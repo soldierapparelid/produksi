@@ -335,7 +335,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261008-admin-commerce1';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261008-admin-commerce2';</script>
 <script>
 (function () {
 'use strict';
@@ -357,7 +357,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.0';
+var APP_VERSION = '1.5.1';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -5294,7 +5294,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.0';
+var UI_VERSION = '1.5.1';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -5736,7 +5736,10 @@ function sync(force, ringan) {
   if (!S.token || !S.state || syncing) return Promise.resolve();
   if (!force && (document.hidden || S.busy > 0)) return Promise.resolve();
   syncing = true;
-  var payload = { token: S.token, ver: (force && !ringan || S.wantAll && !S.state.semua) ? undefined : S.state.ver, av: APP_VERSION, workflowVersion: 2 };
+  /* av describes the server that produced this snapshot, not the bundled UI.
+     Unknown snapshot metadata needs one full read before using the shortcut. */
+  var snapshotVersion = typeof S.state.appVersion === 'string' ? S.state.appVersion.trim() : '';
+  var payload = { token: S.token, ver: (!snapshotVersion || force && !ringan || S.wantAll && !S.state.semua) ? undefined : S.state.ver, av: snapshotVersion || undefined, workflowVersion: 2 };
   if (S.wantAll) payload.semua = true;
   var urut = S.seq;
   S.busy++; paintSync();

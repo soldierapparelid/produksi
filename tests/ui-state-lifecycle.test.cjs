@@ -14,6 +14,13 @@ function harness(){
  const run=code=>vm.runInContext(code,c);return {c,requests,run,json:code=>JSON.parse(run('JSON.stringify('+code+')'))};
 }
 function state(ver=11,all=false){return {me:{id:'worker',divisi:'potong'},ver,workflowVersion:2,po:[{id:'current'}],potong:all?[{id:'old-cut'}]:[],semua:all,trimmed:!all};}
+function enableSync(h){h.run("var document={hidden:false},APP_VERSION='1.5.1';function tanda(){}");vm.runInContext(part('var syncTimer =','function startSync()'),h.c);}
+function serverSync(snapshot){
+ const source=fs.readFileSync(path.resolve(__dirname,'../src/core.js'),'utf8'),start=source.indexOf('  actions.sync = function (p) {'),end=source.indexOf('  actions.getState =',start);
+ assert.ok(start>=0&&end>start);const context=vm.createContext({snapshot});
+ vm.runInContext(`var actions={},APP_VERSION=snapshot.appVersion,store={version:()=>snapshot.ver,read:()=>[]},env={now:()=>new Date()};function auth(){return snapshot.me;}function durableMigrationStatus(){return false;}function buildState(){return snapshot;}`,context);
+ vm.runInContext(source.slice(start,end),context);return payload=>{context.payload=payload;return vm.runInContext('actions.sync(payload)',context);};
+}
 
 test('late mutation snapshots cannot roll back a newer committed version, while both mutation results resolve',async()=>{
  const h=harness(),one=h.run("req('createPotong',{potong:{id:'first'}})"),two=h.run("req('createPotong',{potong:{id:'second'}})");
@@ -52,11 +59,36 @@ test('an already-running mutation cannot downgrade same-version complete history
 
 test('newer business data remains authoritative and the next light sync requests full history without same-version shortcut',async()=>{
  const h=harness();h.run('applyState('+JSON.stringify(state(11,true))+');S.wantAll=true;applyState('+JSON.stringify(state(12,false))+')');assert.equal(h.run('S.state.ver'),12);assert.equal(h.run('S.state.semua'),false);
- h.run("var document={hidden:false},APP_VERSION='1.4.7';function tanda(){}");vm.runInContext(part('var syncTimer =','function startSync()'),h.c);
+ h.run("S.state.appVersion='1.4.7';var document={hidden:false},APP_VERSION='1.4.7';function tanda(){}");vm.runInContext(part('var syncTimer =','function startSync()'),h.c);
  const sync=h.run('sync(false)');assert.equal(h.requests[0].action,'sync');assert.equal(h.requests[0].payload.semua,true);assert.equal(h.requests[0].payload.ver,undefined);h.requests[0].resolve(state(12,true));await sync;assert.equal(h.run('S.state.semua'),true);
 });
 
 test('a lower-version reply for the same account cannot restore its previous role',()=>{
  const h=harness(),newer={...state(13),me:{id:'worker',divisi:'jahit'}},old={...state(12),me:{id:'worker',divisi:'owner'}};
  h.run('applyState('+JSON.stringify(newer)+')');assert.equal(h.run('applyState('+JSON.stringify(old)+')'),false);assert.equal(h.run('S.state.me.divisi'),'jahit');assert.equal(h.run('S.state.ver'),13);
+});
+
+test('a server upgrade refreshes the snapshot at an unchanged business version, then returns to light sync',async()=>{
+ const h=harness(),fresh={...state(10),appVersion:'1.5.0',newProjection:{ready:true}},reply=serverSync(fresh);enableSync(h);h.run("S.state.appVersion='1.4.6'");
+ const first=h.run('sync(true,true)');assert.equal(h.requests[0].payload.av,'1.4.6');assert.equal(h.requests[0].payload.ver,10);h.requests[0].resolve(reply(h.requests[0].payload));await first;
+ assert.equal(h.run('S.state.appVersion'),'1.5.0');assert.equal(h.run('S.state.newProjection.ready'),true);assert.equal(h.run('snapshots'),1);
+ const second=h.run('sync(false)'),response=reply(h.requests[1].payload);assert.equal(h.requests[1].payload.av,'1.5.0');assert.equal(h.requests[1].payload.ver,10);assert.equal(response.same,true);h.requests[1].resolve(response);await second;
+ assert.equal(h.run('snapshots'),1);assert.equal(h.run('refreshes'),1);assert.equal(h.run('S.busy'),0);
+});
+
+test('a snapshot without usable server version metadata performs one full read before light sync',async()=>{
+ for(const unknown of [undefined,null,'','   ',150]){
+  const h=harness(),fresh={...state(10),appVersion:'1.5.0'},reply=serverSync(fresh);enableSync(h);h.run('S.state.appVersion='+JSON.stringify(unknown));
+  const first=h.run('sync(false)');assert.equal(h.requests[0].payload.ver,undefined);h.requests[0].resolve(reply(h.requests[0].payload));await first;assert.equal(h.run('S.state.appVersion'),'1.5.0');
+  const second=h.run('sync(false)');assert.equal(h.requests[1].payload.ver,10);assert.equal(h.requests[1].payload.av,'1.5.0');const response=reply(h.requests[1].payload);assert.equal(response.same,true);h.requests[1].resolve(response);await second;assert.equal(h.run('snapshots'),1);
+ }
+});
+
+test('a deployment refresh cannot overwrite a newer mutation or another authenticated session',async()=>{
+ for(const change of ['mutation','session']){
+  const h=harness(),fresh={...state(10),appVersion:'1.5.0'},reply=serverSync(fresh);enableSync(h);h.run("S.state.appVersion='1.4.6'");const syncing=h.run('sync(true,true)');
+  if(change==='mutation')h.run('applyState('+JSON.stringify({...state(11),appVersion:'1.5.0'})+')');else h.run("S.token='new-token';S.state={me:{id:'other',divisi:'jahit'},ver:1,appVersion:'1.5.0'}");
+  h.requests[0].resolve(reply(h.requests[0].payload));await syncing;
+  assert.equal(h.run('S.state.ver'),change==='mutation'?11:1);assert.equal(h.run('S.state.me.id'),change==='mutation'?'worker':'other');assert.equal(h.run('S.busy'),0);
+ }
 });
