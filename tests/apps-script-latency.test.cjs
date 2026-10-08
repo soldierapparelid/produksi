@@ -8,7 +8,7 @@ const { harness } = require('./helpers/apps-script-harness.cjs');
 // Remote Sheets latency varies; avoiding one getValues and two flushes is the
 // measurable optimization, not a promised number of seconds on a live account.
 function meter(h) {
-  const reads = {}, invalidations = [];
+  const reads = {}, invalidations = [], cachePuts = [];
   for (const [name, sheet] of Object.entries(h.sheets)) {
     const getRange = sheet.getRange.bind(sheet);
     sheet.getRange = (...args) => {
@@ -19,8 +19,9 @@ function meter(h) {
   }
   const cache = h.context.CacheService.getScriptCache(), remove = cache.remove.bind(cache);
   cache.remove = key => { invalidations.push(key); return remove(key); };
+  const putAll = cache.putAll.bind(cache); cache.putAll = (values, ttl) => { cachePuts.push(Object.keys(values)); return putAll(values, ttl); };
   h.events.length = 0;
-  return { reads, invalidations, flushes: () => h.events.filter(e => e[0] === 'flush').length };
+  return { reads, invalidations, cachePuts, flushes: () => h.events.filter(e => e[0] === 'flush').length };
 }
 
 function fixture() {
@@ -153,7 +154,8 @@ test('a cold-cache login checks metadata once per table and still loads physical
   assert.equal(result.data.state.produk[0].id, 'product01');
   assert.equal(m.reads.Produk, 1);
   const cacheReads = h.events.filter(e => e[0] === 'cache.get');
-  assert.equal(cacheReads.length, 2, 'one Pegawai lookup and one batched state prefetch; no repeated per-table miss lookup');
+  assert.equal(cacheReads.length, 1, 'physical account validation plus one batched state prefetch; no per-table miss lookup');
+  assert.equal(m.reads.Pegawai,1,'PIN validation and session write share the same physical account read');
   const keys = cacheReads.flatMap(event => event.slice(1));
   assert.equal(new Set(keys).size, keys.length);
   assert.equal(m.reads.Pengaturan, 1);
@@ -193,5 +195,51 @@ test('changed sync reads durable status once and a hard-timeout marker prevents 
   assert.equal(blocked.ok, false);
   assert.match(blocked.error, /Pemulihan riwayat belum selesai/);
   assert.equal(h.sheets.Produk.writes, writes);
+});
+
+test('cold login batches independent read-cache fills with fewer cache RPCs and identical authenticated state',()=>{
+  function measured(batch){
+    const {h,owner}=fixture();for(const key of Object.keys(h.cached))delete h.cached[key];h.cold();
+    if(!batch)h.run('pkStore_().withReadCacheBatch=function(fn){return fn();};void 0;');
+    const m=meter(h),result=h.request('login',{userId:owner.id,pin:'1234'});assert.equal(result.ok,true,result.error);
+    const published=m.cachePuts.length,readNames=Object.keys(m.reads).sort();
+    h.cold();const warm=h.request('getState',{token:result.data.token});assert.equal(warm.ok,true,warm.error);assert.equal(warm.data.me.id,result.data.state.me.id);
+    return{puts:published,reads:readNames,keys:Object.keys(result.data.state).sort()};
+  }
+  const individual=measured(false),batched=measured(true);
+  assert.ok(individual.puts>=12,'fixture must include a real cold full state');
+  assert.ok(batched.puts<=Math.ceil((individual.puts-1)/4)+1,JSON.stringify({old:individual.puts,current:batched.puts}));
+  assert.deepEqual(batched.reads,individual.reads);assert.deepEqual(batched.keys,individual.keys);
+});
+
+test('login physically rechecks PIN, account state and lockout counters even when ScriptCache is stale',()=>{
+  const {h,owner}=fixture();h.run('pkStore_().read("Pegawai");');
+  const sheet=h.sheets.Pegawai,cols=sheet.values[0],row=sheet.values.find(r=>r[cols.indexOf('id')]===owner.id),originalTokens=row[cols.indexOf('token')];
+  row[cols.indexOf('pin')]='5678';row[cols.indexOf('gagal')]=4;h.cold();
+  const stalePIN=h.request('login',{userId:owner.id,pin:'1234'});assert.equal(stalePIN.ok,true);assert.equal(stalePIN.data.salah,true);assert.match(stalePIN.data.pesan,/dikunci/);
+  assert.equal(row[cols.indexOf('token')],originalTokens);assert.ok(row[cols.indexOf('kunci')]);
+  row[cols.indexOf('kunci')]='';row[cols.indexOf('aktif')]=false;h.cold();
+  const disabled=h.request('login',{userId:owner.id,pin:'5678'});assert.equal(disabled.ok,false);assert.match(disabled.error,/Pegawai tidak ditemukan/);
+  assert.equal(row[cols.indexOf('token')],originalTokens);
+});
+
+test('queued read-cache entries are discarded on checkpoint and cannot resurrect invalidated snapshots',()=>{
+  const {h}=fixture();for(const key of Object.keys(h.cached))delete h.cached[key];h.cold();
+  h.run(`pkStore_().withReadCacheBatch(function(){pkStore_().read('Produk');pkStore_().checkpoint(['Produk']);});`);
+  const productKeys=Object.keys(h.cached).filter(key=>key.includes('|Produk|'));assert.equal(productKeys.length,0);
+});
+
+test('same-request changes cancel queued old rows and only publish the committed table version',()=>{
+  const {h}=fixture();for(const key of Object.keys(h.cached))delete h.cached[key];h.cold();
+  h.run(`pkStore_().withReadCacheBatch(function(){pkStore_().read('Produk');pkStore_().lock(function(){pkStore_().append('Produk',{id:'batched01',nama:'Committed fixture'});});});`);
+  const v=h.properties.v_Produk,metadata=Object.keys(h.cached).filter(key=>key.includes('|Produk|')&&!/\|\d+\|\d+$/.test(key));
+  assert.ok(metadata.every(key=>key.endsWith('|'+v)));h.cold();assert.equal(h.run('pkStore_().read("Produk")[0].nama'),'Committed fixture');
+});
+
+test('failed Sheets flush never publishes a staged mutation through the read-cache batch',()=>{
+  const {h}=fixture();for(const key of Object.keys(h.cached))delete h.cached[key];h.cold();
+  h.context.SpreadsheetApp.flush=()=>{throw new Error('simulated flush failure');};
+  assert.throws(()=>h.run(`pkStore_().withReadCacheBatch(function(){pkStore_().read('Produk');pkStore_().lock(function(){pkStore_().append('Produk',{id:'failed01',nama:'Unconfirmed fixture'});});});`),/flush failure/);
+  assert.equal(Object.keys(h.cached).filter(key=>key.includes('|Produk|')).length,0);assert.equal(h.isLocked(),false);
 });
 

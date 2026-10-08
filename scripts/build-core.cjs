@@ -64,7 +64,7 @@ function appsScriptHtml(html) {
 }
 
 function build() {
-  const sources = ['src/core.js', 'src/import-legacy-v1.js', 'src/import-backup.js', 'src/reconcile-legacy.js', 'src/migration-actions.js', 'src/history-corrections.js', 'src/auto-completion.js'];
+  const sources = ['src/core.js', 'src/import-legacy-v1.js', 'src/import-backup.js', 'src/reconcile-legacy.js', 'src/migration-actions.js', 'src/history-corrections.js', 'src/auto-completion.js', 'src/slip-models.js', 'src/bahan-invoice.js', 'src/cutting-plans.js'];
   const core = sources.map(source).join('\n\n') + '\n\n';
   // Parse saja, jangan menjalankan kode aplikasi saat build/check.
   new vm.Script(core, { filename: 'combined-core.js' });

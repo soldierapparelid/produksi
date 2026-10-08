@@ -16,6 +16,7 @@ function pkStore_() {
   var ss = null; var tz = null;
   var cache = {}; var cacheMiss = {}; var depth = 0; var dirty = false; var ver = null; var kotor = {};
   var settingsReadInLock = false; var settingsNeedsFlush = false;
+  var readCacheBatch = 0; var readCacheQueue = {};
   var sc = null; var scMati = false;
   function versiTab(name) { return String(pkProps_()['v_' + name] || '0'); }
   function kunciCache(name, v) { return 'pk3|' + pkSchema_() + '|' + String(pkProps_().ve || '0') + '|' + name + '|' + v; }
@@ -48,10 +49,14 @@ function pkStore_() {
       });
     } catch (e) {}
   }
-  function keCache(name, rows, v) {
+  function keCache(name, rows, v, readFill) {
     var c = lemari(); if (!c || name === 'Gambar') return;
     try {
       var teks = JSON.stringify(rows); var m = Math.ceil(teks.length / PK_CACHE_POTONG_) || 1; if (m > 40) return;
+      /* A cold state reads many small tables. Publish those optional read-cache
+         fills together at the end of this request instead of one RPC per table.
+         Transaction commits still publish synchronously below. */
+      if (readFill && readCacheBatch) { readCacheQueue[name] = { text: teks, version: String(v), epoch: String(pkProps_().ve || '0') }; return; }
       var k = kunciCache(name, v); var grup = {}; var n = 0;
       for (var i = 0; i < m; i++) {
         grup[k + '|' + i] = teks.substr(i * PK_CACHE_POTONG_, PK_CACHE_POTONG_); n++;
@@ -60,6 +65,23 @@ function pkStore_() {
       grup[k] = String(m);
       c.putAll(grup, PK_CACHE_TTL_);
     } catch (e) {}
+  }
+  function flushReadCache() {
+    var queued = readCacheQueue; readCacheQueue = {};
+    var c = lemari(); if (!c) return;
+    var group = {}, parts = 0;
+    function flush() { if (!Object.keys(group).length) return; try { c.putAll(group, PK_CACHE_TTL_); } catch (e) {} group = {}; parts = 0; }
+    Object.keys(queued).forEach(function (name) {
+      var q = queued[name];
+      if (q.version !== versiTab(name) || q.epoch !== String(pkProps_().ve || '0')) return;
+      var key = kunciCache(name, q.version), count = Math.ceil(q.text.length / PK_CACHE_POTONG_) || 1;
+      for (var i = 0; i < count; i++) {
+        if (parts === 4) flush();
+        group[key + '|' + i] = q.text.substr(i * PK_CACHE_POTONG_, PK_CACHE_POTONG_); parts++;
+      }
+      group[key] = String(count);
+    });
+    flush();
   }
   function book() {
     if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -123,7 +145,7 @@ function pkStore_() {
       rowNo[o[k]] = i + 1; rows.push(o);
     }
     cache[name] = { sh: sh, head: head, rows: rows, rowNo: rowNo, last: values.length, max: sh.getMaxRows(), extra: head.some(function (h) { return h && cols.indexOf(h) < 0; }) };
-    if (!penuh) keCache(name, rows, versiTab(name));
+    if (!penuh) keCache(name, rows, versiTab(name), true);
     return cache[name];
   }
   function toArray(t, obj, base) {
@@ -150,6 +172,7 @@ function pkStore_() {
     t.last += data.length; changed(name);
   }
   function changed(name) {
+    delete readCacheQueue[name];
     dirty = true; kotor[name] = 1;
     if (name === 'Pengaturan') { settingsReadInLock = false; settingsNeedsFlush = true; }
   }
@@ -159,6 +182,11 @@ function pkStore_() {
   }
   PK_STORE_ = {
     read: function (name) { return load(name).rows; },
+    withReadCacheBatch: function (fn) {
+      readCacheBatch++;
+      try { return fn(); }
+      finally { readCacheBatch--; if (!readCacheBatch) flushReadCache(); }
+    },
     /* Preflight tanpa akses Sheets: dipakai sebelum operasi yang menulis beberapa tabel. */
     validateRows: function (name, rows) {
       if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name);
@@ -170,6 +198,7 @@ function pkStore_() {
     checkpoint: function (names) {
       names = names || [];
       names.forEach(function (name) { if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name); });
+      names.forEach(function (name) { delete readCacheQueue[name]; });
       SpreadsheetApp.flush();
       settingsNeedsFlush = false;
       /* A hard execution timeout may skip lock.finally and its version update.
@@ -306,7 +335,7 @@ function pkStore_() {
     },
     version: version,
     fresh: function (name) { load(name, true); },
-    ensureAll: function () { Object.keys(SCHEMA).forEach(ensure); cache = {}; cacheMiss = {}; settingsReadInLock = false; },
+    ensureAll: function () { Object.keys(SCHEMA).forEach(ensure); cache = {}; cacheMiss = {}; readCacheQueue = {}; settingsReadInLock = false; },
     imgGet: function (ids) {
       var c = lemari(); var out = {}; if (!c || !ids.length) return out;
       try { var awal = 'pkg|' + String(pkProps_().ve || '0') + '|'; var got = c.getAll(ids.map(function (i) { return awal + i; })) || {}; ids.forEach(function (i) { var v = got[awal + i]; if (typeof v === 'string') out[i] = v; }); } catch (e) {}
@@ -341,8 +370,11 @@ function pkRun_(text) {
   try {
     var reqObj = JSON.parse(text);
     pkSetup_();
-    var core = createCore(pkStore_(), pkEnv_());
-    return { ok: true, data: core.handle(String(reqObj.action || ''), reqObj.payload || {}) };
+    var store = pkStore_();
+    return store.withReadCacheBatch(function () {
+      var core = createCore(store, pkEnv_());
+      return { ok: true, data: core.handle(String(reqObj.action || ''), reqObj.payload || {}) };
+    });
   } catch (err) {
     return { ok: false, error: String((err && err.message) || err) };
   }

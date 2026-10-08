@@ -38,6 +38,19 @@ function coreInstallMigrationActions(actions, ctx) {
   function pending() { checkpoint(['Pengaturan']); return (store.getSettings() || {}).legacyMigrationStatus || null; }
   function status(value) { var settings = copy(store.getSettings() || {}); settings.legacyMigrationStatus = value || false; store.setSettings(settings); }
   function preflight(name, rows) { if (store.validateRows) store.validateRows(name, rows); }
+  function protectCutPlans(replacements) {
+    var names = ['Potong', 'PO'];
+    if (SCHEMA.RencanaPotong) names.push('RencanaPotong');
+    /* apply/recover run inside the write lock. Refresh these together instead
+       of trusting the planner snapshot or the recovery journal's older rows. */
+    checkpoint(names);
+    var beforeCuts = store.read('Potong'), plans = SCHEMA.RencanaPotong ? store.read('RencanaPotong') : [];
+    var afterCuts = Object.prototype.hasOwnProperty.call(replacements, 'Potong') ? replacements.Potong : beforeCuts;
+    var afterPO = Object.prototype.hasOwnProperty.call(replacements, 'PO') ? replacements.PO : store.read('PO');
+    if (typeof coreCutValidateReplacement === 'function') return coreCutValidateReplacement(beforeCuts, afterCuts, plans, afterPO);
+    if (plans.length || beforeCuts.concat(afterCuts).some(function (row) { return !!row.rencanaId; })) fail('Paket pelindung persiapan potong belum lengkap. Perbarui server sebelum memulihkan riwayat.');
+    return true;
+  }
   function readJournal(batchId, expectedManifestHash) {
     var all = store.read('MigrasiJournal').filter(function (r) { return r.batchId === batchId; });
     var control = all.filter(function (r) { return r.sheet === '_manifest'; })[0];
@@ -76,6 +89,7 @@ function coreInstallMigrationActions(actions, ctx) {
     if (!/^[A-Za-z0-9_-]{6,48}$/.test(plan.batchId || '')) fail('Identitas pemulihan tidak sah.');
     var names = Object.keys(plan.rows || {});
     if (!names.length || names.some(function (name) { return tables.indexOf(name) < 0 || !(plan.rows[name] instanceof Array); })) fail('Tabel pemulihan tidak sah.');
+    protectCutPlans(plan.rows);
     if (store.validateMigrationLayout) store.validateMigrationLayout(names);
     var before = {}, after = {}, manifest = { tables: [] }, journal = [];
     var at = ctx.env.now().toISOString(), serial = 0;
@@ -123,6 +137,7 @@ function coreInstallMigrationActions(actions, ctx) {
     var journal = readJournal(active.batchId, active.journalHash);
     if (journal.control.beforeHash !== active.beforeHash || journal.control.planHash !== active.planHash) fail('Jurnal pemulihan tidak cocok dengan proses yang tertunda.');
     var names = Object.keys(journal.before);
+    protectCutPlans(journal.before);
     if (store.validateMigrationLayout) store.validateMigrationLayout(names);
     names.forEach(function (name) { preflight(name, journal.before[name]); });
     names.forEach(function (name) { store.replaceAll(name, journal.before[name]); });

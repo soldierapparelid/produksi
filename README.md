@@ -11,6 +11,9 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - `src/migration-actions.js`: aksi owner untuk pratinjau, penerapan, dan pemulihan cadangan jurnal.
 - `src/history-corrections.js`: koreksi jumlah fisik riwayat oleh owner dengan jejak perubahan; sumber pembayaran tetap utuh.
 - `src/auto-completion.js`: penutupan otomatis PO setelah tujuh hari sejak produksi terverifikasi tuntas.
+- `src/bahan-invoice.js`: pembelian beberapa bahan dalam satu invoice dan pengaman penyimpanan ulang.
+- `src/cutting-plans.js`: persiapan kain oleh owner, pencadangan stok, dan validasi hasil potong.
+- `src/slip-models.js`: rincian slip mingguan dan cetakan/PDF yang sama untuk browser dan server.
 - `index.html`: aplikasi browser, termasuk salinan hasil build core dan konverter. UI tetap diedit di file ini, di luar blok `CORE` sampai sebelum `UI bagian 1`.
 - `apps-script/Core.gs`: hasil build core dan konverter yang sama untuk project Google Apps Script.
 - `apps-script/Server.gs`: adaptor Google Sheets dari project Apps Script Soldier Produksi yang dibaca pada 8 Oktober 2026; memuat endpoint, pemetaan kolom, lock, cache, dan PDF. Tidak memuat ID spreadsheet, deployment, atau kredensial.
@@ -34,7 +37,7 @@ npm test
 
 - Setiap PO adalah satu siklus produksi. Ukuran/SKU dihitung terpisah; target kerja bersumber dari hasil potong, atau penugasan untuk data lama yang memenuhi validasi.
 - Laporan penjahit berstatus menunggu sampai hitung fisik diterima. Jumlah bagus dan reject harus dirinci per ukuran dan tidak boleh melebihi sisa penugasan pekerja, termasuk laporan yang masih menunggu.
-- QC untuk suatu ukuran terbuka setelah seluruh penugasan ukuran itu sudah dihitung: jumlah bagus sama dengan target dikurangi reject jahit, tanpa sisa penugasan atau laporan tertunda. Ukuran lain boleh masih berjalan.
+- Antrean QC terbuka setelah **seluruh PO** selesai dijahit dan dihitung fisik, tanpa sisa penugasan, laporan tertunda, atau persiapan potong yang belum dipakai. Setoran parsial tetap menghasilkan slip hitung fisik dan tetap terlihat di tahap hitung fisik. Pemeriksaan QC kemudian dicatat per slip dan ukuran supaya hubungan sumbernya tetap tepat.
 - Satu pemeriksaan menghabiskan seluruh hitungan pada ukuran slip yang dipilih: **OK + offline + perbaikan + reject** harus tepat jumlah sumber. Catatan QC selalu menunjuk slip hitung fisik asal; reject seluruhnya berarti nol hasil OK.
 - Sebelum QC, hitungan yang diterima menjadi dasar upah. Sesudah QC, hanya hasil OK yang layak diupah. Hasil perbaikan OK menambah hak upah pada tanggal penyelesaiannya dengan tarif sumber. Snapshot slip pembayaran tetap tersimpan; selisih lebih bayar ditandai untuk diperiksa, bukan dihapus atau dibayar ulang.
 - Gudang terbentuk sebagai proyeksi hasil QC dan hasil perbaikan, sehingga pengiriman ulang transaksi tidak menggandakan penerimaan. Pencatatan BigSeller adalah langkah pembukuan berikutnya dan dibatasi stok OK yang belum dicatat. PO dapat selesai ketika produksi/QC/perbaikan tuntas meskipun pencatatan BigSeller belum selesai.
@@ -58,6 +61,16 @@ Pada PO aktif yang masih ditandai perlu pemeriksaan, owner dapat memilih **Korek
 
 Koreksi mengubah jumlah fisik yang ditampilkan dan diperiksa pada alur produksi. Baris potong/penugasan asli, slip pembayaran, tarif, dan perhitungan upah historis tidak ditulis ulang. Koreksi tidak membuat upah tambahan dan tidak menandai pemeriksaan PO selesai; hubungan hitung fisik atau QC yang masih hilang tetap memerlukan bukti sumber. Jumlah yang belum diketahui dibiarkan seperti semula sampai owner mengisinya.
 
+## Invoice bahan, persiapan potong, dan slip tim
+
+- **Stok bahan → Pembelian** mencatat satu invoice dengan maksimal 30 baris bahan, masing-masing jumlah/berat, satuan, rol, dan harga. Nama yang sama menurut kapital/spasi memakai bahan terdaftar; satuan bahan tidak dicampur. Nomor invoice, supplier, tanggal, dan sumber bon berlaku untuk semua baris. Ledger tetap dapat dikoreksi per baris.
+- Owner memilih **Siapkan bahan potong** pada detail PO. Bahan dipilih dari stok terdaftar, dengan jumlah dan rol yang disiapkan. Persiapan menahan ketersediaan bahan; saldo fisik baru berkurang ketika hasil potong disimpan. Persiapan belum dipakai dapat diubah/dibatalkan, dengan pemeriksaan revisi agar formulir lama tidak menimpa perubahan baru.
+- Tukang potong hanya memilih pekerjaan siap dan mengisi hasil pcs per ukuran. Server mengambil bahan/kiloan/rol dari persiapan owner. Satu persiapan hanya dapat dipakai sekali, termasuk pengiriman ulang setelah respons terputus. Riwayat lama tetap disimpan.
+- Admin membagi hasil potong ke maklon beserta jumlah dan target seperti sebelumnya. Antre jahit, sebagian selesai, menunggu hitung fisik, dan selesai memiliki label/warna. Semua setoran pekerja harus diterima melalui hitung fisik sebelum slip terbit dan upah tersedia.
+- Slip jahit dan potong mingguan memakai periode Senin–Minggu dengan rincian tanggal, PO, jumlah, tarif, dan hasil perbaikan. Pratinjau dan PDF menggunakan model yang sama; pembayaran historis tetap memakai snapshot. Cetak membuka pratinjau yang dapat dicoba kembali; unduhan PDF menyediakan tautan manual jika unduhan otomatis dibatasi browser.
+- PO baru dapat menyertakan desain tersendiri dengan pratinjau. Gambar dikompresi di perangkat dan disimpan khusus pada PO tersebut.
+- Koneksi yang terputus saat menyimpan ditampilkan sebagai hasil belum pasti. Aplikasi tidak mengulang perubahan otomatis. Invoice memakai ID baris yang stabil dan pemeriksaan data terbaru sebelum retry, sehingga respons hilang tidak menambah stok lagi.
+
 ## Sambungan ke data pusat
 
 ### PO tuntas otomatis selesai setelah tujuh hari
@@ -68,7 +81,7 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
-Proses masuk tidak lagi membaca ulang pengaturan dan cache tabel yang sama berkali-kali. Perhitungan workflow dipakai bersama oleh ringkasan PO. Salinan sesi lokal juga dipakai saat membuka ulang aplikasi Apps Script, dengan pemeriksaan sesi/versi/divisi dan sinkronisasi ke server. Pembacaan penyimpanan lokal mempunyai batas waktu agar aplikasi tetap membuka layar masuk bila penyimpanan perangkat macet. PIN tetap diperiksa di server sebelum sesi baru dapat membuka data.
+Proses masuk tidak lagi membaca ulang pengaturan dan cache tabel yang sama berkali-kali. PIN dan status akun dibaca langsung sekali dari Sheets; pengisian cache beberapa tabel digabung setelah permintaan selesai. Cache transaksi tetap mengikuti versi data yang berhasil disimpan. Perhitungan workflow dipakai bersama oleh ringkasan PO. Salinan sesi lokal juga dipakai saat membuka ulang aplikasi Apps Script, dengan pemeriksaan sesi/versi/divisi dan sinkronisasi ke server. Pembacaan penyimpanan lokal mempunyai batas waktu agar aplikasi tetap membuka layar masuk bila penyimpanan perangkat macet. PIN tetap diperiksa di server sebelum sesi baru dapat membuka data.
 
 Browser dapat memakai `google.script.run.api(...)` saat disajikan oleh Apps Script, atau mengirim aksi ke web app Google Apps Script berakhiran `/exec`. Data pusat dirancang disimpan di Google Sheets oleh adaptor server yang sudah ada. Mode coba memakai penyimpanan perangkat.
 
