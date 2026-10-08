@@ -7,8 +7,8 @@ function coreBahanInvoiceNumber(value) {
 }
 function coreBahanInvoicePlan(id, rows, existing) {
   if (!/^[A-Za-z0-9_-]{6,42}$/.test(String(id || ''))) throw new Error('Identitas invoice tidak sah. Buka kembali form pembelian.');
-  if (!(rows instanceof Array) || !rows.length || rows.length > 30) throw new Error('Isi 1 sampai 30 baris bahan dalam satu invoice.');
-  var fields = ['jenis','tanggal','bahan','qty','satuan','rol','harga','total','supplier','invoice','sumber','catatan','invoiceId'];
+  if (!(rows instanceof Array) || !rows.length || rows.length > 200) throw new Error('Isi maksimal 200 rol dalam satu invoice.');
+  var fields = ['jenis','tanggal','bahan','qty','satuan','rol','harga','total','supplier','invoice','sumber','catatan','invoiceId','stockMode','rollLabel'];
   var previous = {}, canonical = {}, units = {}, pending = [], all = [];
   (existing || []).forEach(function (r) { previous[r.id] = r; });
   rows.forEach(function (source, index) {

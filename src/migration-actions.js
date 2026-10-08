@@ -47,7 +47,7 @@ function coreInstallMigrationActions(actions, ctx) {
     var beforeCuts = store.read('Potong'), plans = SCHEMA.RencanaPotong ? store.read('RencanaPotong') : [];
     var afterCuts = Object.prototype.hasOwnProperty.call(replacements, 'Potong') ? replacements.Potong : beforeCuts;
     var afterPO = Object.prototype.hasOwnProperty.call(replacements, 'PO') ? replacements.PO : store.read('PO');
-    if (typeof coreCutValidateReplacement === 'function') return coreCutValidateReplacement(beforeCuts, afterCuts, plans, afterPO);
+    if (typeof coreCutValidateReplacement === 'function') return coreCutValidateReplacement(beforeCuts, afterCuts, plans, afterPO, store.read('PO'));
     if (plans.length || beforeCuts.concat(afterCuts).some(function (row) { return !!row.rencanaId; })) fail('Paket pelindung persiapan potong belum lengkap. Perbarui server sebelum memulihkan riwayat.');
     return true;
   }
