@@ -1613,6 +1613,8 @@ var Api = (function () {
       LS.set('pk_api', m[1]); remoteUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec'; return true;
     },
     disconnect: function () { LS.del('pk_api'); remoteUrl = ''; },
+    /* link undangan dibuka saat aplikasi sudah terbuka: alamatnya hanya berubah di bagian #, halaman tidak dimuat ulang */
+    rehash: function () { if (gas || !/[#&]k=[A-Za-z0-9_-]{20,}/.test(String(location.hash || ''))) return false; readInvite(); return true; },
     inviteLink: function () { var k = LS.get('pk_api'); return k && !gas ? location.origin + location.pathname + '#k=' + k : ''; }
   };
 })();
@@ -3336,6 +3338,11 @@ document.addEventListener('keydown', function (ev) {
     return;
   }
   if (ev.key === 'Escape' && sheets.length && !$('[data-form]', topNode())) closeSheet();
+});
+
+window.addEventListener('hashchange', function () {
+  if (!Api.rehash()) return;
+  S.token = LS.get('pk_token') || ''; S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; closeAll(); boot();
 });
 
 function boot() {
