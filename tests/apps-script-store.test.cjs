@@ -173,10 +173,36 @@ test('real importRows preflights rows and pending settings together', () => {
     const before = JSON.stringify(Object.fromEntries(Object.entries(h.sheets).map(([name, sh]) => [name, sh.values])));
     const version = h.properties.ver;
     h.cold();
-    const result = h.request('importRows', { token: setup.data.token, ...payload });
+    const result = h.request('importRows', { workflowVersion: 2, token: setup.data.token, ...payload });
     assert.equal(result.ok, false); assert.match(result.error, /terlalu panjang/);
     assert.equal(JSON.stringify(Object.fromEntries(Object.entries(h.sheets).map(([name, sh]) => [name, sh.values]))), before);
     assert.equal(h.properties.ver, version); assert.equal(h.isLocked(), false);
+  }
+});
+
+test('real importRows rejects old clients before writes and accepts v2 during setup and after login', () => {
+  for (const configured of [false, true]) {
+    const h = harness(); let token;
+    if (configured) {
+      const setup = h.request('setupOwner', { nama: 'Owner', pin: '1234' }); assert.equal(setup.ok, true); token = setup.data.token;
+    } else h.run('pkSetup_();');
+    const payload = { token, sheet: 'PO', rows: [{ id: 'po00001', nama: 'Import', ukuran: { M: 10 }, total: 10 }], ukuran: ['M', 'NEW'] };
+    const snapshot = () => JSON.stringify(Object.fromEntries(Object.entries(h.sheets).map(([name, sh]) => [name, { values: sh.values, writes: sh.writes }])));
+    const before = snapshot(), version = h.properties.ver;
+    for (const workflowVersion of [undefined, 1]) {
+      h.cold();
+      const lockCount = h.events.filter(e => e[0] === 'lock').length;
+      const result = h.request('importRows', { ...payload, workflowVersion });
+      assert.equal(result.ok, false); assert.match(result.error, /Versi alur produksi tidak cocok/);
+      assert.equal(snapshot(), before); assert.equal(h.properties.ver, version);
+      assert.equal(h.events.filter(e => e[0] === 'lock').length, lockCount, 'version guard runs before mutation lock');
+    }
+    h.cold();
+    const accepted = h.request('importRows', { ...payload, workflowVersion: 2 });
+    assert.equal(accepted.ok, true, accepted.error); assert.equal(accepted.data.ditambah, 1);
+    h.cold();
+    assert.equal(h.run('pkStore_().read("PO")[0].id'), 'po00001');
+    assert.ok(h.run('pkStore_().getSettings().ukuran').includes('NEW'));
   }
 });
 
