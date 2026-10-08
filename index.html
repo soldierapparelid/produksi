@@ -335,7 +335,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '202610081128';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '202610081143';</script>
 <script>
 (function () {
 'use strict';
@@ -2451,16 +2451,23 @@ var SNAP_SEGAR = 12 * 3600000;
 var snapTimer = null;
 function snapKey() { return 'pks_' + (Api.div() || 'pusat'); }
 function bootKey() { return 'pk_boot' + (Api.div() ? '_' + Api.div() : ''); }
+function tulisSnap() {
+  clearTimeout(snapTimer); snapTimer = null;
+  var st = S.state; if (!st || !S.token || st.semua) return;
+  var teks; try { teks = JSON.stringify(st); } catch (e) { return; }
+  Idb.put('kv', snapKey(), { t: S.token, at: S.lastSync || Date.now(), ui: UI_VERSION, s: teks });
+}
+/* ditulis sebentar setelah data datang, supaya beberapa perubahan beruntun cukup ditulis sekali */
 function simpanSnap() {
   if (Api.mode() !== 'remote') return;
   clearTimeout(snapTimer);
-  snapTimer = setTimeout(function () {
-    var st = S.state; if (!st || !S.token || st.semua) return;
-    var teks; try { teks = JSON.stringify(st); } catch (e) { return; }
-    Idb.put('kv', snapKey(), { t: S.token, at: S.lastSync || Date.now(), ui: UI_VERSION, s: teks });
-  }, 700);
+  snapTimer = setTimeout(tulisSnap, 700);
 }
-function hapusSnap() { clearTimeout(snapTimer); Idb.del('kv', snapKey()); }
+function hapusSnap() { clearTimeout(snapTimer); snapTimer = null; Idb.del('kv', snapKey()); }
+/* aplikasi ditutup atau dipindah ke belakang sebelum jeda itu habis: salinan langsung ditulis */
+function snapSegera() { if (snapTimer) tulisSnap(); }
+document.addEventListener('visibilitychange', function () { if (document.hidden) snapSegera(); });
+window.addEventListener('pagehide', snapSegera);
 function bacaSnap(cb) {
   if (Api.mode() !== 'remote' || !S.token) return cb(null);
   Idb.get('kv', snapKey(), function (v) {
@@ -2838,7 +2845,18 @@ function gateDepan() {
   return !!Api.div() && !S.token && !g.buka && !g.needLink && !(S.boot && S.boot.needSetup);
 }
 A.gateBuka = function () { S.gate.buka = true; render(); window.scrollTo(0, 0); };
-A.gateTutup = function () { S.gate.buka = false; S.gate.user = null; S.gate.pin = ''; S.gate.err = ''; pilihTerakhir(); render(); };
+/* Kembali dari daftar nama: di aplikasi divisi ke layar depan divisi, di aplikasi owner ke daftar divisi */
+A.gateTutup = function () {
+  var g = S.gate; g.user = null; g.pin = ''; g.err = '';
+  if (Api.div()) { g.buka = false; pilihTerakhir(); } else g.div = '';
+  render();
+};
+/* aplikasi owner: sebuah divisi dipilih. Divisi yang hanya berisi satu orang langsung ke layar PIN orang itu. */
+A.gateDiv = function (el) {
+  var d = el.getAttribute('data-id'); var list = ((S.boot && S.boot.users) || []).filter(function (u) { return u.divisi === d; });
+  var g = S.gate; g.div = d; g.pin = ''; g.err = ''; g.user = list.length === 1 ? list[0] : null;
+  render(); window.scrollTo(0, 0);
+};
 function gateHtml() {
   var g = S.gate; var b = S.boot;
   var nama = (b && b.namaUsaha) || 'Soldier';
@@ -2874,14 +2892,25 @@ function gateHtml() {
   } else if (!g.user) {
     var groups = ['owner', 'admin', 'potong', 'jahit', 'qc'];
     var rows = '';
-    groups.forEach(function (d) {
-      b.users.filter(function (u) { return u.divisi === d; }).sort(function (x, y) { return x.nama < y.nama ? -1 : 1; }).forEach(function (u) {
-        rows += '<button class="item" data-a="gateUser" data-id="' + esc(u.id) + '"><span class="ava l">' + esc(inisial(u.nama)) + '</span><span class="grow"><span class="t">' + esc(u.nama) + '</span><br><span class="d">' + esc(DIVISI[d].label) + '</span></span>' + ic('chev') + '</button>';
+    var luring = g.luring ? '<div class="note bad row"><span class="grow">' + esc(g.luring) + '</span><button class="btn sm" data-a="reboot">Coba lagi</button></div>' : '';
+    if (!kunci && !(g.div && DIVISI[g.div])) {
+      /* aplikasi owner (tidak dikunci ke satu divisi): layar awal hanya daftar divisi; nama baru muncul setelah divisinya dipilih */
+      groups.forEach(function (d) {
+        var n = b.users.filter(function (u) { return u.divisi === d; }).length; if (!n) return;
+        rows += '<button class="item" data-a="gateDiv" data-id="' + d + '"><span class="ava l">' + esc(inisial(DIVISI[d].label)) + '</span><span class="grow"><span class="t">' + esc(DIVISI[d].label) + '</span><br><span class="d">' + n + ' orang</span></span>' + ic('chev') + '</button>';
       });
-    });
-    body = (g.luring ? '<div class="note bad row"><span class="grow">' + esc(g.luring) + '</span><button class="btn sm" data-a="reboot">Coba lagi</button></div>' : '') +
-      '<div class="card flush"><div class="sec-h"><h3>Pilih nama Anda</h3>' + (kunci ? '<button class="btn ghost sm" data-a="gateTutup">Kembali</button>' : '') + '</div><div class="list">' +
-      (rows || emptyBox(kunci ? 'Akun ' + DIV_APP[kunci].nama + ' belum dibuat. Owner membuatnya dari aplikasi owner (Soldier Produksi): Lainnya › Pegawai › Tambah, pilih divisi ' + DIV_APP[kunci].nama + ', isi nama dan PIN. Setelah itu tekan Muat ulang di sini.' : 'Belum ada pegawai.', '<button class="btn sm" data-a="reboot">Muat ulang</button>')) + '</div></div>' + connectLink();
+      body = luring + '<div class="card flush"><div class="sec-h"><h3>Pilih divisi</h3></div><div class="list">' +
+        (rows || emptyBox('Belum ada pegawai.', '<button class="btn sm" data-a="reboot">Muat ulang</button>')) + '</div></div>' + connectLink();
+    } else {
+      groups.forEach(function (d) {
+        if (!kunci && d !== g.div) return;
+        b.users.filter(function (u) { return u.divisi === d; }).sort(function (x, y) { return x.nama < y.nama ? -1 : 1; }).forEach(function (u) {
+          rows += '<button class="item" data-a="gateUser" data-id="' + esc(u.id) + '"><span class="ava l">' + esc(inisial(u.nama)) + '</span><span class="grow"><span class="t">' + esc(u.nama) + '</span><br><span class="d">' + esc(DIVISI[d].label) + '</span></span>' + ic('chev') + '</button>';
+        });
+      });
+      body = luring + '<div class="card flush"><div class="sec-h"><h3>Pilih nama Anda</h3><button class="btn ghost sm" data-a="gateTutup">Kembali</button></div><div class="list">' +
+        (rows || emptyBox(kunci ? 'Akun ' + DIV_APP[kunci].nama + ' belum dibuat. Owner membuatnya dari aplikasi owner (Soldier Produksi): Lainnya › Pegawai › Tambah, pilih divisi ' + DIV_APP[kunci].nama + ', isi nama dan PIN. Setelah itu tekan Muat ulang di sini.' : 'Belum ada pegawai.', '<button class="btn sm" data-a="reboot">Muat ulang</button>')) + '</div></div>' + connectLink();
+    }
   } else {
     var dots = ''; for (var i = 0; i < Math.max(4, g.pin.length); i++) dots += '<i' + (i < g.pin.length ? ' class="f"' : '') + '></i>';
     var keys = ''; [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(function (n) { keys += '<button data-a="pin" data-k="' + n + '">' + n + '</button>'; });
@@ -2906,7 +2935,13 @@ function installBtn() {
 }
 A.reboot = function () { S.gate.bootErr = ''; boot(); };
 A.gateUser = function (el) { var id = el.getAttribute('data-id'); S.gate.user = S.boot.users.filter(function (u) { return u.id === id; })[0] || null; S.gate.pin = ''; S.gate.err = ''; render(); };
-A.gateBack = function () { S.gate.user = null; S.gate.pin = ''; S.gate.err = ''; LS.del(lastKey()); render(); };
+A.gateBack = function () {
+  var g = S.gate; var d = g.user ? g.user.divisi : '';
+  g.user = null; g.pin = ''; g.err = ''; LS.del(lastKey());
+  /* aplikasi owner: kembali ke daftar nama divisi itu kalau isinya lebih dari satu orang, kalau tidak ke daftar divisi */
+  if (!Api.div()) g.div = ((S.boot && S.boot.users) || []).filter(function (u) { return u.divisi === d; }).length > 1 ? d : '';
+  render();
+};
 A.pin = function (el) { pinKey(el.getAttribute('data-k')); };
 function pinKey(k) {
   var g = S.gate; if (!g.user || g.sending) return;
