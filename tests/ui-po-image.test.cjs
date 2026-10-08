@@ -19,11 +19,13 @@ function ui() {
   vm.runInContext(`
     var A={}, C={}, calls=[], decodes=[], messages=[], closed=0, quietErrors=[];
     var S={state:{settings:{ukuran:['M']}},tab:''}, D={po:{},produk:{}};
-    var form={isConnected:true,nodes:{},values:{id:'',newId:'draftpo01',produkId:'product01',jenis:'stok',nama:'Desain baru',series:'Seri',pelanggan:'',deadline:'',bahan:'Katun',catatan:'',noPO:'',status:'aktif'}};
-    ['data-po-image','data-po-image-preview','data-po-image-label','data-po-image-remove','data-po-image-input','data-po-image-note'].forEach(function(key){form.nodes['['+key+']']={hidden:false,disabled:false,value:'',removeAttribute:function(k){delete this[k];}};});
+    var form={isConnected:true,nodes:{},closest:function(){return null;},values:{id:'',newId:'draftpo01',rencanaId:'draftplan01',prepareMode:'legacy',produkId:'product01',jenis:'stok',nama:'Desain baru',series:'Seri',pelanggan:'',deadline:'',bahan:'Katun',catatan:'',noPO:'',status:'aktif'}};
+    ['data-po-image','data-po-image-preview','data-po-image-label','data-po-image-remove','data-po-image-input','data-po-image-note','data-po-prepared-notice'].forEach(function(key){form.nodes['['+key+']']={hidden:false,disabled:false,value:'',getAttribute:function(){return '';},removeAttribute:function(k){delete this[k];}};});
     var fileInput=form.nodes['[data-po-image-input]'];fileInput.closest=function(){return form;};
     var removeButton=form.nodes['[data-po-image-remove]'];removeButton.closest=function(){return form;};
     function $(selector,scope){return scope.nodes[selector]||null;}
+    function $$(selector,scope){if(selector==='[data-po-active-size]:checked')return [{getAttribute:function(){return 'M';}}];if(selector==='input,select,textarea,button')return Object.keys(form.nodes).map(function(k){return form.nodes[k];});return [];}
+    function me(){return {id:'owner01',divisi:'owner'};}function poPrepareHtml(){return '';}function poLegacyValues(){return {bahanList:[{nama:'Katun',qty:2,satuan:'kg'}],rol:1};}function applyState(state){S.state=state;}function refresh(){}
     function topForm(){return form;}function formVals(f){return Object.assign({},f.values);}function sizeVals(){return {M:2};}
     function fileToThumb(file){return new Promise(function(resolve,reject){decodes.push({file:file,resolve:resolve,reject:reject});});}
     function req(action,payload){return new Promise(function(resolve,reject){calls.push({action:action,payload:payload,resolve:resolve,reject:reject});});}
@@ -91,7 +93,7 @@ test('invalid or unfinished image blocks PO creation until corrected or removed'
   const save = vm.runInContext('A.poSave({})', c); await Promise.resolve();
   assert.equal(c.calls.length, 1);
   assert.equal(c.calls[0].payload.gambarData, '');
-  c.calls[0].resolve({ id: 'draftpo01' }); await save;
+  c.calls[0].resolve({ po:{id:'draftpo01'},rencana:{id:'draftplan01'},pending:false }); await save;
 });
 
 test('save failure retains image and stable PO ID; duplicate taps send one request', async () => {
@@ -100,29 +102,32 @@ test('save failure retains image and stable PO ID; duplicate taps send one reque
   const first = vm.runInContext('A.poSave({})', c);
   vm.runInContext('A.poSave({})', c); await Promise.resolve();
   assert.equal(c.calls.length, 1);
-  assert.equal(c.calls[0].action, 'savePO');
+  assert.equal(c.calls[0].action, 'savePOWithRencana');
   assert.equal(c.calls[0].payload.gambarData, picture);
   assert.equal(c.calls[0].payload.po.produkId, 'product01');
   assert.equal(c.form.nodes['[data-po-image-input]'].disabled, true);
   c.calls[0].reject(new Error('Koneksi terputus.')); await first;
   assert.equal(c.closed, 0);
   assert.equal(c.form._poImage.data, picture);
-  assert.equal(c.form.nodes['[data-po-image-input]'].disabled, false);
-  const retry = vm.runInContext('A.poSave({})', c); await Promise.resolve();
-  assert.deepEqual(json(c.calls[1].payload), json(c.calls[0].payload));
-  c.calls[1].resolve({ id: 'draftpo01' }); await retry;
+  assert.equal(c.form.nodes['[data-po-image-input]'].disabled, true);
+  vm.runInContext('A.poSave({})',c);assert.equal(c.calls.length,1);
+  const checking=vm.runInContext('A.poPreparedCheck(fileInput)',c);assert.equal(c.calls[1].action,'getState');c.calls[1].resolve({me:{id:'owner01'},po:[],rencanaPotong:[]});await checking;
+  const retry = vm.runInContext('A.poPreparedRetry(fileInput)', c); await Promise.resolve();
+  assert.deepEqual(json(c.calls[2].payload), json(c.calls[0].payload));
+  c.calls[2].resolve({po:{id:'draftpo01'},rencana:{id:'draftplan01'},pending:false}); await retry;
   assert.equal(c.closed, 1);
 });
 
 function backend() {
   const c = vm.createContext({});
-  vm.runInContext(coreSource + `
+  vm.runInContext(coreSource + fs.readFileSync(path.join(root,'src/cutting-plans.js'),'utf8') + `
     var db={},serial=0,config={},failImageOnce=false;
     Object.keys(SCHEMA).forEach(function(s){db[s]=[];});
     db.Pegawai=[{id:'owner01',nama:'Owner',divisi:'owner',aktif:true,token:'owner-token-123456789'},
       {id:'owner02',nama:'Other',divisi:'owner',aktif:true,token:'other-token-123456789'},
       {id:'worker01',nama:'Worker',divisi:'jahit',aktif:true,token:'worker-token-12345678'}];
     db.Produk=[{id:'product01',nama:'Kaos',series:'Seri',gambar:'product-v1',aktif:true}];
+    db.StokBahan=[{id:'stock0001',jenis:'beli',bahan:'Katun',qty:20,satuan:'kg',rol:2}];
     db.Gambar=[{id:'product01',data:'data:image/jpeg;base64,b2xk',diubah:'2026-01-01'}];
     var store={read:function(s){return db[s];},append:function(s,r){if(s==='Gambar'&&failImageOnce){failImageOnce=false;throw new Error('temporary image write failure');}db[s].push(r);},
       update:function(s,id,p){Object.assign(db[s].find(function(r){return r.id===id;}),p);},remove:function(s,id){db[s]=db[s].filter(function(r){return r.id!==id;});},
@@ -130,12 +135,13 @@ function backend() {
     var core=createCore(store,{now:function(){return new Date('2026-10-08T08:00:00Z');},id:function(){return 'generated'+(++serial);}});
   `, c);
   function call(payload, token = 'owner-token-123456789') {
-    const p = { token, workflowVersion: 2, ...payload };
-    return json(vm.runInContext(`core.handle('savePO',JSON.parse(${JSON.stringify(JSON.stringify(p))}))`, c));
+    const edit=!!payload.po.id,p = { token, workflowVersion: 2, ...payload };
+    if(!edit)p.rencana={id:'draftplan01',bahanList:[{nama:'Katun',qty:2,satuan:'kg'}],rol:1};
+    return json(vm.runInContext(`core.handle('${edit?'savePO':'savePOWithRencana'}',JSON.parse(${JSON.stringify(JSON.stringify(p))}))`, c));
   }
   return { c, call };
 }
-function draft() { return { newId: 'draftpo01', nama: 'Desain baru', produkId: 'product01', ukuran: { M: 2 } }; }
+function draft() { return { newId: 'draftpo01', nama: 'Desain baru', produkId: 'product01', ukuran: {}, ukuranAktif:['M'] }; }
 
 test('server validates the image before creating PO and attaches it only to that PO', () => {
   const a = backend(), originalProduct = json(a.c.db.Produk), originalImage = json(a.c.db.Gambar[0]);
@@ -146,8 +152,8 @@ test('server validates the image before creating PO and attaches it only to that
   }
   assert.throws(() => a.call({ po: draft(), gambarData: picture }, 'worker-token-12345678'), /owner|admin|izin/i);
   const result = a.call({ po: draft(), gambarData: picture });
-  assert.equal(result.data.id, 'draftpo01');
-  assert.ok(result.data.gambar);
+  assert.equal(result.data.po.id, 'draftpo01');
+  assert.ok(result.data.po.gambar);
   assert.deepEqual(json(a.c.db.Produk), originalProduct);
   assert.deepEqual(json(a.c.db.Gambar[0]), originalImage);
   assert.equal(a.c.db.Gambar.find(r => r.id === 'draftpo01').data, picture);
@@ -168,8 +174,8 @@ test('retry after a partial image write completes the same PO and omitted image 
 
 test('an existing newId with another intent or creator cannot overwrite that PO image', () => {
   const a = backend(); a.call({ po: draft(), gambarData: picture });
-  assert.throws(() => a.call({ po: { ...draft(), nama: 'Unrelated' }, gambarData: '' }), /data berbeda/);
-  assert.throws(() => a.call({ po: draft(), gambarData: '' }, 'other-token-123456789'), /data berbeda/);
+  assert.throws(() => a.call({ po: { ...draft(), nama: 'Unrelated' }, gambarData: '' }), /berbeda/);
+  assert.throws(() => a.call({ po: draft(), gambarData: '' }, 'other-token-123456789'), /berbeda/);
   assert.equal(a.c.db.Gambar.find(r => r.id === 'draftpo01').data, picture);
   assert.equal(a.c.db.PO.length, 1);
   a.call({ po: draft(), gambarData: '' });

@@ -14,11 +14,19 @@ var PK_CACHE_ACCOUNT_TTL_ = 1800;
 var PK_CACHE_POTONG_ = 80000;
 var PK_CELL_MAX_ = 49000;
 function pkSchema_() { return APP_VERSION + ':' + coreHash(JSON.stringify(SCHEMA) + '|' + JSON.stringify(TYPES)); }
+/* Code-only releases keep the same physical columns. Retain versioned row
+   caches, but do not inspect every sheet header just to verify a PIN after a
+   patch release. A missing/different layout digest still performs full setup. */
+function pkLayoutMatches_(saved, want) {
+  saved = String(saved || ''); want = String(want || '');
+  var at = saved.lastIndexOf(':'), expectedAt = want.lastIndexOf(':');
+  return at > 0 && expectedAt > 0 && saved.slice(at + 1) === want.slice(expectedAt + 1);
+}
 function pkStore_() {
   if (PK_STORE_) return PK_STORE_;
   var props = PropertiesService.getScriptProperties();
   var ss = null; var tz = null;
-  var cache = {}; var cacheMiss = {}; var depth = 0; var dirty = false; var ver = null; var kotor = {};
+  var cache = {}; var cacheMiss = {}; var depth = 0; var dirty = false; var businessDirty = false; var ver = null; var kotor = {};
   var settingsReadInLock = false; var settingsNeedsFlush = false;
   var readCacheBatch = 0; var readCacheQueue = {};
   var sc = null; var scMati = false;
@@ -184,14 +192,15 @@ function pkStore_() {
     data.forEach(function (o, i) { t.rows.push(o); t.rowNo[o[k]] = start + i; });
     t.last += data.length; changed(name);
   }
-  function changed(name) {
+  function changed(name, privateAuthOnly) {
     delete readCacheQueue[name];
     dirty = true; kotor[name] = 1;
+    if (!privateAuthOnly) businessDirty = true;
     if (name === 'Pengaturan') { settingsReadInLock = false; settingsNeedsFlush = true; }
   }
   function version() {
     if (ver === null) ver = Number(pkProps_().ver || 0);
-    return ver + (dirty ? 1 : 0);
+    return ver + (businessDirty ? 1 : 0);
   }
   PK_STORE_ = {
     read: function (name) { return load(name).rows; },
@@ -259,7 +268,11 @@ function pkStore_() {
       range.setNumberFormats(fmtRow(t.head));
       range.setValues([toArray(t, next, base)]);
       for (var field in next) obj[field] = next[field];
-      changed(name);
+      /* Session tokens and PIN-attempt counters are not part of publicUser.
+         Publish their account-table version normally, without forcing every
+         colleague to download the full production state after each sign-in. */
+      var patchKeys = Object.keys(patch);
+      changed(name, name === 'Pegawai' && patchKeys.length > 0 && patchKeys.every(function (key) { return ['token','gagal','kunci'].indexOf(key) >= 0; }));
     },
     remove: function (name, id) {
       var t = load(name, true); var k = keyOf(name); var r = t.rowNo[id]; if (!r) return;
@@ -320,7 +333,7 @@ function pkStore_() {
       if (depth > 0) return fn();
       var lk = LockService.getScriptLock();
       try { lk.waitLock(25000); } catch (e) { throw new Error('Server sedang sibuk. Coba lagi beberapa detik lagi.'); }
-      depth = 1; cache = {}; cacheMiss = {}; dirty = false; kotor = {}; settingsReadInLock = false; settingsNeedsFlush = false;
+      depth = 1; cache = {}; cacheMiss = {}; dirty = false; businessDirty = false; kotor = {}; settingsReadInLock = false; settingsNeedsFlush = false;
       PK_PROPS_ = null; var pv = pkProps_();
       ver = Number(pv.ver || 0);
       try { return fn(); }
@@ -330,20 +343,21 @@ function pkStore_() {
           try { SpreadsheetApp.flush(); } catch (e) { galatSimpan = e; }
           if (dirty) {
             dirty = false;
-            var naik = { ver: String(ver + 1) }; var nama = Object.keys(kotor); var kunciLama = {};
+            var nextVer = ver + (businessDirty ? 1 : 0);
+            var naik = businessDirty ? { ver: String(nextVer) } : {}; var nama = Object.keys(kotor); var kunciLama = {};
             nama.forEach(function (n) { kunciLama[n] = kunciCache(n, String(pv['v_' + n] || '0')); naik['v_' + n] = String(Number(pv['v_' + n] || 0) + 1); });
             try { props.setProperties(naik, false); }
             catch (e2) {
               var c = lemari(); if (c) nama.forEach(function (n) { try { c.remove(kunciLama[n]); } catch (e3) {} });
               throw e2;
             }
-            ver = ver + 1; for (var kk in naik) pv[kk] = naik[kk];
+            ver = nextVer; for (var kk in naik) pv[kk] = naik[kk];
             if (!galatSimpan) nama.forEach(function (n) { var t = cache[n]; if (t && !t.ringan) keCache(n, t.rows, pv['v_' + n]); });
             kotor = {};
           }
           if (galatSimpan) throw galatSimpan;
         }
-        finally { depth = 0; dirty = false; settingsReadInLock = false; settingsNeedsFlush = false; lk.releaseLock(); }
+        finally { depth = 0; dirty = false; businessDirty = false; settingsReadInLock = false; settingsNeedsFlush = false; lk.releaseLock(); }
       }
     },
     version: version,
@@ -370,12 +384,12 @@ function pkEnv_() {
 }
 function pkSetup_() {
   var want = pkSchema_();
-  if (pkProps_().schema === want) return;
+  if (pkLayoutMatches_(pkProps_().schema, want)) return;
   var props = PropertiesService.getScriptProperties();
   var lk = LockService.getScriptLock();
   lk.waitLock(25000);
   try {
-    if (props.getProperty('schema') !== want) { pkStore_().ensureAll(); props.setProperty('schema', want); }
+    if (!pkLayoutMatches_(props.getProperty('schema'), want)) { pkStore_().ensureAll(); props.setProperty('schema', want); }
     PK_PROPS_ = null;
   } finally { lk.releaseLock(); }
 }

@@ -124,9 +124,10 @@ test('new production UI refuses mutation against an old server before making a r
 });
 test('the bundled demo still completes with the same enforced workflow as the server', () => {
   const c = context();
+  vm.runInContext(fs.readFileSync(path.join(root,'src/cutting-plans.js'),'utf8'),c);
   vm.runInContext(`var saved={},clock=0,seq=0,booted=0;
     var LS={get:k=>saved[k]||null,set:(k,v)=>{saved[k]=v;return true;},del:k=>{delete saved[k];}};
-    function tokenKey(){return 'test-token';} function boot(){booted++;}`, c);
+    function tokenKey(){return 'test-token';} function boot(){booted++;} function newId(){return 'demoid_'+(++seq);}`, c);
   vm.runInContext(between('function createLocalStore(', '/* aplikasi per divisi:'), c);
   vm.runInContext(`var testStore=createLocalStore('test-db');
     var core=createCore(testStore,{now:()=>new Date(Date.now()-clock),id:()=>('testid_'+(++seq))});

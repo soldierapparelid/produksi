@@ -13,7 +13,7 @@ function ui(){const c=vm.createContext({console});vm.runInContext(fs.readFileSyn
  form.choices=[choice('rollA',5),choice('rollC',2)];form.meta['[data-roll-picker]']={getAttribute:function(){return '';}};form.meta['[data-roll-summary]']={textContent:''};form.meta['[data-po-prepared-notice]']={hidden:true,innerHTML:''};
  var button=element({'data-a':'poSave'}),check=element({'data-a':'poPreparedCheck'}),retry=element({'data-a':'poPreparedRetry'});form.controls=[element(),element()];
  function $(q,scope){scope=scope||form;if(q==='[data-roll-select]')return scope.selected;if(q==='[data-roll-qty]')return scope.input;return scope.meta&&scope.meta[q]||null;}
- function $$(q,scope){scope=scope||form;if(q==='[data-roll-choice]')return scope.choices||[];if(q==='[data-po-legacy-bahan]')return scope.legacy||[];if(q==='input,select,textarea,button')return scope.controls||[];if(q==='[data-a="poSave"]')return [button];return [];}
+ function $$(q,scope){scope=scope||form;if(q==='[data-po-active-size]:checked')return (scope.activeSizes||['M']).map(function(s){return element({'data-po-active-size':s});});if(q==='[data-roll-choice]')return scope.choices||[];if(q==='[data-po-legacy-bahan]')return scope.legacy||[];if(q==='input,select,textarea,button')return scope.controls||[];if(q==='[data-a="poSave"]')return [button];return [];}
  function formVals(f){return Object.assign({},f.values);}function sizeVals(){return {M:40};}function topForm(){return form;}function me(){return actor;}function isAdmin(){return actor.divisi==='owner'||actor.divisi==='admin';}function workflowFor(){return {issues:[]};}
  function stokTampil(){return stock;}function bahanInfo(n){return stock.find(function(b){return b.kunci===coreNormBahan(n);});}
  function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}function nf(n){return String(n);}function nfQty(n){return String(n);}function satuanPendek(s){return s;}function rp(n){return 'Rp '+n;}function ic(){return '';}function thumb(){return '';}
@@ -29,10 +29,27 @@ test('product and custom new PO share obvious prepared-material choices, while n
  const h=ui();for(const product of ['', 'product']){h.run(`openPO('',${JSON.stringify(product)})`);const html=h.run('rendered');assert.match(html,/Bahan potong \(wajib\)/);assert.doesNotMatch(html,/name="siapkanPotong"|siapkan nanti/);assert.match(html,/Saldo lama/);assert.match(html,/data-po-image/);assert.match(html,/data-roll-picker/);assert.match(html,/PO baru harus memiliki bahan dan jumlah yang disiapkan/);}
  h.run("actor.divisi='admin';openPO('','product')");assert.doesNotMatch(h.run('rendered'),/data-roll-picker|siapkanPotong/);
 });
+
+test('new PO requires explicitly checked active sizes and sends no target quantity with the same material reservation',async()=>{
+ const h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product')");const shown=h.run('rendered');assert.match(shown,/Ukuran aktif/);assert.doesNotMatch(shown,/data-po-active-size="[^"]+" checked|data-size=|Target per ukuran/);
+ h.run('form.activeSizes=[];A.poSave(button)');assert.equal(h.run('requests.length'),0);assert.match(h.run('messages[messages.length-1]'),/Pilih minimal satu ukuran/);
+ h.run("form.activeSizes=['M','XL']");const done=h.run('A.poSave(button)');await Promise.resolve();assert.deepEqual(h.json('requests[0].payload.po.ukuranAktif'),['M','XL']);assert.deepEqual(h.json('requests[0].payload.po.ukuran'),{});assert.equal(h.run('requests[0].payload.po.total'),undefined);assert.equal(h.run('requests[0].action'),'savePOWithRencana');assert.equal(h.run('requests[0].payload.rencana.alokasiBahan.length'),2);h.resolve(0,{po:{id:'newpo001'},rencana:{id:'newpo001_cut'},pending:false});await done;
+});
+
+test('legacy target editor preserves recorded quantities while selected-size production offers no unselected extras',async()=>{
+ const h=ui();h.run("D.po.old={id:'old',nama:'Old',asal:'lama',jenis:'stok',status:'aktif',ukuran:{M:114},total:114};openPO('old','');form.values.id='old'");assert.match(h.run('rendered'),/Ukuran dan jumlah riwayat lama tetap disimpan/);assert.doesNotMatch(h.run('rendered'),/data-po-active-size|data-size=/);const done=h.run('A.poSave(button)');await Promise.resolve();assert.deepEqual(h.json('requests[0].payload.po.ukuran'),{M:114});assert.equal(h.run('requests[0].payload.po.ukuranAktif'),undefined);h.resolve(0,{id:'old'});await done;
+ vm.runInContext(part('function poSizes(po)','function workflowFor('),h.c);h.run("S.state.settings.ukuran=['S','M','L','XL'];var selected={ukuran:{},ukuranAktif:['M','L'],cutting:{verified:true,ukuran:['M','L']}};");assert.deepEqual(h.json('sizesSplit(selected)'),{main:['M','L'],extra:[]});assert.deepEqual(h.json("sizesSplit({ukuran:{M:114}})"),{main:['M'],extra:['S','L','XL']});
+});
 test('roll picker displays actual remaining weight and invoice and never fabricates old-stock roll identities',()=>{
- const h=ui(),view=h.run("rollChoicesHtml('Katun',[],'')");assert.match(view,/BON-A/);assert.match(view,/Rol 1/);assert.match(view,/5 kg tersedia/);assert.match(view,/berat awal 8 kg/);
+ const h=ui(),view=h.run("rollChoicesHtml('Katun',[],'')");assert.match(view,/BON-A/);assert.match(view,/Rol 1/);assert.match(view,/5 kg tersedia/);assert.match(view,/berat awal 8 kg/);assert.match(view,/Untuk PO \(kg\)/);
  assert.deepEqual(h.json('rollPickerValues(form)'),[{stokId:'rollA',qty:5},{stokId:'rollC',qty:2}]);
  h.run("stock.push({kunci:'lama',nama:'Lama',satuan:'kg',saldo:50,legacyTersedia:50})");assert.match(h.run("rollChoicesHtml('Lama',[],'')"),/Saldo lama tanpa rincian berat tiap rol/);assert.doesNotMatch(h.run("rollChoicesHtml('Lama',[], '')"),/data-roll-choice/);
+});
+
+test('material summary totals allocated roll weights and optional old balance by product material without inventing roll weights',()=>{
+ const h=ui();h.run("form.meta['[data-po-material-summary]']={innerHTML:''};form.values.includeLegacy=true;form.legacy=[{values:{legacyBahan:'Katun',legacyQty:'3'}}];poPreparedSummaryRecalc(form)");let summary=h.run("form.meta['[data-po-material-summary]'].innerHTML");assert.match(summary,/Katun · 8 kg/);assert.match(summary,/Rib · 2 kg/);assert.match(summary,/Total: 10 kg/);assert.doesNotMatch(summary,/pcs|per potong/);
+ h.run("form.values.prepareMode='legacy';poPreparedSummaryRecalc(form)");summary=h.run("form.meta['[data-po-material-summary]'].innerHTML");assert.match(summary,/Katun · 3 kg/);assert.match(summary,/Total: 3 kg/);assert.doesNotMatch(summary,/Rib|Rol/);
+ h.run("form.values.prepareMode='roll';form.values.includeLegacy=false;form.choices[0].input.value='1.5';poPreparedSummaryRecalc(form)");summary=h.run("form.meta['[data-po-material-summary]'].innerHTML");assert.match(summary,/Katun · 1.5 kg/);assert.match(summary,/Total: 3.5 kg/);assert.equal(h.run('requests.length'),0);
 });
 test('duplicate, stale, excessive or malformed selected roll quantities block submission before writing',()=>{
  const h=ui();for(const code of ["form.choices=[choice('rollA',6)]","form.choices=[choice('rollA',1),choice('rollA',1)]","form.choices=[choice('missing',1)]","form.choices=[choice('rollA',1.0001)]","form.choices=[]"]){h.run(code);assert.throws(()=>h.run('rollPickerValues(form)'));}

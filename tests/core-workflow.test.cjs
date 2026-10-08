@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../src/core.js'), 'utf8');
+const source = ['core.js','cutting-plans.js'].map(name=>fs.readFileSync(path.join(__dirname,'../src',name),'utf8')).join('\n');
 function app() {
   const context = vm.createContext({});
   vm.runInContext(source + `
@@ -30,9 +30,14 @@ function app() {
   function call(action, payload = {}, token = 'owner-token-123456789') {
     return run(`core.handle(${JSON.stringify(action)},JSON.parse(${JSON.stringify(JSON.stringify({ token, workflowVersion: 2, ...payload }))}))`);
   }
-  function seed(sizes = { M: 40, L: 60 }) {
-    call('savePO', { po: { newId: 'po00001', nama: 'Kaos', ukuran: sizes } });
-    call('createPotong', { potong: { id: 'cut0001', poId: 'po00001', userId: 'cutter1', ukuran: sizes, tarif: 500 } });
+  function seed(sizes = { M: 40, L: 60 }, legacy = false) {
+    let plan;
+    if(legacy)run(`db.PO=[{id:'po00001',nama:'Kaos',noPO:'PO-OLD',status:'aktif',ukuran:${JSON.stringify(JSON.stringify(sizes))},total:${Object.values(sizes).reduce((n,q)=>n+q,0)},asal:'lama'}];true`);
+    else {
+      call('saveStok',{stok:{baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
+      plan=call('savePOWithRencana',{po:{newId:'po00001',nama:'Kaos',ukuran:{},ukuranAktif:Object.keys(sizes)},rencana:{id:'fixture-plan',bahanList:[{nama:'Fixture cloth',qty:1,satuan:'kg'}],rol:1}}).data.rencana;
+    }
+    call('createPotong', { potong: { id: 'cut0001', poId: 'po00001', userId: 'cutter1', ukuran: sizes, tarif: 500, ...(plan?{rencanaId:plan.id,expectedRencanaRevision:plan.revision}:{}) } });
     call('createKirim', { kirim: { id: 'send001', poId: 'po00001', maklonId: 'worker1', ukuran: sizes, upah: 2000 } });
   }
   function count(sizes, id = 'count01') { return call('createSetor', { setor: { id, poId: 'po00001', maklonId: 'worker1', ukuran: sizes, tanggal: '2026-10-02' } }); }
@@ -132,7 +137,7 @@ test('completion uses production, excludes BigSeller; closed PO requires reopeni
 });
 
 test('downstream/paid records prevent destructive upstream deletion and reprice', () => {
-  const a = app(); a.seed({ M: 40 }); a.count({ M: 40 });
+  const a = app(); a.seed({ M: 40 }, true); a.count({ M: 40 });
   assert.throws(() => a.call('deleteRecord', { sheet: 'Potong', id: 'cut0001' }), /penugasan/);
   assert.throws(() => a.call('deleteRecord', { sheet: 'SlipKirim', id: 'send001' }), /setoran/);
   a.inspect({ M: 40 });
@@ -168,7 +173,7 @@ test('server scopes worker payroll and validates contract and event dates', () =
 });
 
 test('re-import preserves paid snapshots and rejects quantity rewrites before any writes', () => {
-  const a = app(); a.seed({ M: 40 }); a.count({ M: 40 }); a.inspect({ M: 40 });
+  const a = app(); a.seed({ M: 40 }, true); a.count({ M: 40 }); a.inspect({ M: 40 });
   a.call('createUpah', { upah: { id: 'pay0001', pegawaiId: 'worker1', itemIds: ['setor:count01:M'] } });
   const sheets = ['PO','Potong','SlipKirim','SlipSetor','QC','Gudang'];
   a.run(`['PO','Potong','SlipKirim','SlipSetor','QC','Gudang'].forEach(function(s){db[s].forEach(function(r){r.asal='lama';});}); true`);

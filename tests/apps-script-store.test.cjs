@@ -244,6 +244,7 @@ test('settings validates the whole object before updating any existing key', () 
 
 test('real API core+Sheets adapter completes count/QC/payroll and preserves payment after cold reload', () => {
   const h = harness();
+  vm.runInContext(fs.readFileSync(path.join(root,'src/cutting-plans.js'),'utf8'),h.context);
   const setup = h.request('setupOwner', { nama: 'Owner', pin: '1234' }); assert.equal(setup.ok, true);
   const token = setup.data.token;
   function call(action, payload = {}) {
@@ -252,8 +253,9 @@ test('real API core+Sheets adapter completes count/QC/payroll and preserves paym
   }
   const worker = call('saveUser', { user: { nama: 'Penjahit', divisi: 'jahit' } });
   const cutter = call('saveUser', { user: { nama: 'Potong', divisi: 'potong' } });
-  call('savePO', { po: { newId: 'po00001', nama: 'Kaos', ukuran: { M: 10 } } });
-  call('createPotong', { potong: { id: 'cut0001', poId: 'po00001', userId: cutter.id, ukuran: { M: 10 }, tarif: 500 } });
+  call('saveStok',{stok:{baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
+  const prepared=call('savePOWithRencana',{po:{newId:'po00001',nama:'Kaos',ukuran:{},ukuranAktif:['M']},rencana:{id:'fixture-plan',bahanList:[{nama:'Fixture cloth',qty:1,satuan:'kg'}],rol:1}}).rencana;
+  call('createPotong', { potong: { id: 'cut0001', poId: 'po00001', userId: cutter.id, ukuran: { M: 10 }, tarif: 500, rencanaId:prepared.id,expectedRencanaRevision:prepared.revision } });
   call('createKirim', { kirim: { id: 'send001', poId: 'po00001', maklonId: worker.id, ukuran: { M: 10 }, upah: 2000 } });
   call('createSetor', { setor: { id: 'count01', poId: 'po00001', maklonId: worker.id, ukuran: { M: 10 } } });
   call('createQC', { qc: { id: 'qc00001', poId: 'po00001', setorId: 'count01', ukuran: { M: 8 }, offline: 2, offlineUkuran: { M: 2 } } });

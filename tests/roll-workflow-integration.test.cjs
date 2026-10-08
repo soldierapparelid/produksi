@@ -47,7 +47,7 @@ function fixture() {
     return raw('StokBahan').filter(row => row.invoiceId === inv.id);
   }
   function bundle(allocations, poId = 'prepared-po-001', planId = 'prepared-plan-001') {
-    return { po: { newId: poId, nama: 'Fixture Roll Product', jenis: 'stok', status: 'aktif', ukuran: { M: 8, L: 4 } },
+    return { po: { newId: poId, nama: 'Fixture Roll Product', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M','L'] },
       rencana: { id: planId, alokasiBahan: allocations, catatan: 'Fixture preparation' } };
   }
   function findPlan(id = 'prepared-plan-001') {
