@@ -1,0 +1,13 @@
+{
+  "name": "soldier-produksi",
+  "private": true,
+  "description": "Aplikasi Soldier Produksi dan core bersama untuk browser/Google Apps Script",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build-core.cjs",
+    "check": "node scripts/build-core.cjs --check",
+    "test": "node --test"
+  }
+}
