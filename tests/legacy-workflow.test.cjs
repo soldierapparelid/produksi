@@ -207,7 +207,7 @@ test('durable pending marker wins over stale settings cache for writes and same-
   const state = a.call('sync', { ver: 1, av: '1.4.0' });
   assert.equal(state.same, undefined);
   assert.equal(state.settings.legacyMigrationStatus.batchId, 'durable1');
-  assert.ok(a.run('checkpoints.length') >= 3);
+  assert.equal(a.run('checkpoints.length'), 2, 'write guard and sync each verify the durable marker once');
   a.run('config={};true');
   assert.equal(a.call('getState').settings.legacyMigrationStatus.batchId, 'durable1');
 });

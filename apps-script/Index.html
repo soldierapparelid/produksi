@@ -332,7 +332,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261008-history-edit1';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261008-loading-jahit1';</script>
 <script>
 (function () {
 'use strict';
@@ -354,7 +354,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.4.1';
+var APP_VERSION = '1.4.2';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -362,7 +362,7 @@ var WORKFLOW_VERSION = 2;
 var SCHEMA = {
   Pegawai:   ['id','nama','divisi','pin','token','gagal','kunci','hp','catatan','aktif','dibuat'],
   Produk:    ['id','nama','series','gambar','tarifPotong','tarifJahit','catatan','aktif','dibuat'],
-  PO:        ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','ukuran','total','bahan','catatan','gambar','status','dibuat','dibuatOleh','diubah','selesaiPada','asal','imporVersion','imporReview','imporSumber'],
+  PO:        ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','ukuran','total','bahan','catatan','gambar','status','dibuat','dibuatOleh','diubah','selesaiPada','asal','imporVersion','imporReview','imporSumber','tuntasPada'],
   Potong:    ['id','poId','userId','tanggal','ukuran','total','bahan','kg','rol','tarif','upahId','catatan','dibuat','bahanList','asal'],
   SlipKirim: ['id','noSlip','poId','maklonId','tanggal','target','ukuran','total','upah','catatan','dibuatOleh','dibuat','asal'],
   SlipSetor: ['id','noSlip','poId','maklonId','tanggal','ukuran','total','reject','upah','catatan','status','dibuatOleh','dibuat','diprosesOleh','diprosesPada','upahId','asal','rejectUkuran','workflowVersion','imporSumber'],
@@ -797,8 +797,8 @@ function corePayroll(potong, setor, qc, slipUpah, extras) {
 }
 
 /* ---------- agregasi progres per PO (dihitung, tidak disimpan) ---------- */
-function coreAggregate(poRows, potong, kirim, setor, qc, gudang, extras) {
-  var flow = coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras);
+function coreAggregate(poRows, potong, kirim, setor, qc, gudang, extras, knownFlow) {
+  var flow = knownFlow || coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras);
   if (typeof coreHistoryPhysicalRows === 'function') { potong = coreHistoryPhysicalRows('Potong', potong, extras && extras.historyCorrections); kirim = coreHistoryPhysicalRows('SlipKirim', kirim, extras && extras.historyCorrections); }
   var FIELDS = ['potong', 'kirim', 'terima', 'diajukan', 'qcOk', 'bigseller'];
   var byPo = {};
@@ -895,6 +895,7 @@ function coreSlipText(type, rec, ctx) {
 
 /* ============================================================ */
 function createCore(store, env) {
+  var insideWrite = false, skipAutoCompletion = false;
 
   function fail(msg) { throw new Error(msg); }
   function nowIso() { return env.now().toISOString(); }
@@ -998,11 +999,33 @@ function createCore(store, env) {
   }
   function correctedSource(sheet, id) { return store.read('KoreksiRiwayat').some(function (r) { return r.sheet === sheet && r.rowId === id; }); }
   function sourcePaid(id) { return sourceInLegacySettlement(id) || payroll().some(function (r) { return r.sourceId === id && (r.paidQty > 0 || r.overpaidQty > 0 || r.legacyPaid || r.legacySettlementHold || r.legacySettlementId); }); }
-  function durableMigrationStatus() { if (store.checkpoint) store.checkpoint(['Pengaturan']); return (store.getSettings() || {}).legacyMigrationStatus; }
+  function durableMigrationStatus() {
+    if (store.getMigrationStatusFresh) return store.getMigrationStatusFresh();
+    if (store.checkpoint) store.checkpoint(['Pengaturan']);
+    return (store.getSettings() || {}).legacyMigrationStatus;
+  }
+
+  function advanceCompletion(me, opt) {
+    function advance() {
+      var pending = durableMigrationStatus();
+      if (pending) return buildState(me, opt, pending, true);
+      /* Cached candidates are only a hint. Re-read all production evidence and
+         the actor before any status transition, including during a write. */
+      if (store.checkpoint) store.checkpoint(['PO', 'Potong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'GudangLama', 'LegacySettlement', 'KoreksiRiwayat', 'Pegawai']);
+      var actor = findUser(me.id);
+      if (!actor || !actor.aktif) fail('Akun ini sudah dinonaktifkan.');
+      if (!insideWrite && opt && opt.token) actor = auth(opt);
+      var freshFlow = workflow();
+      var plan = coreAutoCompletionPlan(store.read('PO'), freshFlow, env.now());
+      plan.patches.forEach(function (patch) { store.update('PO', patch.id, patch.changes); });
+      return buildState(actor, opt, null, true, freshFlow);
+    }
+    return insideWrite ? advance() : store.lock(advance);
+  }
 
   /* ---------- data yang dikirim ke perangkat, disaring menurut divisi ---------- */
-  function buildState(me, opt) {
-    var migrationStatus = durableMigrationStatus();
+  function buildState(me, opt, migrationStatus, skipAdvance, knownFlow) {
+    if (arguments.length < 3) migrationStatus = durableMigrationStatus();
     var semua = !!(opt && opt.semua);
     /* tabel yang akan dibaca diambil dari cache dalam satu kali ambil (kalau penyimpanannya mendukung) */
     if (store.prefetch) {
@@ -1024,8 +1047,9 @@ function createCore(store, env) {
     var upah = withParsed(store.read('SlipUpah'), 'itemIds', []);
     upah = withParsed(upah, 'items', []);
     var extras = legacyExtras();
-    var agg = coreAggregate(po, potong, kirim, setor, qc, gudang, extras);
-    var wf = validateWorkers(coreWorkflow(po, potong, kirim, setor, qc, gudang, extras));
+    var wf = knownFlow || validateWorkers(coreWorkflow(po, potong, kirim, setor, qc, gudang, extras));
+    if (!skipAdvance && !skipAutoCompletion && !migrationStatus && typeof coreAutoCompletionPlan === 'function' && coreAutoCompletionPlan(po, wf, env.now()).patches.length) return advanceCompletion(me, opt);
+    var agg = coreAggregate(po, potong, kirim, setor, qc, gudang, extras, wf);
     var earned = corePayroll(potong, setor, qc, upah, extras);
     /* Hydrate only the response copy for historical receipt rendering. Stored SlipUpah stays unchanged. */
     upah.forEach(function (u) { if (!u.items.length) { var original = coreLegacySlipItems(u, extras.settlements); if (original.length) u.items = original; } });
@@ -1182,9 +1206,11 @@ function createCore(store, env) {
      (av dikirim perangkat versi baru; perangkat lama tidak mengirimnya). Dengan begitu perangkat yang membuka dari
      salinan data terakhirnya tetap mendapat data baru setelah server diperbarui. */
   actions.sync = function (p) {
+    var me = auth(p);
     var pendingMigration = durableMigrationStatus();
-    if (!pendingMigration && p && p.ver !== undefined && String(p.ver) === String(store.version()) && (p.av === undefined || String(p.av) === APP_VERSION)) return { same: true, ver: store.version() };
-    return buildState(auth(p), p);
+    var due = typeof coreAutoCompletionDue === 'function' && coreAutoCompletionDue(store.read('PO'), env.now());
+    if (!pendingMigration && !due && p && p.ver !== undefined && String(p.ver) === String(store.version()) && (p.av === undefined || String(p.av) === APP_VERSION)) return { same: true, ver: store.version() };
+    return buildState(me, p, pendingMigration);
   };
 
   actions.getState = function (p) { return buildState(auth(p), p); };
@@ -1392,6 +1418,7 @@ function createCore(store, env) {
       var noPO = teks(po.noPO, 30).trim() || rec.noPO;
       for (var i = 0; i < rows.length; i++) if (rows[i].noPO === noPO && rows[i].id !== rec.id) fail('Nomor PO ' + noPO + ' sudah dipakai.');
       common.noPO = noPO;
+      if (status === 'aktif' && rec.status !== 'aktif') common.tuntasPada = '';
       if (status === 'aktif') common.selesaiPada = '';
       else if (rec.status === 'aktif') common.selesaiPada = today();
       store.update('PO', rec.id, common);
@@ -1412,7 +1439,9 @@ function createCore(store, env) {
     if (PO_STATUS.indexOf(p.status) < 0) fail('Status tidak dikenal.');
     var rec = findRow('PO', String(p.id || '')); if (!rec) fail('PO tidak ditemukan.');
     if (p.status === 'selesai') ensureComplete(rec);
-    store.update('PO', rec.id, { status: p.status, diubah: nowIso(), selesaiPada: p.status === 'aktif' ? '' : (rec.status !== 'aktif' && rec.selesaiPada ? rec.selesaiPada : today()) });
+    var patch = { status: p.status, diubah: nowIso(), selesaiPada: p.status === 'aktif' ? '' : (rec.status !== 'aktif' && rec.selesaiPada ? rec.selesaiPada : today()) };
+    if (p.status === 'aktif' && rec.status !== 'aktif') patch.tuntasPada = '';
+    store.update('PO', rec.id, patch);
     return findRow('PO', rec.id);
   };
 
@@ -1928,6 +1957,7 @@ function createCore(store, env) {
         o.token = ''; o.gagal = 0; o.kunci = ''; o.aktif = true;
       }
       if (sheet === 'Produk' || sheet === 'PO') o.gambar = '';
+      if (sheet === 'PO') o.tuntasPada = ''; /* Completion time is observed by this server, never backdated by import. */
       if (SCHEMA[sheet].indexOf('asal') >= 0) o.asal = 'lama';
       existing[o.id] = 1; add.push(o);
     });
@@ -1977,7 +2007,7 @@ function createCore(store, env) {
         });
         o.asal = 'lama';
         var dulu = lamaById[o.id];
-        if (sheet === 'PO') o.gambar = dulu ? dulu.gambar : '';
+        if (sheet === 'PO') { o.gambar = dulu ? dulu.gambar : ''; o.tuntasPada = ''; }
         /* pembayaran yang sudah dicatat di aplikasi ini tetap menempel pada itemnya */
         if (['SlipSetor','Potong','QC','GudangLama'].indexOf(sheet) >= 0 && dulu && dulu.upahId) o.upahId = dulu.upahId;
         if (kolNo && o[kolNo]) { while (nomor[o[kolNo]]) o[kolNo] = o[kolNo] + 'L'; nomor[o[kolNo]] = 1; }
@@ -2155,12 +2185,18 @@ function createCore(store, env) {
     if (contractAction[action] && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     return store.lock(function () {
-      if (durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
-      var data = fn(payload);
-      if (NO_STATE[action]) return data;
-      var out = { data: data };
-      try { out.state = buildState(auth(payload), payload); } catch (e) {}
-      return out;
+      insideWrite = true;
+      /* Migration verifies exact row hashes; register timers on the next normal
+         authenticated load rather than altering its verified result response. */
+      skipAutoCompletion = action === 'applyLegacyMigration' || action === 'recoverLegacyMigration';
+      try {
+        if (durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
+        var data = fn(payload);
+        if (NO_STATE[action]) return data;
+        var out = { data: data };
+        try { out.state = buildState(auth(payload), payload); } catch (e) {}
+        return out;
+      } finally { insideWrite = false; skipAutoCompletion = false; }
     });
   }
   return { handle: handle, slipHtml: slipHtml, settings: settings };
@@ -3468,6 +3504,55 @@ function coreInstallHistoryCorrections(actions, ctx) {
   };
 }
 
+/* Seven elapsed days after verified production completion. This planner never
+   mutates source rows or payroll. The caller rechecks fresh evidence under lock
+   before applying these PO-only patches. Old complete POs start at first sight. */
+var CORE_AUTO_COMPLETE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function coreAutoCompletionTime(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return NaN;
+  var ms = Date.parse(value);
+  return isFinite(ms) && new Date(ms).toISOString() === value.replace(/(\d{2}:\d{2}:\d{2})Z$/, '$1.000Z') ? ms : NaN;
+}
+function coreAutoCompletionEligible(po, flow) {
+  var provenance = coreParseJSON(po.imporSumber, {}), reconciliation = provenance.legacyReconciliation || {};
+  if (po.status !== 'aktif' || po.imporReview || reconciliation.mode === 'review' || reconciliation.mode === 'archive') return false;
+  if (!flow || flow.complete !== true || (flow.issues || []).length) return false;
+  return !Object.keys(flow.ukuran || {}).some(function (size) { return (flow.ukuran[size].issues || []).length; });
+}
+/* Cheap same-version sync check; an unregistered PO is examined on full state,
+   including the first authenticated load after deployment and production writes. */
+function coreAutoCompletionDue(poRows, now) {
+  var ms = now.getTime();
+  return (poRows || []).some(function (po) {
+    if (po.status !== 'aktif' || !po.tuntasPada) return false;
+    var start = coreAutoCompletionTime(po.tuntasPada);
+    return !isFinite(start) || start > ms || ms - start >= CORE_AUTO_COMPLETE_MS;
+  });
+}
+function coreAutoCompletionPlan(poRows, workflowById, now) {
+  var ms = now.getTime();
+  if (!isFinite(ms)) throw new Error('Waktu server tidak sah untuk penutupan PO.');
+  var iso = now.toISOString(), patches = [], next = Infinity;
+  (poRows || []).forEach(function (po) {
+    if (po.status !== 'aktif') return;
+    if (!coreAutoCompletionEligible(po, (workflowById || {})[po.id])) {
+      if (po.tuntasPada) patches.push({ id: po.id, changes: { tuntasPada: '' }, reason: 'incomplete' });
+      return;
+    }
+    var start = coreAutoCompletionTime(po.tuntasPada);
+    if (!isFinite(start) || start > ms) {
+      patches.push({ id: po.id, changes: { tuntasPada: iso }, reason: 'started' });
+      start = ms;
+    } else if (ms - start >= CORE_AUTO_COMPLETE_MS) {
+      patches.push({ id: po.id, changes: { status: 'selesai', selesaiPada: coreYmd(now), diubah: iso }, reason: 'completed' });
+      return;
+    }
+    next = Math.min(next, start + CORE_AUTO_COMPLETE_MS);
+  });
+  return { patches: patches, nextDeadline: isFinite(next) ? new Date(next).toISOString() : '' };
+}
+
 /* ============================================================
    UI bagian 1 — alat bantu, penyimpanan mode coba, sambungan ke server, state
    ============================================================ */
@@ -3510,7 +3595,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.3.2';
+var UI_VERSION = '1.4.2';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -3535,13 +3620,14 @@ var Idb = (function () {
        awalan (boleh kosong): hanya kunci yang diawali teks itu, supaya isi yang besar tidak ikut terbaca */
     all: function (store, cb, awalan) {
       open(function (d) {
-        var out = {}, selesai = false; var fin = function () { if (!selesai) { selesai = true; cb(out); } };
+        var out = {}, selesai = false, timer = null; var fin = function () { if (!selesai) { selesai = true; clearTimeout(timer); cb(out); } };
         if (!d) return fin();
+        timer = setTimeout(fin, 1500);
         try {
           var rentang = null;
           try { if (awalan && window.IDBKeyRange) rentang = window.IDBKeyRange.bound(awalan, awalan + '￿'); } catch (e) { rentang = null; }
           var tx = d.transaction(store, 'readonly'); var rq = tx.objectStore(store).openCursor(rentang);
-          rq.onsuccess = function () { var c = rq.result; if (c) { out[c.key] = c.value; c.continue(); } else fin(); };
+          rq.onsuccess = function () { if (selesai) return; var c = rq.result; if (c) { out[c.key] = c.value; c.continue(); } else fin(); };
           rq.onerror = fin; tx.onabort = fin; tx.onerror = fin;
         } catch (e) { fin(); }
       });
@@ -3549,12 +3635,13 @@ var Idb = (function () {
     /* satu isi saja; memanggil balik dengan undefined kalau tidak ada atau IndexedDB tidak tersedia */
     get: function (store, k, cb) {
       open(function (d) {
-        var selesai = false; var fin = function (v) { if (!selesai) { selesai = true; cb(v); } };
+        var selesai = false, timer = null; var fin = function (v) { if (!selesai) { selesai = true; clearTimeout(timer); cb(v); } };
         if (!d) return fin(undefined);
+        timer = setTimeout(function () { fin(undefined); }, 1500);
         try {
           var tx = d.transaction(store, 'readonly'); var rq = tx.objectStore(store).get(k);
           rq.onsuccess = function () { fin(rq.result); };
-          rq.onerror = function () { fin(undefined); }; tx.onabort = function () { fin(undefined); };
+          rq.onerror = function () { fin(undefined); }; tx.onabort = function () { fin(undefined); }; tx.onerror = function () { fin(undefined); };
         } catch (e) { fin(undefined); }
       });
     },
@@ -3839,7 +3926,7 @@ function tulisSnap() {
 }
 /* ditulis sebentar setelah data datang, supaya beberapa perubahan beruntun cukup ditulis sekali */
 function simpanSnap() {
-  if (Api.mode() !== 'remote') return;
+  if (Api.mode() === 'demo') return;
   clearTimeout(snapTimer);
   snapTimer = setTimeout(tulisSnap, 700);
 }
@@ -3849,7 +3936,7 @@ function snapSegera() { if (snapTimer) tulisSnap(); }
 document.addEventListener('visibilitychange', function () { if (document.hidden) snapSegera(); });
 window.addEventListener('pagehide', snapSegera);
 function bacaSnap(cb) {
-  if (Api.mode() !== 'remote' || !S.token) return cb(null);
+  if (Api.mode() === 'demo' || !S.token) return cb(null);
   Idb.get('kv', snapKey(), function (v) {
     var st = null;
     try { if (v && v.t === S.token && v.ui === UI_VERSION && typeof v.s === 'string') st = JSON.parse(v.s); } catch (e) { st = null; }
@@ -3859,11 +3946,11 @@ function bacaSnap(cb) {
 }
 /* daftar nama di layar masuk juga disimpan (tanpa data lain), supaya layar masuk tidak menunggu server */
 function simpanBoot(res) {
-  if (Api.mode() !== 'remote' || !res || res.needSetup || !(res.users instanceof Array)) return;
+  if (Api.mode() === 'demo' || !res || res.needSetup || !(res.users instanceof Array)) return;
   try { LS.set(bootKey(), JSON.stringify({ needSetup: false, namaUsaha: res.namaUsaha, appVersion: res.appVersion, divisi: res.divisi, users: res.users })); } catch (e) {}
 }
 function bacaBoot() {
-  if (Api.mode() !== 'remote') return null;
+  if (Api.mode() === 'demo') return null;
   var b = coreParseJSON(LS.get(bootKey()) || '', null);
   return (b && b.users instanceof Array) ? b : null;
 }
@@ -4298,12 +4385,14 @@ function gateHtml() {
     }
   } else {
     var dots = ''; for (var i = 0; i < Math.max(4, g.pin.length); i++) dots += '<i' + (i < g.pin.length ? ' class="f"' : '') + '></i>';
-    var keys = ''; [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(function (n) { keys += '<button data-a="pin" data-k="' + n + '">' + n + '</button>'; });
-    keys += '<button class="x" data-a="pin" data-k="back">Hapus</button><button data-a="pin" data-k="0">0</button><button class="x" data-a="pinGo" id="pin-go">Masuk</button>';
+    var disabled = g.sending ? ' disabled' : '';
+    var keys = ''; [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(function (n) { keys += '<button data-a="pin" data-k="' + n + '"' + disabled + '>' + n + '</button>'; });
+    keys += '<button class="x" data-a="pin" data-k="back"' + disabled + '>Hapus</button><button data-a="pin" data-k="0"' + disabled + '>0</button><button class="x" data-a="pinGo" id="pin-go"' + disabled + '>' + (g.sending ? 'Memuat…' : 'Masuk') + '</button>';
     body = '<div class="card col gap-l"><div class="row"><span class="ava l">' + esc(inisial(g.user.nama)) + '</span><span class="grow"><span class="b">' + esc(g.user.nama) + '</span><br><span class="muted small">' + esc((DIVISI[g.user.divisi] || {}).label || '') + '</span></span>' +
-      '<button class="btn ghost sm" data-a="gateBack">Ganti</button></div>' +
+      '<button class="btn ghost sm" data-a="gateBack"' + disabled + '>Ganti</button></div>' +
       '<div class="col gap-s"><div class="label" style="text-align:center">Masukkan PIN</div><div class="dots" id="dots">' + dots + '</div>' +
-      (g.err ? '<div class="note bad" style="text-align:center">' + esc(g.err) + '</div>' : '') + '</div>' +
+      (g.err ? '<div class="note bad" style="text-align:center">' + esc(g.err) + '</div>' : '') +
+      (g.sending ? '<div class="note" role="status" aria-live="polite" style="text-align:center">Memeriksa PIN dan membuka data produksi…</div>' : '') + '</div>' +
       '<div class="pad">' + keys + '</div></div>';
   }
   return '<div class="gate"><div class="gate-in">' + head + body + installBtn() + '</div></div>';
@@ -4339,14 +4428,17 @@ function pinKey(k) {
 A.pinGo = function () {
   var g = S.gate; if (!g.user || g.sending) return;
   if (g.pin.length < 4) { g.err = 'PIN minimal 4 angka.'; return render(); }
-  g.sending = true; var btn = $('#pin-go'); if (btn) btn.textContent = '…';
-  Api.call('login', { userId: g.user.id, pin: g.pin }).then(function (res) {
+  var loginUserId = g.user.id;
+  g.sending = true; render();
+  return Api.call('login', { userId: loginUserId, pin: g.pin, av: APP_VERSION, workflowVersion: 2 }).then(function (res) {
+    if (S.gate !== g) return;
     g.sending = false;
+    if (!g.user || g.user.id !== loginUserId) return render();
     if (res && res.salah) { g.pin = ''; g.err = res.pesan; return render(); }
-    S.token = res.token; LS.set(tokenKey(), res.token); LS.set(lastKey(), g.user.id);
+    S.token = res.token; LS.set(tokenKey(), res.token); LS.set(lastKey(), loginUserId);
     S.gate = { user: null, pin: '', err: '', setup: null }; S.tab = '';
     applyState(res.state); startSync(); render();
-  }, function (e) { g.sending = false; g.pin = ''; g.err = e.message || 'Gagal masuk.'; render(); });
+  }, function (e) { if (S.gate !== g) return; g.sending = false; if (!g.user || g.user.id !== loginUserId) return render(); g.pin = ''; g.err = e.message || 'Gagal masuk.'; render(); });
 };
 A.setup = function (el) {
   var v = formVals(el.closest('form'));
@@ -4512,11 +4604,25 @@ function deadlineChip(ymd, label) {
   return '<span class="chip">' + ic('clock', 's') + (label || '') + tgl(ymd) + '</span>';
 }
 function poMeta(po) { return [po.noPO, po.series, po.pelanggan].filter(Boolean).map(esc).join(' · '); }
+function poStatusChips(po, stage) {
+  stage = stage || poTahap(po);
+  var lifecycle = po.status === 'selesai' ? ['ok', 'PO selesai'] : po.status === 'aktif' ? ['info', 'PO aktif'] : ['bad', 'PO dibatalkan'];
+  var timer = '';
+  if (po.status === 'aktif' && stage.k === 'tuntas' && po.tuntasPada) {
+    var start = Date.parse(po.tuntasPada);
+    if (isFinite(start)) {
+      var due = new Date(start + 7 * 24 * 60 * 60 * 1000);
+      var label = due.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      timer = '<span class="chip info" title="Otomatis menjadi PO selesai setelah 7 × 24 jam sejak produksi tuntas, saat aplikasi terhubung ke server. Riwayat dan pembayaran tetap tersimpan.">Selesai otomatis ' + esc(label) + ' WIB</span>';
+    }
+  }
+  return '<span class="chip ' + lifecycle[0] + '">' + lifecycle[1] + '</span><span class="chip ' + stage.cls + '">' + esc(stage.label) + '</span>' + timer;
+}
 function poCard(po, extra) {
   var th = poTahap(po);
   return '<button class="po" data-a="poOpen" data-id="' + esc(po.id) + '"><div class="row top">' + thumb(po) +
     '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + poMeta(po) + '</div>' +
-    '<div class="chips"><span class="chip ' + th.cls + '">' + esc(th.label) + '</span>' + (po.jenis === 'pesanan' ? '<span class="chip">Pesanan</span>' : '') +
+    '<div class="chips">' + poStatusChips(po, th) + (po.jenis === 'pesanan' ? '<span class="chip">Pesanan</span>' : '') +
     (po.status === 'aktif' && po.deadline ? deadlineChip(po.deadline) : '') + '</div></div></div>' + stagesHtml(po) + (extra || '') + '</button>';
 }
 
@@ -4927,7 +5033,7 @@ function poSheet(id) {
   var po = D.po[id]; if (!po) return sheetHtml('PO', emptyBox('PO ini sudah tidak ada.'));
   var st = S.state; var t = T(po); var th = poTahap(po); var admin = isAdmin(); var d = ' data-id="' + esc(po.id) + '"';
   var h = '<div class="row top">' + thumb(po, 'l') + '<div class="grow col gap-s"><div class="name" style="font-family:var(--f-display);font-weight:700;font-size:21px;line-height:1.1">' + esc(po.nama) + '</div>' +
-    '<div class="small muted">' + poMeta(po) + '</div><div class="chips"><span class="chip ' + th.cls + '">' + esc(th.label) + '</span><span class="chip">' + (po.jenis === 'pesanan' ? 'Pesanan' : 'Stok jualan') + '</span>' + (po.deadline ? deadlineChip(po.deadline, 'Deadline ') : '') + '</div></div></div>';
+    '<div class="small muted">' + poMeta(po) + '</div><div class="chips">' + poStatusChips(po, th) + '<span class="chip">' + (po.jenis === 'pesanan' ? 'Pesanan' : 'Stok jualan') + '</span>' + (po.deadline ? deadlineChip(po.deadline, 'Deadline ') : '') + '</div></div></div>';
   if (po.bahan || po.catatan) h += '<dl class="kv">' + (po.bahan ? '<dt>Bahan</dt><dd>' + esc(po.bahan) + '</dd>' : '') + (po.catatan ? '<dt>Catatan</dt><dd>' + esc(po.catatan) + '</dd>' : '') + '</dl>';
   h += stagesHtml(po);
   var flow = workflowFor(po);

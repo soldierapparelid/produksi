@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.4.1';
+var APP_VERSION = '1.4.2';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -27,7 +27,7 @@ var WORKFLOW_VERSION = 2;
 var SCHEMA = {
   Pegawai:   ['id','nama','divisi','pin','token','gagal','kunci','hp','catatan','aktif','dibuat'],
   Produk:    ['id','nama','series','gambar','tarifPotong','tarifJahit','catatan','aktif','dibuat'],
-  PO:        ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','ukuran','total','bahan','catatan','gambar','status','dibuat','dibuatOleh','diubah','selesaiPada','asal','imporVersion','imporReview','imporSumber'],
+  PO:        ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','ukuran','total','bahan','catatan','gambar','status','dibuat','dibuatOleh','diubah','selesaiPada','asal','imporVersion','imporReview','imporSumber','tuntasPada'],
   Potong:    ['id','poId','userId','tanggal','ukuran','total','bahan','kg','rol','tarif','upahId','catatan','dibuat','bahanList','asal'],
   SlipKirim: ['id','noSlip','poId','maklonId','tanggal','target','ukuran','total','upah','catatan','dibuatOleh','dibuat','asal'],
   SlipSetor: ['id','noSlip','poId','maklonId','tanggal','ukuran','total','reject','upah','catatan','status','dibuatOleh','dibuat','diprosesOleh','diprosesPada','upahId','asal','rejectUkuran','workflowVersion','imporSumber'],
@@ -462,8 +462,8 @@ function corePayroll(potong, setor, qc, slipUpah, extras) {
 }
 
 /* ---------- agregasi progres per PO (dihitung, tidak disimpan) ---------- */
-function coreAggregate(poRows, potong, kirim, setor, qc, gudang, extras) {
-  var flow = coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras);
+function coreAggregate(poRows, potong, kirim, setor, qc, gudang, extras, knownFlow) {
+  var flow = knownFlow || coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras);
   if (typeof coreHistoryPhysicalRows === 'function') { potong = coreHistoryPhysicalRows('Potong', potong, extras && extras.historyCorrections); kirim = coreHistoryPhysicalRows('SlipKirim', kirim, extras && extras.historyCorrections); }
   var FIELDS = ['potong', 'kirim', 'terima', 'diajukan', 'qcOk', 'bigseller'];
   var byPo = {};
@@ -560,6 +560,7 @@ function coreSlipText(type, rec, ctx) {
 
 /* ============================================================ */
 function createCore(store, env) {
+  var insideWrite = false, skipAutoCompletion = false;
 
   function fail(msg) { throw new Error(msg); }
   function nowIso() { return env.now().toISOString(); }
@@ -663,11 +664,33 @@ function createCore(store, env) {
   }
   function correctedSource(sheet, id) { return store.read('KoreksiRiwayat').some(function (r) { return r.sheet === sheet && r.rowId === id; }); }
   function sourcePaid(id) { return sourceInLegacySettlement(id) || payroll().some(function (r) { return r.sourceId === id && (r.paidQty > 0 || r.overpaidQty > 0 || r.legacyPaid || r.legacySettlementHold || r.legacySettlementId); }); }
-  function durableMigrationStatus() { if (store.checkpoint) store.checkpoint(['Pengaturan']); return (store.getSettings() || {}).legacyMigrationStatus; }
+  function durableMigrationStatus() {
+    if (store.getMigrationStatusFresh) return store.getMigrationStatusFresh();
+    if (store.checkpoint) store.checkpoint(['Pengaturan']);
+    return (store.getSettings() || {}).legacyMigrationStatus;
+  }
+
+  function advanceCompletion(me, opt) {
+    function advance() {
+      var pending = durableMigrationStatus();
+      if (pending) return buildState(me, opt, pending, true);
+      /* Cached candidates are only a hint. Re-read all production evidence and
+         the actor before any status transition, including during a write. */
+      if (store.checkpoint) store.checkpoint(['PO', 'Potong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'GudangLama', 'LegacySettlement', 'KoreksiRiwayat', 'Pegawai']);
+      var actor = findUser(me.id);
+      if (!actor || !actor.aktif) fail('Akun ini sudah dinonaktifkan.');
+      if (!insideWrite && opt && opt.token) actor = auth(opt);
+      var freshFlow = workflow();
+      var plan = coreAutoCompletionPlan(store.read('PO'), freshFlow, env.now());
+      plan.patches.forEach(function (patch) { store.update('PO', patch.id, patch.changes); });
+      return buildState(actor, opt, null, true, freshFlow);
+    }
+    return insideWrite ? advance() : store.lock(advance);
+  }
 
   /* ---------- data yang dikirim ke perangkat, disaring menurut divisi ---------- */
-  function buildState(me, opt) {
-    var migrationStatus = durableMigrationStatus();
+  function buildState(me, opt, migrationStatus, skipAdvance, knownFlow) {
+    if (arguments.length < 3) migrationStatus = durableMigrationStatus();
     var semua = !!(opt && opt.semua);
     /* tabel yang akan dibaca diambil dari cache dalam satu kali ambil (kalau penyimpanannya mendukung) */
     if (store.prefetch) {
@@ -689,8 +712,9 @@ function createCore(store, env) {
     var upah = withParsed(store.read('SlipUpah'), 'itemIds', []);
     upah = withParsed(upah, 'items', []);
     var extras = legacyExtras();
-    var agg = coreAggregate(po, potong, kirim, setor, qc, gudang, extras);
-    var wf = validateWorkers(coreWorkflow(po, potong, kirim, setor, qc, gudang, extras));
+    var wf = knownFlow || validateWorkers(coreWorkflow(po, potong, kirim, setor, qc, gudang, extras));
+    if (!skipAdvance && !skipAutoCompletion && !migrationStatus && typeof coreAutoCompletionPlan === 'function' && coreAutoCompletionPlan(po, wf, env.now()).patches.length) return advanceCompletion(me, opt);
+    var agg = coreAggregate(po, potong, kirim, setor, qc, gudang, extras, wf);
     var earned = corePayroll(potong, setor, qc, upah, extras);
     /* Hydrate only the response copy for historical receipt rendering. Stored SlipUpah stays unchanged. */
     upah.forEach(function (u) { if (!u.items.length) { var original = coreLegacySlipItems(u, extras.settlements); if (original.length) u.items = original; } });
@@ -847,9 +871,11 @@ function createCore(store, env) {
      (av dikirim perangkat versi baru; perangkat lama tidak mengirimnya). Dengan begitu perangkat yang membuka dari
      salinan data terakhirnya tetap mendapat data baru setelah server diperbarui. */
   actions.sync = function (p) {
+    var me = auth(p);
     var pendingMigration = durableMigrationStatus();
-    if (!pendingMigration && p && p.ver !== undefined && String(p.ver) === String(store.version()) && (p.av === undefined || String(p.av) === APP_VERSION)) return { same: true, ver: store.version() };
-    return buildState(auth(p), p);
+    var due = typeof coreAutoCompletionDue === 'function' && coreAutoCompletionDue(store.read('PO'), env.now());
+    if (!pendingMigration && !due && p && p.ver !== undefined && String(p.ver) === String(store.version()) && (p.av === undefined || String(p.av) === APP_VERSION)) return { same: true, ver: store.version() };
+    return buildState(me, p, pendingMigration);
   };
 
   actions.getState = function (p) { return buildState(auth(p), p); };
@@ -1057,6 +1083,7 @@ function createCore(store, env) {
       var noPO = teks(po.noPO, 30).trim() || rec.noPO;
       for (var i = 0; i < rows.length; i++) if (rows[i].noPO === noPO && rows[i].id !== rec.id) fail('Nomor PO ' + noPO + ' sudah dipakai.');
       common.noPO = noPO;
+      if (status === 'aktif' && rec.status !== 'aktif') common.tuntasPada = '';
       if (status === 'aktif') common.selesaiPada = '';
       else if (rec.status === 'aktif') common.selesaiPada = today();
       store.update('PO', rec.id, common);
@@ -1077,7 +1104,9 @@ function createCore(store, env) {
     if (PO_STATUS.indexOf(p.status) < 0) fail('Status tidak dikenal.');
     var rec = findRow('PO', String(p.id || '')); if (!rec) fail('PO tidak ditemukan.');
     if (p.status === 'selesai') ensureComplete(rec);
-    store.update('PO', rec.id, { status: p.status, diubah: nowIso(), selesaiPada: p.status === 'aktif' ? '' : (rec.status !== 'aktif' && rec.selesaiPada ? rec.selesaiPada : today()) });
+    var patch = { status: p.status, diubah: nowIso(), selesaiPada: p.status === 'aktif' ? '' : (rec.status !== 'aktif' && rec.selesaiPada ? rec.selesaiPada : today()) };
+    if (p.status === 'aktif' && rec.status !== 'aktif') patch.tuntasPada = '';
+    store.update('PO', rec.id, patch);
     return findRow('PO', rec.id);
   };
 
@@ -1593,6 +1622,7 @@ function createCore(store, env) {
         o.token = ''; o.gagal = 0; o.kunci = ''; o.aktif = true;
       }
       if (sheet === 'Produk' || sheet === 'PO') o.gambar = '';
+      if (sheet === 'PO') o.tuntasPada = ''; /* Completion time is observed by this server, never backdated by import. */
       if (SCHEMA[sheet].indexOf('asal') >= 0) o.asal = 'lama';
       existing[o.id] = 1; add.push(o);
     });
@@ -1642,7 +1672,7 @@ function createCore(store, env) {
         });
         o.asal = 'lama';
         var dulu = lamaById[o.id];
-        if (sheet === 'PO') o.gambar = dulu ? dulu.gambar : '';
+        if (sheet === 'PO') { o.gambar = dulu ? dulu.gambar : ''; o.tuntasPada = ''; }
         /* pembayaran yang sudah dicatat di aplikasi ini tetap menempel pada itemnya */
         if (['SlipSetor','Potong','QC','GudangLama'].indexOf(sheet) >= 0 && dulu && dulu.upahId) o.upahId = dulu.upahId;
         if (kolNo && o[kolNo]) { while (nomor[o[kolNo]]) o[kolNo] = o[kolNo] + 'L'; nomor[o[kolNo]] = 1; }
@@ -1820,12 +1850,18 @@ function createCore(store, env) {
     if (contractAction[action] && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     return store.lock(function () {
-      if (durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
-      var data = fn(payload);
-      if (NO_STATE[action]) return data;
-      var out = { data: data };
-      try { out.state = buildState(auth(payload), payload); } catch (e) {}
-      return out;
+      insideWrite = true;
+      /* Migration verifies exact row hashes; register timers on the next normal
+         authenticated load rather than altering its verified result response. */
+      skipAutoCompletion = action === 'applyLegacyMigration' || action === 'recoverLegacyMigration';
+      try {
+        if (durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
+        var data = fn(payload);
+        if (NO_STATE[action]) return data;
+        var out = { data: data };
+        try { out.state = buildState(auth(payload), payload); } catch (e) {}
+        return out;
+      } finally { insideWrite = false; skipAutoCompletion = false; }
     });
   }
   return { handle: handle, slipHtml: slipHtml, settings: settings };
@@ -3131,5 +3167,54 @@ function coreInstallHistoryCorrections(actions, ctx) {
     fresh(['KoreksiRiwayat']);
     return read(p);
   };
+}
+
+/* Seven elapsed days after verified production completion. This planner never
+   mutates source rows or payroll. The caller rechecks fresh evidence under lock
+   before applying these PO-only patches. Old complete POs start at first sight. */
+var CORE_AUTO_COMPLETE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function coreAutoCompletionTime(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return NaN;
+  var ms = Date.parse(value);
+  return isFinite(ms) && new Date(ms).toISOString() === value.replace(/(\d{2}:\d{2}:\d{2})Z$/, '$1.000Z') ? ms : NaN;
+}
+function coreAutoCompletionEligible(po, flow) {
+  var provenance = coreParseJSON(po.imporSumber, {}), reconciliation = provenance.legacyReconciliation || {};
+  if (po.status !== 'aktif' || po.imporReview || reconciliation.mode === 'review' || reconciliation.mode === 'archive') return false;
+  if (!flow || flow.complete !== true || (flow.issues || []).length) return false;
+  return !Object.keys(flow.ukuran || {}).some(function (size) { return (flow.ukuran[size].issues || []).length; });
+}
+/* Cheap same-version sync check; an unregistered PO is examined on full state,
+   including the first authenticated load after deployment and production writes. */
+function coreAutoCompletionDue(poRows, now) {
+  var ms = now.getTime();
+  return (poRows || []).some(function (po) {
+    if (po.status !== 'aktif' || !po.tuntasPada) return false;
+    var start = coreAutoCompletionTime(po.tuntasPada);
+    return !isFinite(start) || start > ms || ms - start >= CORE_AUTO_COMPLETE_MS;
+  });
+}
+function coreAutoCompletionPlan(poRows, workflowById, now) {
+  var ms = now.getTime();
+  if (!isFinite(ms)) throw new Error('Waktu server tidak sah untuk penutupan PO.');
+  var iso = now.toISOString(), patches = [], next = Infinity;
+  (poRows || []).forEach(function (po) {
+    if (po.status !== 'aktif') return;
+    if (!coreAutoCompletionEligible(po, (workflowById || {})[po.id])) {
+      if (po.tuntasPada) patches.push({ id: po.id, changes: { tuntasPada: '' }, reason: 'incomplete' });
+      return;
+    }
+    var start = coreAutoCompletionTime(po.tuntasPada);
+    if (!isFinite(start) || start > ms) {
+      patches.push({ id: po.id, changes: { tuntasPada: iso }, reason: 'started' });
+      start = ms;
+    } else if (ms - start >= CORE_AUTO_COMPLETE_MS) {
+      patches.push({ id: po.id, changes: { status: 'selesai', selesaiPada: coreYmd(now), diubah: iso }, reason: 'completed' });
+      return;
+    }
+    next = Math.min(next, start + CORE_AUTO_COMPLETE_MS);
+  });
+  return { patches: patches, nextDeadline: isFinite(next) ? new Date(next).toISOString() : '' };
 }
 
