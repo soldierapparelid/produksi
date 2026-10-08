@@ -335,7 +335,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261008-potong-history-login1';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261008-team-audit1';</script>
 <script>
 (function () {
 'use strict';
@@ -357,7 +357,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.4.6';
+var APP_VERSION = '1.4.7';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -702,7 +702,14 @@ function coreCuttingProjection(poRows, physicalCuts) {
     var projection = out[p.id] = { verified: evidence.valid, ukuran: evidence.ukuran, pendingUkuran: evidence.valid && p.status === 'aktif' ? evidence.ukuran.filter(function (size) { return !(coreNum((totals[p.id] || {})[size]) > 0); }) : [], needsReview: !evidence.valid };
     if (evidence.valid && legacy) {
       var plans = coreMap(p.imporSumber).legacyCutting.plans;
-      var review = plans.filter(function (r) { return r && r.status === 'ready' && (!r.rencanaId || r.reviewCode); }).map(function (r) { return { ukuran: (r.ukuran instanceof Array ? r.ukuran : []).filter(function (size) { return evidence.ukuran.indexOf(size) >= 0; }), reason: r.reviewCode === 'multi-size-plan-needs-batch-review' ? 'Jatah lama mencakup beberapa ukuran dan perlu diperiksa owner sebelum dipakai.' : 'Jatah bahan lama perlu diperiksa owner sebelum dipakai.' }; });
+      var review = plans.filter(function (r) { return r && r.status === 'ready' && (!r.rencanaId || r.reviewCode); }).map(function (r) {
+        var reasons = {
+          'already-cut-or-used': 'Ukuran jatah ini sudah memiliki hasil potong atau pemakaian bahan. Periksa riwayat; jangan dicatat ulang.',
+          'missing-purchase-proof': 'Bukti pembelian rol sumber tidak ditemukan. Owner perlu mencocokkan catatan pembelian sebelum jatah dipakai.',
+          'multi-size-plan-needs-batch-review': 'Jatah lama mencakup beberapa ukuran. Pembagian bahan per hasil perlu diperiksa owner sebelum jatah dipakai.'
+        };
+        return { ukuran: (r.ukuran instanceof Array ? r.ukuran : []).filter(function (size) { return evidence.ukuran.indexOf(size) >= 0; }), reason: reasons[r.reviewCode] || 'Jatah bahan lama perlu diperiksa owner sebelum dipakai.' };
+      });
       if (review.length) projection.reviewPlans = review;
     }
   });
@@ -1898,6 +1905,7 @@ function createCore(store, env) {
       ensureRollSourceUnused(lama.id);
       var changes = isiStok(r, lama);
       if (changes.jenis === 'koreksi') ensureAggregateCorrection(changes,lama);
+      else if (lama.stockMode !== 'roll') ensureAggregatePurchase(changes,lama);
       if (lama.stockMode === 'roll') {
         if (r.stockMode && r.stockMode !== 'roll' || changes.satuan !== 'kg') fail('Identitas rol dan satuannya tidak dapat diganti.');
         var weight = coreBahanInvoiceNumber(r.qty); if (!isFinite(weight) || weight <= 0 || weight > 1e8 || Math.abs(weight*1000-Math.round(weight*1000)) > 0.000001) fail('Berat rol harus lebih dari nol, maksimal 3 angka desimal.');
@@ -1962,6 +1970,31 @@ function createCore(store, env) {
     var delta = {}, name = coreNormBahan(next.bahan); delta[name] = coreNum(next.qty);
     if (previous) { var oldName = coreNormBahan(previous.bahan); delta[oldName] = coreNum(delta[oldName])-coreNum(previous.qty); }
     Object.keys(delta).forEach(function (key) { var pool=inventory.legacyMap[key], available=pool ? pool.tersedia : 0; if (available+delta[key] < -0.000001) fail('Koreksi jumlah bahan akan mengurangi rol tercatat atau cadangan saldo lama. Pilih hitung fisik pada rol yang bersangkutan, atau batalkan cadangan saldo lama terlebih dahulu.'); });
+  }
+  function ensureAggregatePurchase(next,previous) {
+    if (typeof coreCutAvailability !== 'function') return;
+    var oldName=coreNormBahan(previous.bahan), name=coreNormBahan(next.bahan), delta={};
+    delta[oldName]=-coreNum(previous.qty); delta[name]=coreNum(delta[name])+coreNum(next.qty);
+    var unitChanged=name === oldName && next.satuan !== previous.satuan;
+    if (!unitChanged && !Object.keys(delta).some(function (key) { return delta[key] < -0.000001; })) return;
+    var inventory=coreRollInventory(store.read('Potong'),store.read('StokBahan'),settings(),store.read('RencanaPotong'));
+    /* Only free aggregate stock may be removed. Identified rolls cannot cover
+       an old pool's shortage; unchanged notes or an increase may repair old data. */
+    Object.keys(delta).forEach(function (key) { var pool=inventory.legacyMap[key], available=pool ? pool.tersedia : 0; if (delta[key] < -0.000001 && available+delta[key] < -0.000001) fail('Pembelian ini menopang bahan yang sudah dipakai atau dicadangkan. Jumlah saldo lama tidak boleh dikurangi di bawah pemakaian dan cadangannya.'); });
+    var oldPool=inventory.legacyMap[oldName];
+    if (unitChanged && oldPool && (oldPool.pakai > 0 || oldPool.dicadangkan > 0)) fail('Satuan bahan yang sudah dipakai atau dicadangkan tidak dapat diubah.');
+  }
+  function ensureAggregateStockReplacement(stock,cuts,afterSettings) {
+    if (typeof coreCutAvailability !== 'function') return;
+    var st=settings(), plans=store.read('RencanaPotong');
+    var before=coreRollInventory(store.read('Potong'),store.read('StokBahan'),st,plans);
+    var after=coreRollInventory(cuts,stock,afterSettings || st,plans);
+    var reserved={}; before.materials.forEach(function (m) { reserved[m.kunci]=m.dicadangkan; });
+    before.legacy.forEach(function (pool) {
+      var next=after.legacyMap[pool.kunci], available=next ? next.tersedia : -pool.dicadangkan;
+      if (available < -0.000001 && available < pool.tersedia-0.000001) fail('Impor mengurangi saldo lama di bawah bahan yang sudah dipakai atau dicadangkan. Periksa pembelian dan koreksi bahan sebelum impor.');
+      if (next && next.satuan !== pool.satuan && (pool.pakai > 0 || reserved[pool.kunci] > 0)) fail('Impor tidak boleh mengganti satuan bahan yang sudah dipakai atau dicadangkan.');
+    });
   }
   actions.cocokkanStokRol = function (p) {
     ['Pegawai','StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
@@ -2134,9 +2167,13 @@ function createCore(store, env) {
 
   actions.createSetor = function (p) {
     var me = auth(p); var admin = coreIsAdmin(me);
-    var s = p.setor || {}; var d = dedupe('SlipSetor', s); if (d.ada) return d.ada;
     var cek = admin || me.divisi === 'qc';   /* admin & QC mencatat barang yang sudah mereka hitung sendiri */
     if (!cek && me.divisi !== 'jahit') fail('Hanya maklon jahit, QC, atau admin yang bisa mencatat setoran.');
+    var s = p.setor || {}; var d = dedupe('SlipSetor', s);
+    if (d.ada) {
+      if (!cek && d.ada.maklonId !== me.id) fail('Hanya bisa membuka kembali setoran sendiri.');
+      return d.ada;
+    }
     var maklonId = cek ? String(s.maklonId || '') : me.id;
     var maklon = findUser(maklonId); if (!maklon || maklon.divisi !== 'jahit') fail('Pilih maklon jahit.');
     var po = openPO(s.poId);
@@ -2366,6 +2403,7 @@ function createCore(store, env) {
       ensureRollSourceUnused(id);
       if (rec.sourceStockId) fail('Bukti koreksi rol tidak dapat dihapus. Catat hitung fisik baru untuk rol tersebut.');
       if (rec.jenis === 'koreksi') ensureAggregateCorrection({bahan:rec.bahan,qty:-coreNum(rec.qty)},null);
+      else if (rec.jenis === 'beli' && rec.stockMode !== 'roll') ensureAggregatePurchase({bahan:rec.bahan,qty:0,satuan:rec.satuan},rec);
     } else if (sheet === 'Karyawan') {
       if (!admin) fail('Hanya admin.');
       if (store.read('GajiHarian').some(function (g) { return g.karyawanId === id; }) || store.read('Kasbon').some(function (k) { return k.jenis === 'harian' && k.orangId === id; }))
@@ -2382,6 +2420,7 @@ function createCore(store, env) {
   actions.importRows = function (p) {
     var me = adminAtauPemasangan(p);
     var sheet = String(p.sheet || ''); if (!SCHEMA[sheet] || ['Pengaturan','Gambar','LegacySettlement','MigrasiJournal','GudangLama','KoreksiRiwayat','RencanaPotong'].indexOf(sheet) >= 0) fail('Sheet tidak dikenal.');
+    if (sheet === 'StokBahan') ['StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
     var rows = p.rows instanceof Array ? p.rows : [];
     var existing = {}; store.read(sheet).forEach(function (r) { existing[r.id] = 1; });
     var add = []; var nextSettings = null;
@@ -2423,6 +2462,7 @@ function createCore(store, env) {
       store.validateRows(sheet, add);
       if (nextSettings) store.validateRows('Pengaturan', Object.keys(nextSettings).map(function (k) { return { key: k, value: JSON.stringify(nextSettings[k]) }; }));
     }
+    if (sheet === 'StokBahan' && add.length) ensureAggregateStockReplacement(store.read('StokBahan').concat(add),store.read('Potong'),nextSettings);
     if (nextSettings) store.setSettings(nextSettings);
     if (add.length) store.appendMany(sheet, add);
     return { ditambah: add.length, dilewati: rows.length - add.length, ids: sheet === 'Pegawai' ? add.map(function (r) { return r.id; }) : undefined };
@@ -2550,6 +2590,7 @@ function createCore(store, env) {
       nextSettings = st;
     }
     /* Kapasitas adaptor juga dicek untuk SEMUA tabel/pengaturan sebelum penggantian pertama. */
+    if (next.StokBahan) ensureAggregateStockReplacement(next.StokBahan,isi('Potong'),nextSettings);
     if (store.validateRows) {
       sheets.forEach(function (sheet) { store.validateRows(sheet, next[sheet]); });
       if (nextSettings) store.validateRows('Pengaturan', Object.keys(nextSettings).map(function (k) { return { key: k, value: JSON.stringify(nextSettings[k]) }; }));
@@ -4585,7 +4626,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.4.6';
+var UI_VERSION = '1.4.7';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -4973,13 +5014,21 @@ function bacaBoot() {
 
 /* dariSimpanan = waktu (ms) data itu terakhir diambil dari server, diisi kalau st berasal dari salinan di perangkat */
 function applyState(st, dariSimpanan) {
-  if (!st || !st.me) return;
+  if (!st || !st.me) return false;
+  var previous=S.state;
+  /* Two saves/read checks may finish in a different order from their server
+     commits. Keep the newer business version for the same authenticated user. */
+  if(previous&&previous.me&&previous.me.id===st.me.id&&previous.ver!==undefined&&previous.ver!==null&&previous.ver!==''&&st.ver!==undefined&&st.ver!==null&&st.ver!==''&&Number.isFinite(Number(previous.ver))&&Number.isFinite(Number(st.ver))){
+    if(Number(st.ver)<Number(previous.ver))return false;
+    if(Number(st.ver)===Number(previous.ver)&&previous.me.divisi===st.me.divisi&&previous.appVersion===st.appVersion&&previous.semua===true&&st.semua!==true)return false;
+  }
   S.state = st; S.seq++;
   if (dariSimpanan) S.lastSync = dariSimpanan;
   else { S.lastSync = Date.now(); S.off = false; simpanSnap(); }
   index();
   /* owner atau admin masuk di jendela yang tidak dikunci: perangkat ini perangkat owner */
   if (!Api.div() && Api.mode() === 'remote' && coreIsAdmin(st.me) && LS.get('pk_div') !== 'pusat') LS.set('pk_div', 'pusat');
+  return true;
 }
 
 /* panggil server; token ikut otomatis; jawaban aksi tulis membawa data terbaru */
@@ -5019,7 +5068,7 @@ function sync(force, ringan) {
   if (!S.token || !S.state || syncing) return Promise.resolve();
   if (!force && (document.hidden || S.busy > 0)) return Promise.resolve();
   syncing = true;
-  var payload = { token: S.token, ver: (force && !ringan) ? undefined : S.state.ver, av: APP_VERSION, workflowVersion: 2 };
+  var payload = { token: S.token, ver: (force && !ringan || S.wantAll && !S.state.semua) ? undefined : S.state.ver, av: APP_VERSION, workflowVersion: 2 };
   if (S.wantAll) payload.semua = true;
   var urut = S.seq;
   S.busy++; paintSync();
@@ -5227,7 +5276,7 @@ function dropSheet(i) {
   var t = sheets[sheets.length - 1]; if (wasTop && t && t.live) paintTop();
 }
 function closeSheet() { dropSheet(sheets.length - 1); }
-function closeAll() { while (sheets.length) { var s = sheets.pop(); if (s.node.parentNode) s.node.parentNode.removeChild(s.node); if (s.onClose) s.onClose(); } showSheets(); }
+function closeAll() { if(typeof closeSlipPreviews==='function')closeSlipPreviews();while (sheets.length) { var s = sheets.pop(); if (s.node.parentNode) s.node.parentNode.removeChild(s.node); if (s.onClose) s.onClose(); } showSheets(); }
 A.close = function (el) {
   var s = sheets[sheets.length - 1]; if (!s) return;
   if (el && el.classList.contains('scrim') && $('[data-form]', s.node)) return;   /* form tidak tertutup karena salah ketuk di luar */
@@ -6163,7 +6212,22 @@ VIEWS.po = function () {
 A.poStatus = function (el) { S.f.poStatus = el.getAttribute('data-v'); render(); };
 C.poTahap = function (el) { S.f.poTahap = el.value; paintList(); };
 C.poJenis = function (el) { S.f.poJenis = el.value; paintList(); };
-A.loadAll = function (el) { S.wantAll = true; act(el, sync(true)).then(function () { toast('Semua data lama dimuat.'); }).catch(quiet); };
+var loadAllRequest = null;
+A.loadAll = function (el) {
+  if(!S.token||!S.state)return Promise.resolve();
+  if(loadAllRequest&&loadAllRequest.token===S.token)return loadAllRequest.promise;
+  var model={token:S.token,actor:S.state.me,promise:null};loadAllRequest=model;
+  /* This explicit history request must not be skipped by an in-flight light
+     sync, and success means the complete authenticated snapshot was accepted. */
+  var work=req('getState',{semua:true}).then(function(state){
+    if(S.token!==model.token||!S.state)throw new Error('Sesi sudah berubah. Silakan masuk kembali.');
+    if(!state||!state.me||state.me.id!==model.actor.id||state.me.divisi!==model.actor.divisi||state.semua!==true||state.trimmed||!Array.isArray(state.po)||!Array.isArray(state.potong))throw new Error('Data lama belum lengkap. Coba muat data lama lagi.');
+    if(applyState(state)===false&&(!S.state.semua||S.state.trimmed))throw new Error('Data berubah saat riwayat dimuat. Coba muat data lama lagi untuk mengambil catatan terbaru.');
+    S.wantAll=true;refresh();toast('Semua data lama dimuat.');
+  });
+  model.promise=act(el,work).catch(quiet).then(function(){if(loadAllRequest===model)loadAllRequest=null;});
+  return model.promise;
+};
 
 /* ---------- detail PO ---------- */
 A.poOpen = function (el) { var id = el.getAttribute('data-id'); if (!D.po[id]) return toast('PO ini sudah tidak ada di daftar.', true); openSheet(function () { return poSheet(id); }, { live: true, cls: 'wide' }); };
@@ -6717,11 +6781,14 @@ function slipInvokePrint(win, doc) {
     return false;
   }
 }
+var slipPreviews = [];
+function closeSlipPreviews() { (slipPreviews||[]).slice().forEach(function(close){close();}); }
 function slipCetak(list) {
   var html;
   try { html = slipDocumentHtml(list); } catch (e) { return Promise.reject(e); }
   return new Promise(function (resolve, reject) {
-    var done = false, frame = null, overlay = null, timer, printButton, label;
+    var done = false, frame = null, overlay = null, timer, printButton, label, imageDeadline;
+    function closePreview(){clearTimeout(timer);clearTimeout(imageDeadline);if(overlay&&overlay.parentNode)overlay.parentNode.removeChild(overlay);var i=slipPreviews.indexOf(closePreview);if(i>=0)slipPreviews.splice(i,1);if(!done){done=true;resolve({closed:true});}}
     function fail(error) { if (done) return; done = true; clearTimeout(timer); if(label)label.textContent=error.message; reject(error); }
     function ready(win, doc) {
       if (done) return;
@@ -6730,7 +6797,6 @@ function slipCetak(list) {
       if (!doc || !doc.getElementById('slip-print-button')) return;
       var images = Array.prototype.slice.call(doc.images || []);
       var waitImages = Promise.all(images.map(function (img) { return img.complete ? null : new Promise(function (ok) { img.onload = ok; img.onerror = ok; }); }));
-      var imageDeadline;
       Promise.race([waitImages, new Promise(function (ok) { imageDeadline = setTimeout(ok, 2000); })]).then(function () {
         clearTimeout(imageDeadline);
         if (done) return;
@@ -6755,12 +6821,12 @@ function slipCetak(list) {
       overlay = document.createElement('div'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', 'Pratinjau cetak slip'); overlay.setAttribute('aria-modal', 'true');
       overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:white;display:flex;flex-direction:column';
       var close = document.createElement('button'); close.type = 'button'; close.textContent = 'Tutup pratinjau'; close.style.cssText = 'padding:12px;font:inherit;align-self:flex-end';
-      close.onclick = function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); if (!done) { done = true; clearTimeout(timer); resolve({ closed: true }); } };
+      close.onclick = closePreview;
       printButton = document.createElement('button'); printButton.type='button';printButton.textContent='Cetak / Simpan PDF';printButton.disabled=true;printButton.style.cssText='padding:12px;font:inherit;align-self:flex-start;margin:0 12px';
       label=document.createElement('p');label.setAttribute('role','status');label.textContent='Menyiapkan pratinjau cetak…';label.style.cssText='margin:8px 12px;font:14px Arial,sans-serif;color:#182638';
       frame = document.createElement('iframe'); frame.title = 'Pratinjau cetak slip'; frame.style.cssText = 'width:100%;flex:1;border:0;background:white';
       frame.onload = function () { try { ready(frame.contentWindow, frame.contentDocument); } catch (e) { fail(e); } };
-      frame.srcdoc = html;overlay.appendChild(close);overlay.appendChild(printButton);overlay.appendChild(label);overlay.appendChild(frame);document.body.appendChild(overlay);
+      frame.srcdoc = html;overlay.appendChild(close);overlay.appendChild(printButton);overlay.appendChild(label);overlay.appendChild(frame);slipPreviews.push(closePreview);document.body.appendChild(overlay);
     } catch (error) { fail(error); }
   });
 }

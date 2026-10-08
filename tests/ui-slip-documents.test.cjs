@@ -63,6 +63,16 @@ test('initial about:blank iframe load is ignored and the real srcdoc load enable
   assert.equal(u.events.filter(event=>event==='frame.print').length,1);assert.equal(u.timers.size,0);
   frame.onload();await Promise.resolve();assert.equal(u.events.filter(event=>event==='frame.print').length,1,'duplicate real load cannot print twice');
 });
+
+test('closing all account views removes ready and still-loading print previews before a newer login is shown',async()=>{
+ for(const ready of [false,true]){
+  const u=ui();u.run('function showSheets(){}');vm.runInContext(part('function closeAll()', 'A.close ='),u.context);
+  const pending=u.run('slipCetak([m])');if(ready)await pending;
+  assert.equal(u.doc.body.children.length,1);u.run('closeAll()');await pending;await Promise.resolve();
+  assert.equal(u.doc.body.children.length,0);assert.equal(u.run('slipPreviews.length'),0);assert.equal(u.timers.size,0);
+  if(!ready)assert.equal(u.events.filter(e=>e==='frame.print').length,0,'closed preview must not print late after its account has gone');
+ }
+});
 test('PDF download waits for a real PDF then exposes persistent user-clicked download/open links',async()=>{
   const u=ui();vm.runInContext(part('A.slipPdf =','A.slipDel ='),u.context);
   const done=u.run(`slipUnduh('makeWeeklyPdf',{pegawaiId:'w',start:'2026-10-05',end:'2026-10-11'})`);

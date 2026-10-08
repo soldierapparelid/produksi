@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.4.6';
+var APP_VERSION = '1.4.7';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -364,7 +364,14 @@ function coreCuttingProjection(poRows, physicalCuts) {
     var projection = out[p.id] = { verified: evidence.valid, ukuran: evidence.ukuran, pendingUkuran: evidence.valid && p.status === 'aktif' ? evidence.ukuran.filter(function (size) { return !(coreNum((totals[p.id] || {})[size]) > 0); }) : [], needsReview: !evidence.valid };
     if (evidence.valid && legacy) {
       var plans = coreMap(p.imporSumber).legacyCutting.plans;
-      var review = plans.filter(function (r) { return r && r.status === 'ready' && (!r.rencanaId || r.reviewCode); }).map(function (r) { return { ukuran: (r.ukuran instanceof Array ? r.ukuran : []).filter(function (size) { return evidence.ukuran.indexOf(size) >= 0; }), reason: r.reviewCode === 'multi-size-plan-needs-batch-review' ? 'Jatah lama mencakup beberapa ukuran dan perlu diperiksa owner sebelum dipakai.' : 'Jatah bahan lama perlu diperiksa owner sebelum dipakai.' }; });
+      var review = plans.filter(function (r) { return r && r.status === 'ready' && (!r.rencanaId || r.reviewCode); }).map(function (r) {
+        var reasons = {
+          'already-cut-or-used': 'Ukuran jatah ini sudah memiliki hasil potong atau pemakaian bahan. Periksa riwayat; jangan dicatat ulang.',
+          'missing-purchase-proof': 'Bukti pembelian rol sumber tidak ditemukan. Owner perlu mencocokkan catatan pembelian sebelum jatah dipakai.',
+          'multi-size-plan-needs-batch-review': 'Jatah lama mencakup beberapa ukuran. Pembagian bahan per hasil perlu diperiksa owner sebelum jatah dipakai.'
+        };
+        return { ukuran: (r.ukuran instanceof Array ? r.ukuran : []).filter(function (size) { return evidence.ukuran.indexOf(size) >= 0; }), reason: reasons[r.reviewCode] || 'Jatah bahan lama perlu diperiksa owner sebelum dipakai.' };
+      });
       if (review.length) projection.reviewPlans = review;
     }
   });
@@ -1560,6 +1567,7 @@ function createCore(store, env) {
       ensureRollSourceUnused(lama.id);
       var changes = isiStok(r, lama);
       if (changes.jenis === 'koreksi') ensureAggregateCorrection(changes,lama);
+      else if (lama.stockMode !== 'roll') ensureAggregatePurchase(changes,lama);
       if (lama.stockMode === 'roll') {
         if (r.stockMode && r.stockMode !== 'roll' || changes.satuan !== 'kg') fail('Identitas rol dan satuannya tidak dapat diganti.');
         var weight = coreBahanInvoiceNumber(r.qty); if (!isFinite(weight) || weight <= 0 || weight > 1e8 || Math.abs(weight*1000-Math.round(weight*1000)) > 0.000001) fail('Berat rol harus lebih dari nol, maksimal 3 angka desimal.');
@@ -1624,6 +1632,31 @@ function createCore(store, env) {
     var delta = {}, name = coreNormBahan(next.bahan); delta[name] = coreNum(next.qty);
     if (previous) { var oldName = coreNormBahan(previous.bahan); delta[oldName] = coreNum(delta[oldName])-coreNum(previous.qty); }
     Object.keys(delta).forEach(function (key) { var pool=inventory.legacyMap[key], available=pool ? pool.tersedia : 0; if (available+delta[key] < -0.000001) fail('Koreksi jumlah bahan akan mengurangi rol tercatat atau cadangan saldo lama. Pilih hitung fisik pada rol yang bersangkutan, atau batalkan cadangan saldo lama terlebih dahulu.'); });
+  }
+  function ensureAggregatePurchase(next,previous) {
+    if (typeof coreCutAvailability !== 'function') return;
+    var oldName=coreNormBahan(previous.bahan), name=coreNormBahan(next.bahan), delta={};
+    delta[oldName]=-coreNum(previous.qty); delta[name]=coreNum(delta[name])+coreNum(next.qty);
+    var unitChanged=name === oldName && next.satuan !== previous.satuan;
+    if (!unitChanged && !Object.keys(delta).some(function (key) { return delta[key] < -0.000001; })) return;
+    var inventory=coreRollInventory(store.read('Potong'),store.read('StokBahan'),settings(),store.read('RencanaPotong'));
+    /* Only free aggregate stock may be removed. Identified rolls cannot cover
+       an old pool's shortage; unchanged notes or an increase may repair old data. */
+    Object.keys(delta).forEach(function (key) { var pool=inventory.legacyMap[key], available=pool ? pool.tersedia : 0; if (delta[key] < -0.000001 && available+delta[key] < -0.000001) fail('Pembelian ini menopang bahan yang sudah dipakai atau dicadangkan. Jumlah saldo lama tidak boleh dikurangi di bawah pemakaian dan cadangannya.'); });
+    var oldPool=inventory.legacyMap[oldName];
+    if (unitChanged && oldPool && (oldPool.pakai > 0 || oldPool.dicadangkan > 0)) fail('Satuan bahan yang sudah dipakai atau dicadangkan tidak dapat diubah.');
+  }
+  function ensureAggregateStockReplacement(stock,cuts,afterSettings) {
+    if (typeof coreCutAvailability !== 'function') return;
+    var st=settings(), plans=store.read('RencanaPotong');
+    var before=coreRollInventory(store.read('Potong'),store.read('StokBahan'),st,plans);
+    var after=coreRollInventory(cuts,stock,afterSettings || st,plans);
+    var reserved={}; before.materials.forEach(function (m) { reserved[m.kunci]=m.dicadangkan; });
+    before.legacy.forEach(function (pool) {
+      var next=after.legacyMap[pool.kunci], available=next ? next.tersedia : -pool.dicadangkan;
+      if (available < -0.000001 && available < pool.tersedia-0.000001) fail('Impor mengurangi saldo lama di bawah bahan yang sudah dipakai atau dicadangkan. Periksa pembelian dan koreksi bahan sebelum impor.');
+      if (next && next.satuan !== pool.satuan && (pool.pakai > 0 || reserved[pool.kunci] > 0)) fail('Impor tidak boleh mengganti satuan bahan yang sudah dipakai atau dicadangkan.');
+    });
   }
   actions.cocokkanStokRol = function (p) {
     ['Pegawai','StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
@@ -1796,9 +1829,13 @@ function createCore(store, env) {
 
   actions.createSetor = function (p) {
     var me = auth(p); var admin = coreIsAdmin(me);
-    var s = p.setor || {}; var d = dedupe('SlipSetor', s); if (d.ada) return d.ada;
     var cek = admin || me.divisi === 'qc';   /* admin & QC mencatat barang yang sudah mereka hitung sendiri */
     if (!cek && me.divisi !== 'jahit') fail('Hanya maklon jahit, QC, atau admin yang bisa mencatat setoran.');
+    var s = p.setor || {}; var d = dedupe('SlipSetor', s);
+    if (d.ada) {
+      if (!cek && d.ada.maklonId !== me.id) fail('Hanya bisa membuka kembali setoran sendiri.');
+      return d.ada;
+    }
     var maklonId = cek ? String(s.maklonId || '') : me.id;
     var maklon = findUser(maklonId); if (!maklon || maklon.divisi !== 'jahit') fail('Pilih maklon jahit.');
     var po = openPO(s.poId);
@@ -2028,6 +2065,7 @@ function createCore(store, env) {
       ensureRollSourceUnused(id);
       if (rec.sourceStockId) fail('Bukti koreksi rol tidak dapat dihapus. Catat hitung fisik baru untuk rol tersebut.');
       if (rec.jenis === 'koreksi') ensureAggregateCorrection({bahan:rec.bahan,qty:-coreNum(rec.qty)},null);
+      else if (rec.jenis === 'beli' && rec.stockMode !== 'roll') ensureAggregatePurchase({bahan:rec.bahan,qty:0,satuan:rec.satuan},rec);
     } else if (sheet === 'Karyawan') {
       if (!admin) fail('Hanya admin.');
       if (store.read('GajiHarian').some(function (g) { return g.karyawanId === id; }) || store.read('Kasbon').some(function (k) { return k.jenis === 'harian' && k.orangId === id; }))
@@ -2044,6 +2082,7 @@ function createCore(store, env) {
   actions.importRows = function (p) {
     var me = adminAtauPemasangan(p);
     var sheet = String(p.sheet || ''); if (!SCHEMA[sheet] || ['Pengaturan','Gambar','LegacySettlement','MigrasiJournal','GudangLama','KoreksiRiwayat','RencanaPotong'].indexOf(sheet) >= 0) fail('Sheet tidak dikenal.');
+    if (sheet === 'StokBahan') ['StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
     var rows = p.rows instanceof Array ? p.rows : [];
     var existing = {}; store.read(sheet).forEach(function (r) { existing[r.id] = 1; });
     var add = []; var nextSettings = null;
@@ -2085,6 +2124,7 @@ function createCore(store, env) {
       store.validateRows(sheet, add);
       if (nextSettings) store.validateRows('Pengaturan', Object.keys(nextSettings).map(function (k) { return { key: k, value: JSON.stringify(nextSettings[k]) }; }));
     }
+    if (sheet === 'StokBahan' && add.length) ensureAggregateStockReplacement(store.read('StokBahan').concat(add),store.read('Potong'),nextSettings);
     if (nextSettings) store.setSettings(nextSettings);
     if (add.length) store.appendMany(sheet, add);
     return { ditambah: add.length, dilewati: rows.length - add.length, ids: sheet === 'Pegawai' ? add.map(function (r) { return r.id; }) : undefined };
@@ -2212,6 +2252,7 @@ function createCore(store, env) {
       nextSettings = st;
     }
     /* Kapasitas adaptor juga dicek untuk SEMUA tabel/pengaturan sebelum penggantian pertama. */
+    if (next.StokBahan) ensureAggregateStockReplacement(next.StokBahan,isi('Potong'),nextSettings);
     if (store.validateRows) {
       sheets.forEach(function (sheet) { store.validateRows(sheet, next[sheet]); });
       if (nextSettings) store.validateRows('Pengaturan', Object.keys(nextSettings).map(function (k) { return { key: k, value: JSON.stringify(nextSettings[k]) }; }));

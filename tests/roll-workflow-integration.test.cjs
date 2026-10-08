@@ -493,3 +493,119 @@ test('aggregate stock correction respects legacy reservations and cannot absorb 
   assert.deepEqual(state.stokRol, originalRolls, 'unknown legacy differences must not silently resize invoice rolls');
   assert.equal(state.stokRol.find(row => row.id === rows[0].id).saldo, 7.125);
 });
+
+test('aggregate purchase edits and deletion cannot spend reserved or consumed material or borrow identified rolls', () => {
+  for (const consumed of [false, true]) {
+    const f = fixture(); f.buy();
+    const input = f.bundle([]);
+    input.rencana = { id: 'legacy-protected-plan', bahanList: [{ nama: 'Katun Combed', qty: 8, satuan: 'kg' }], rol: 0 };
+    f.good('savePOWithRencana', input);
+    if (consumed) f.good('createPotong', f.cutPayload(f.findPlan(input.rencana.id)), f.cutter);
+    const before = f.raw('StokBahan'), receipt = before.find(r => r.id === 'legacy-stock-001'), writes = f.h.sheets.StokBahan.writes;
+    for (const change of [{ qty: 7.999 }, { bahan: 'Different fabric' }]) {
+      f.bad('saveStok', { stok: { ...receipt, ...change } }, /saldo lama|cadang|dipakai|stok|bahan/i);
+      assert.deepEqual(f.raw('StokBahan'), before);
+    }
+    f.bad('deleteRecord', { sheet: 'StokBahan', id: receipt.id }, /saldo lama|cadang|dipakai|stok|bahan/i);
+    assert.deepEqual(f.raw('StokBahan'), before); assert.equal(f.h.sheets.StokBahan.writes, writes);
+    f.good('saveStok', { stok: { ...receipt, qty: 8 } });
+    const state = f.good('getState');
+    assert.equal(state.stokRingkas.find(r => r.kunci === 'katun combed').legacyTersedia, 0);
+    assert.equal(state.stokRol.filter(r => r.bahan === 'Katun Combed').reduce((n, r) => n + r.tersedia, 0), 15.5);
+  }
+});
+
+test('legacy material unit is immutable while reserved or consumed, but released unused receipts remain editable', () => {
+  for (const consumed of [false, true]) {
+    const f = fixture(), input = f.bundle([]);
+    input.rencana = { id: 'legacy-unit-plan', bahanList: [{ nama: 'Katun Combed', qty: 8, satuan: 'kg' }], rol: 0 };
+    f.good('savePOWithRencana', input);
+    if (consumed) f.good('createPotong', f.cutPayload(f.findPlan(input.rencana.id)), f.cutter);
+    const receipt = f.raw('StokBahan')[0];
+    f.bad('saveStok', { stok: { ...receipt, satuan: 'meter' } }, /satuan|dipakai|cadang/i);
+    f.good('saveStok', { stok: { ...receipt, catatan: 'Corrected invoice note', harga: 12000 } });
+    if (!consumed) {
+      const plan = f.findPlan(input.rencana.id);
+      f.good('saveRencanaPotong', { expectedRevision: plan.revision, rencana: { id: plan.id, status: 'batal' } });
+      f.good('saveStok', { stok: { ...receipt, qty: 1, satuan: 'meter' } });
+      f.good('deleteRecord', { sheet: 'StokBahan', id: receipt.id });
+      assert.equal(f.raw('StokBahan').length, 0);
+    }
+  }
+});
+
+test('setor retries enforce role and worker ownership before returning an existing physical slip', () => {
+  const f = fixture();
+  f.h.run(`pkStore_().lock(function(){
+    pkStore_().append('Pegawai',{id:'sewer0001',nama:'Fixture Sewer',divisi:'jahit',aktif:true,token:'fixture-sewer-one-token'});
+    pkStore_().append('Pegawai',{id:'sewer0002',nama:'Fixture Other Sewer',divisi:'jahit',aktif:true,token:'fixture-sewer-two-token'});
+    pkStore_().append('Pegawai',{id:'inspector01',nama:'Fixture QC',divisi:'qc',aktif:true,token:'fixture-inspector-token'});
+  });`);
+  const input = f.bundle([]); input.rencana = { id: 'setor-retry-plan', bahanList: [{ nama: 'Katun Combed', qty: 1, satuan: 'kg' }], rol: 0 };
+  f.good('savePOWithRencana', input);
+  f.good('createPotong', f.cutPayload(f.findPlan(input.rencana.id)), f.cutter);
+  f.good('createKirim', { kirim: { id: 'setor-retry-send', poId: input.po.newId, maklonId: 'sewer0001', ukuran: { M: 8, L: 4 }, upah: 2000 } });
+  const payload = { setor: { id: 'setor-retry-report', poId: input.po.newId, ukuran: { M: 8, L: 4 } } };
+  f.good('createSetor', payload, 'fixture-sewer-one-token');
+  f.good('prosesSetor', { id: payload.setor.id, ukuran: { M: 8, L: 4 } });
+  const before = f.raw('SlipSetor'), writes = f.h.sheets.SlipSetor.writes;
+  assert.equal(f.good('createSetor', payload, 'fixture-sewer-one-token').id, payload.setor.id, 'own accepted report remains idempotent');
+  assert.equal(f.good('createSetor', payload).id, payload.setor.id, 'owner may reconcile an existing report');
+  assert.equal(f.good('createSetor', payload, 'fixture-inspector-token').id, payload.setor.id);
+  f.bad('createSetor', payload, /Hanya|sendiri|maklon|setoran/i, f.cutter);
+  f.bad('createSetor', { setor: { ...payload.setor, maklonId: 'sewer0001' } }, /Hanya|sendiri|maklon|setoran/i, 'fixture-sewer-two-token');
+  assert.deepEqual(f.raw('SlipSetor'), before); assert.equal(f.h.sheets.SlipSetor.writes, writes);
+});
+
+test('an existing legacy stock deficit allows note corrections and partial replenishment but cannot be worsened', () => {
+  const f = fixture();
+  f.h.run(`pkStore_().lock(function(){pkStore_().append('Potong',{id:'historical-stock-cut',poId:'historical-po',bahan:'Katun Combed',kg:12,ukuran:{M:5},total:5,upahId:'LAMA',asal:'lama'});});`);
+  const cutBefore = f.raw('Potong'), receipt = f.raw('StokBahan')[0];
+  f.good('saveStok', { stok: { ...receipt, catatan: 'Verified original invoice note' } });
+  f.good('saveStok', { stok: { ...receipt, qty: 11 } });
+  const before = f.raw('StokBahan');
+  f.bad('saveStok', { stok: { ...receipt, qty: 10 } }, /saldo lama|cadang|dipakai/i);
+  f.bad('deleteRecord', { sheet: 'StokBahan', id: receipt.id }, /saldo lama|cadang|dipakai/i);
+  assert.deepEqual(f.raw('StokBahan'), before); assert.deepEqual(f.raw('Potong'), cutBefore);
+  assert.equal(f.good('getState').stokRingkas.find(r => r.kunci === 'katun combed').legacySaldo, -1);
+});
+
+test('bulk legacy stock replacement preserves reserved and consumed aggregate pools before any table writes', () => {
+  for (const consumed of [false, true]) {
+    const f = fixture(), input = f.bundle([]);
+    input.rencana = { id: 'legacy-import-plan', bahanList: [{ nama: 'Katun Combed', qty: 8, satuan: 'kg' }], rol: 0 };
+    f.good('savePOWithRencana', input);
+    if (consumed) f.good('createPotong', f.cutPayload(f.findPlan(input.rencana.id)), f.cutter);
+    const before = f.raw('StokBahan'), originalPlan = f.raw('RencanaPotong'), originalCut = f.raw('Potong'), receipt = before[0];
+    for (const rows of [[], [{ ...receipt, qty: 7.999 }], [{ ...receipt, bahan: 'Different fabric' }], [{ ...receipt, satuan: 'meter' }]]) {
+      for (const coba of [false, true]) f.bad('gantiImpor', { data: { StokBahan: rows }, coba }, /bahan|saldo|satuan|cadang|dipakai/i);
+      assert.deepEqual(f.raw('StokBahan'), before);
+      assert.deepEqual(f.raw('RencanaPotong'), originalPlan); assert.deepEqual(f.raw('Potong'), originalCut);
+    }
+    f.good('gantiImpor', { data: { StokBahan: [{ ...receipt, qty: 8 }] } });
+    assert.equal(f.good('getState').stokRingkas.find(r => r.kunci === 'katun combed').legacyTersedia, 0);
+  }
+});
+
+test('incremental stock import cannot bypass an active reservation using a new negative correction', () => {
+  const f = fixture(), input = f.bundle([]);
+  input.rencana = { id: 'legacy-append-plan', bahanList: [{ nama: 'Katun Combed', qty: 8, satuan: 'kg' }], rol: 0 };
+  f.good('savePOWithRencana', input);
+  const before = f.raw('StokBahan');
+  f.bad('importRows', { sheet: 'StokBahan', rows: [{ id: 'bad-import-correction', jenis: 'koreksi', bahan: 'Katun Combed', qty: -9, satuan: 'kg' }] }, /bahan|saldo|cadang/i);
+  assert.deepEqual(f.raw('StokBahan'), before);
+  const allowed = { sheet: 'StokBahan', rows: [{ id: 'free-import-correction', jenis: 'koreksi', bahan: 'Katun Combed', qty: -2, satuan: 'kg' }] };
+  f.good('importRows', allowed); f.good('importRows', allowed);
+  assert.equal(f.raw('StokBahan').length, before.length + 1);
+  assert.equal(f.good('getState').stokRingkas.find(r => r.kunci === 'katun combed').legacyTersedia, 0);
+});
+
+test('importing a later purchase with another unit cannot invalidate a reserved identified roll', () => {
+  const f = fixture(), rolls = f.buy();
+  f.good('savePOWithRencana', f.bundle([{ stokId: rolls[0].id, qty: 1 }]));
+  const before = f.raw('StokBahan'), extra = { id: 'unit-changing-import', jenis: 'beli', tanggal: '2099-01-01', bahan: 'Katun Combed', qty: 10, satuan: 'meter' };
+  f.bad('importRows', { sheet: 'StokBahan', rows: [extra] }, /satuan|cadang|dipakai/i);
+  f.bad('gantiImpor', { data: { StokBahan: before.filter(r => r.asal === 'lama').concat([extra]) } }, /satuan|cadang|dipakai/i);
+  assert.deepEqual(f.raw('StokBahan'), before);
+  assert.equal(f.good('getState').stokRol.find(r => r.id === rolls[0].id).tersedia, 6.125);
+});
