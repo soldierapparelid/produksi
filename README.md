@@ -15,6 +15,9 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - `src/cutting-plans.js`: persiapan kain oleh owner, pencadangan stok, dan validasi hasil potong.
 - `src/legacy-cutting.js`: rencana pemulihan tambahan untuk ukuran dan jatah potong yang terbukti cocok dengan sumber impor sebelumnya; tidak mengganti buku produksi atau pembayaran.
 - `src/slip-models.js`: rincian slip mingguan dan cetakan/PDF yang sama untuk browser dan server.
+- `src/commerce.js`: supplier, produk pembelian, order, nota, buku pembayaran/penerimaan, dan model cetaknya.
+- `src/commerce-hpp.js`: biaya per produk dan simulasi harga jual menurut basis biaya aplikasi lama.
+- `src/commerce-migration.js`: pratinjau serta pemindahan data perdagangan/HPP lama dengan bukti sumber dan pemulihan pengiriman ulang.
 - `index.html`: aplikasi browser, termasuk salinan hasil build core dan konverter. UI tetap diedit di file ini, di luar blok `CORE` sampai sebelum `UI bagian 1`.
 - `apps-script/Core.gs`: hasil build core dan konverter yang sama untuk project Google Apps Script.
 - `apps-script/Server.gs`: adaptor Google Sheets dari project Apps Script Soldier Produksi yang dibaca pada 8 Oktober 2026; memuat endpoint, pemetaan kolom, lock, cache, dan PDF. Tidak memuat ID spreadsheet, deployment, atau kredensial.
@@ -76,6 +79,25 @@ Koreksi mengubah jumlah fisik yang ditampilkan dan diperiksa pada alur produksi.
 - Slip jahit dan potong mingguan memakai periode Senin–Minggu dengan rincian tanggal, PO, jumlah, tarif, dan hasil perbaikan. Pratinjau dan PDF menggunakan model yang sama; pembayaran historis tetap memakai snapshot. Cetak membuka pratinjau yang dapat dicoba kembali; unduhan PDF menyediakan tautan manual jika unduhan otomatis dibatasi browser.
 - PO baru dapat menyertakan desain tersendiri dengan pratinjau. Gambar dikompresi di perangkat dan disimpan khusus pada PO tersebut.
 - Koneksi yang terputus saat menyimpan ditampilkan sebagai hasil belum pasti. Aplikasi tidak mengulang perubahan otomatis. Invoice memakai ID baris yang stabil dan pemeriksaan data terbaru sebelum retry, sehingga respons hilang tidak menambah stok lagi.
+
+## HPP, pembelian produk, dan nota penjualan
+
+Owner/admin membuka tiga kartu **Produk dan penjualan** di bagian bawah Beranda, atau melalui menu Lainnya. Setiap halaman mengambil datanya ketika dibuka; data perdagangan tidak ditambahkan ke proses login. Setelah transaksi, hanya modul terkait dimuat ulang. Respons dari akun/sesi sebelumnya diabaikan. Pencarian dan filter memakai data yang sudah dimuat.
+
+- **HPP produk** menampilkan bukti bahan, biaya potong, dan jahit per model. Biaya yang hilang diberi keterangan, bukan dianggap nol. Owner/admin memeriksa biaya, memilih tarif jahit otomatis/manual, biaya lain, serta margin sebelum menyimpan konfigurasi. HPP final dan simulator harga baru tersedia bila konfigurasi lengkap. Fee marketplace, biaya tetap per pcs, dan pajak dapat diatur; rekomendasi harga merupakan perhitungan dari konfigurasi tersebut. Potongan historis yang dikecualikan dari basis biaya tetap terlihat untuk ditinjau.
+- **Pembelian produk** memiliki supplier, produk, order dengan variasi, DP awal, cicilan, dan penerimaan per item. DP awal disimpan bersama order; pembayaran dan penerimaan berikutnya menjadi catatan terpisah yang tidak ditimpa. Owner dapat membatalkan peristiwa melalui jejak koreksi; order yang mempunyai peristiwa aktif tidak langsung dibatalkan. Riwayat sumber yang tidak dapat dipetakan tetap berstatus **Perlu diperiksa**, dan penerimaan baru yang memerlukan pemetaan tersebut ditahan. Pembelian produk terpisah dari invoice stok bahan.
+- **Nota penjualan** memuat pelanggan, barang, warna/ukuran, diskon item, diskon nota, ongkir, pembayaran, dan pelunasan. Nomor nota diterbitkan server dengan penghitung berurutan yang dipertahankan saat impor. Uang tunai yang diterima dan kembalian ditampilkan terpisah dari nilai pelunasan. Nota tidak otomatis mengurangi stok produksi atau menambahkan transaksi Kas.
+- Detail order dan nota menyediakan cetak serta PDF dengan isi dari model yang sama. **Cetak gabungan** memilih paling banyak 20 order dari identitas supplier yang sama. Dokumen berisi halaman masing-masing order beserta nomor dan riwayat pembayarannya; tidak menggabungkan atau membagi ulang pembukuan uang. PDF memeriksa revisi order agar pilihan lama tidak mencetak data yang telah berubah.
+
+Jika respons penyimpanan terputus, formulir mempertahankan ID permintaan dan menawarkan pemeriksaan data. Aplikasi tidak mengirim ulang pembayaran otomatis. Periksa hasil lebih dahulu, lalu ulangi permintaan yang sama hanya bila pemeriksaan membolehkannya.
+
+### Memindahkan data perdagangan lama
+
+Owner membuka **Periksa cadangan lama** pada halaman perdagangan, memilih backup utama, dan bila diperlukan backup Firebase sebagai referensi HPP/gambar. Jalankan pratinjau, tinjau jumlah dan peringatannya, baru terapkan. Server memeriksa sidik sumber/rencana dan mempertahankan ID pembayaran serta penerimaan. Proses ini tidak mengganti data produksi. Bila penerapan terputus, gunakan file dan pratinjau yang sama untuk melanjutkan melalui menu impor.
+
+Backup Firebase saja belum tentu memuat semua data lama. Nota aplikasi asal berada pada penyimpanan browser (`notaPenjualan_v1`); foto produk juga dapat berada di IndexedDB perangkat. Ekspor perangkat format `soldier-device-backup-v1` didukung untuk nota. Simpan backup database, ekspor perangkat, gambar, konfigurasi, dan salinan kode sebelum menghentikan aplikasi lama. Data yang tidak terdapat dalam backup tidak dibuat secara perkiraan.
+
+Alur Pesanan Offline yang membuat/menghapus produksi, pembagian pembayaran lintas order, dan modul ROAS belum dipindahkan sebagai transaksi otomatis. Catatan yang sebelumnya dikecualikan dari produksi tidak diaktifkan kembali oleh impor perdagangan. Aplikasi/repository lama baru boleh dihapus setelah hasil impor, angka, gambar, cetakan, dan pemulihan backup diverifikasi; keberhasilan build atau publikasi saja belum membuktikan kelengkapan data.
 
 ## Sambungan ke data pusat
 

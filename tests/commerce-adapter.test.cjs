@@ -1,0 +1,117 @@
+'use strict';
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
+const {harness}=require('./helpers/apps-script-harness.cjs');
+function fixture(){
+ const h=harness();for(const name of ['reconcile-legacy','commerce-hpp','slip-models','commerce','commerce-migration'])vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src',name+'.js'),'utf8'),h.context);
+ const setup=h.request('setupOwner',{nama:'Fixture Owner',pin:'1234'});assert.equal(setup.ok,true,setup.error);const owner=setup.data.token;
+ h.run(`pkStore_().lock(function(){pkStore_().appendMany('Pegawai',[{id:'adminfixture',nama:'Fixture Admin',divisi:'admin',aktif:true,token:'fixture-admin-token-001'},{id:'cutterfixture',nama:'Fixture Cutter',divisi:'potong',aktif:true,token:'fixture-cutter-token-001'}]);});void 0;`);
+ function call(action,p={},token=owner){h.cold();return h.request(action,{token,workflowVersion:2,...p});}
+ function good(action,p={},token=owner){const r=call(action,p,token);assert.equal(r.ok,true,r.error);return r.data;}
+ function bad(action,p={},regex,token=owner){const r=call(action,p,token);assert.equal(r.ok,false,'must reject');if(regex)assert.match(r.error,regex);return r;}
+ function raw(table){h.cold();return h.run(`pkStore_().fresh(${JSON.stringify(table)});pkStore_().read(${JSON.stringify(table)})`);}
+ function masters(){good('saveCommerceSupplier',{record:{id:'supplier01',nama:'Supplier Fixture'}});good('saveCommerceProduct',{record:{id:'product01',nama:'Product Fixture',supplierId:'supplier01',kategori:'Atasan'}});}
+ function order(extra={}){return {id:'order01',produkId:'product01',items:[{id:'size01',nama:'M',jumlah:3},{id:'size02',nama:'L',jumlah:2}],hargaSatuan:10000,tanggalOrder:'2026-10-08',...extra};}
+ function state(module='pembelian'){return good('getCommerceState',{module});}
+ return {h,owner,call,good,bad,raw,masters,order,state};
+}
+function backup(){return {
+ soldier_pembelian_produk:{suppliers:[{id:'legacySupplier',nama:'Old supplier'}],produk:[{id:'legacyProduct',nama:'Old product',supplierId:'legacySupplier',_hasImg:true}],orders:[{id:'legacyOrder',produkId:'legacyProduct',tanggalOrder:'2026-09-01',items:[{nama:'M',jumlah:5}],hargaSatuan:10000,totalHarga:50000,dp:10000,pembayaran:[{id:'pay-old',tanggal:'2026-09-01',jumlah:10000,metode:'cash'}],penerimaan:[{id:'received-old',tanggal:'2026-09-02',itemId:'missing-item-id',jumlah:3,kondisi:'baik'}]}]},
+ soldier_hpp_cache_v1:{configs:{sku01:{hargaJahit:1200}},modelConfigs:{},marketplace:{shopee:{nama:'Shop',fee:10,fixedPerPcs:1000}},pajak:1},
+ produksi:{produksi:[{id:'sku01',nama:'Old shirt',size:'M'}],cuttingPlans:[]},
+ notaPenjualan_v1:{transactions:[{id:'SA-261001-1',date:'2026-10-01T12:00:00Z',customer:{name:'Fixture customer'},items:[{id:'old-note-line',name:'Shirt',qty:1,price:90000,subtotal:90000}],total:90000,subtotal:90000,payment:{method:'cash',amount:100000,change:10000,status:'lunas'}}]}
+};}
+test('commerce is lazy and all read, PDF, write and import actions require live admin authentication',()=>{
+ const f=fixture();f.h.run(`var savedRead=pkStore_,commerceReadLog=[];pkStore_=function(){var s=savedRead();if(!s.traced){var read=s.read;s.read=function(n){commerceReadLog.push(n);return read(n);};s.traced=true;}return s;};void 0;`);
+ f.good('getState');assert.equal(f.h.run('commerceReadLog.some(function(n){return /^Commerce/.test(n);})'),false);
+ f.bad('getCommerceState',{module:'pembelian'},/owner|admin/,'fixture-cutter-token-001');f.bad('makeCommercePdf',{module:'nota',id:'none'},/owner|admin/,'fixture-cutter-token-001');f.bad('saveCommerceSupplier',{record:{id:'x',nama:'X'}},/owner|admin/,'fixture-cutter-token-001');f.bad('previewCommerceImport',{backup:backup()},/owner/,'fixture-admin-token-001');
+ f.bad('saveCommerceSupplier',{record:{id:'x',nama:'X'},workflowVersion:1},/Versi/);f.bad('importRows',{sheet:'CommerceEvent',rows:[]},/Sheet/);
+ f.h.run(`pkStore_().lock(function(){pkStore_().update('Pegawai','adminfixture',{aktif:false});});void 0;`);f.bad('getCommerceState',{module:'nota'},/masuk|aktif|sesi/i,'fixture-admin-token-001');
+});
+test('stable parent creation, initial DP atomically in parent, revisions and actor replay protect native orders',()=>{
+ const f=fixture();f.masters();const original=f.order({initialPayment:{jumlah:10000,metode:'transfer',tanggal:'2026-10-08'}});
+ const saved=f.good('saveCommerceOrder',{record:original});assert.equal(saved.record.totalPaid,10000);assert.equal(saved.record.balance,40000);assert.equal(saved.state,undefined);assert.equal(f.raw('CommerceEvent').length,0);
+ f.good('saveCommerceOrder',{record:original});assert.equal(f.state().orders.length,1);
+ f.bad('saveCommerceOrder',{record:original},/berubah/,'fixture-admin-token-001');f.bad('saveCommerceOrder',{record:{...original,hargaSatuan:12000}},/berubah/);
+ const rev=saved.record.revision;f.good('appendCommercePayment',{id:'payment01',module:'pembelian',parentId:'order01',expectedRevision:rev,tanggal:'2026-10-08',jumlah:10000,metode:'cash'});
+ f.bad('appendCommercePayment',{id:'payment02',parentId:'order01',expectedRevision:rev,jumlah:10000},/berubah/);
+ f.good('appendCommercePayment',{id:'payment01',module:'pembelian',parentId:'order01',expectedRevision:rev,tanggal:'2026-10-08',jumlah:10000,metode:'cash'});assert.equal(f.raw('CommerceEvent').length,1);
+ f.bad('appendCommercePayment',{id:'payment01',parentId:'order01',expectedRevision:rev,tanggal:'2026-10-08',jumlah:10001,metode:'cash'},/berbeda/);
+});
+test('payments, item receipts and owner void enforce remaining amounts without mutating immutable events',()=>{
+ const f=fixture();f.masters();let r=f.good('saveCommerceOrder',{record:f.order()}).record;
+ f.bad('appendCommercePayment',{id:'pay-over',parentId:r.id,expectedRevision:r.revision,jumlah:50001},/melebihi/);
+ f.bad('appendCommerceReceipt',{id:'receive-over',orderId:r.id,expectedRevision:r.revision,itemId:'size01',jumlah:4},/melebihi/);
+ r=f.good('appendCommerceReceipt',{id:'receive01',orderId:r.id,expectedRevision:r.revision,itemId:'size01',jumlah:3,kondisi:'baik'}).record;
+ const frozen=f.raw('CommerceEvent')[0];assert.equal(r.totalReceived,3);assert.equal(r.receipts[0].kondisi,'baik');
+ f.bad('voidCommerceEvent',{id:'void01',parentId:r.id,eventId:'receive01',expectedRevision:r.revision,catatan:'Receipt duplicate'},/owner/,'fixture-admin-token-001');
+ r=f.good('voidCommerceEvent',{id:'void01',parentId:r.id,eventId:'receive01',expectedRevision:r.revision,catatan:'Receipt duplicate'}).record;assert.equal(r.totalReceived,0);assert.deepEqual(f.raw('CommerceEvent')[0],frozen);
+ f.good('voidCommerceEvent',{id:'void01',parentId:r.id,eventId:'receive01',expectedRevision:'old-proof',catatan:'Receipt duplicate'});assert.equal(f.raw('CommerceEvent').length,2);
+});
+test('cash nota preserves discounts, shipping, applied payment, tender and change in shared document',()=>{
+ const f=fixture(),input={id:'nota01',date:'2026-10-08',customer:{name:'Walk in',phone:'000',address:'Fixture'},items:[{id:'line01',name:'Shirt',qty:2,price:50000,discPercent:10}],discountPercent:10,shipping:9000,initialPayment:{jumlah:90000,metode:'cash',tenderedAmount:100000}};
+ const r=f.good('saveCommerceNota',{record:input}).record;assert.equal(r.total,90000);assert.equal(r.totalPaid,90000);assert.equal(r.payments[0].change,10000);
+ f.h.context.NOTA_FIXTURE=r;const model=f.h.run(`coreCommerceSlipModel('nota',NOTA_FIXTURE,{})`);assert.ok(model.sections.every(s=>s.columns&&s.columns.length));assert.ok(model.summary.some(s=>s.label==='Ongkir'));assert.equal(model.rows[0][4],'10%');
+ f.bad('saveCommerceNota',{record:{...input,id:'nota02',initialPayment:{jumlah:90001,metode:'cash'}}},/melebihi/);
+ f.bad('saveCommerceNota',{record:{...input,id:'nota03',initialPayment:{jumlah:90000,metode:'transfer',tenderedAmount:100000}}},/tunai/);
+});
+test('additive migration freezes original snapshots, never counts DP twice, holds unresolved receipt links and recovers exact pictures',()=>{
+ const f=fixture(),b=backup(),reference={soldier:{produksi:b.produksi,pembelianProduk:{produk:[{...b.soldier_pembelian_produk.produk[0],gambar:'data:image/png;base64,AAAA'}]},stokBahan:{pembelian:[]},produksi_meta:{tarif:1000,pin:'never-copy'}}};
+ const p=f.good('previewCommerceImport',{backup:b,reference});assert.equal(p.summary.receiptReview,1);assert.equal(p.summary.images,1);assert.equal(f.raw('CommerceRecord').length,0);
+ const applied=f.good('applyCommerceImport',{backup:b,reference,sourceHash:p.sourceHash,planHash:p.planHash});assert.equal(applied.applied,true);
+ const order=f.state().orders[0];assert.equal(order.totalPaid,10000);assert.equal(order.balance,40000);assert.equal(order.receiptReview,true);assert.equal(order.receipts[0].itemId,'missing-item-id');
+ assert.equal(f.state('nota').notes[0].totalPaid,90000);assert.equal(f.state().products[0].gambar,'data:image/png;base64,AAAA');assert.equal(JSON.stringify(f.raw('CommerceSource')).includes('never-copy'),false);
+ const source=f.raw('CommerceSource').find(r=>r.kind==='order');assert.deepEqual(JSON.parse(source.data),b.soldier_pembelian_produk.orders[0]);
+ f.bad('appendCommerceReceipt',{id:'manual-new',orderId:order.id,expectedRevision:order.revision,itemId:'guessed',jumlah:1},/Hubungan/);
+ const before=f.raw('CommerceSource');f.good('applyCommerceImport',{backup:b,reference,sourceHash:p.sourceHash,planHash:p.planHash});assert.deepEqual(f.raw('CommerceSource'),before);
+ assert.equal(f.raw('PO').length,0);assert.equal(f.raw('StokBahan').length,0);
+});
+test('migration validates every table before writing and a partial append stays locked until exact retry',()=>{
+ const f=fixture(),bad=backup();bad.soldier_pembelian_produk.orders[0].catatan='x'.repeat(49001);
+ f.bad('previewCommerceImport',{backup:bad},/panjang|batas|49|besar/i);assert.equal(f.raw('CommerceImport').length,0);
+ const b=backup(),p=f.good('previewCommerceImport',{backup:b});
+ f.h.run(`var savedCommerceStore=pkStore_,interruptCommerce=true;pkStore_=function(){var s=savedCommerceStore();if(!s.failureWrapped){var append=s.appendMany;s.appendMany=function(name,rows){if(name==='CommerceRecord'&&interruptCommerce){interruptCommerce=false;append(name,rows.slice(0,1));throw new Error('fixture interruption');}return append(name,rows);};s.failureWrapped=true;}return s;};void 0;`);
+ f.bad('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash},/interruption/);assert.equal(f.raw('CommerceImport')[0].status,'pending');
+ f.bad('getCommerceState',{module:'pembelian'},/belum selesai/);f.bad('saveCommerceSupplier',{record:{id:'new',nama:'New'}},/belum selesai/);
+ const different=backup();different.soldier_pembelian_produk.suppliers[0].nama='Different';f.bad('previewCommerceImport',{backup:different},/impor lain/);
+ f.good('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash});assert.equal(f.raw('CommerceImport')[0].status,'complete');assert.equal(f.state().suppliers.length,1);assert.equal(f.raw('CommerceRecord').length,5);
+});
+test('purchase identity is frozen at issue and inactive masters or initial backdated payments cannot create a new order',()=>{
+ const f=fixture();f.masters();const original=f.good('saveCommerceOrder',{record:f.order()}).record;
+ let supplier=f.state().suppliers[0];f.good('saveCommerceSupplier',{record:{...supplier,nama:'Supplier renamed'},expectedRevision:supplier.revision});
+ let product=f.state().products[0];f.good('saveCommerceProduct',{record:{...product,nama:'Product renamed'},expectedRevision:product.revision});
+ assert.equal(f.state().orders[0].supplierName,original.supplierName);assert.equal(f.state().orders[0].productName,original.productName);
+ f.bad('saveCommerceOrder',{record:f.order({id:'early-dp',initialPayment:{jumlah:1000,tanggal:'2026-10-07'}})},/sebelum/);
+ supplier=f.state().suppliers[0];f.good('saveCommerceSupplier',{record:{...supplier,aktif:false},expectedRevision:supplier.revision});f.bad('saveCommerceOrder',{record:f.order({id:'inactive-order'})},/tidak aktif/);
+});
+test('HPP source integrity fails closed after incomplete snapshot and marketplace settings preserve fixed fees and revision',()=>{
+ const f=fixture(),b=backup(),p=f.good('previewCommerceImport',{backup:b});f.good('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash});
+ const first=f.state('hpp');assert.equal(first.config.marketplace.shopee.fixedPerPcs,1000);
+ const request={marketplace:{shop:{nama:'Fixture Shop',fee:10,fixedPerPcs:1250}},pajak:1,expectedRevision:first.revision};f.good('saveCommerceHppSettings',request);f.good('saveCommerceHppSettings',request);assert.equal(f.state('hpp').config.marketplace.shop.fixedPerPcs,1250);
+ f.bad('saveCommerceHppSettings',{...request,pajak:2},/berubah/);
+ f.h.run(`pkStore_().lock(function(){var rows=pkStore_().read('CommerceSource');pkStore_().replaceAll('CommerceSource',rows.filter(function(r){return r.kind!=='hpp-production';}));});void 0;`);
+ f.bad('getCommerceState',{module:'hpp'},/tidak utuh/);
+});
+test('later device-only nota backup is additive, imported amounts settle once and new daily note numbers are stable',()=>{
+ const f=fixture(),b=backup();delete b.notaPenjualan_v1;let p=f.good('previewCommerceImport',{backup:b});f.good('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash});const source=f.raw('CommerceSource'),purchase=f.state();
+ const nota=backup().notaPenjualan_v1;nota.transactions[0].id='SA-261008-004';nota.transactions[0].date='2026-10-08';const device={format:'soldier-device-backup-v1',data:{notaPenjualan_v1:nota,sa_roas_analysis_v2:{private:'not-a-commerce-module'}},raw:{secret:'ignored'}};
+ p=f.good('previewCommerceImport',{backup:device});assert.equal(p.summary.orders,0);assert.equal(p.summary.notes,1);f.good('applyCommerceImport',{backup:device,sourceHash:p.sourceHash,planHash:p.planHash});assert.deepEqual(f.state(),{...purchase,version:f.state().version});assert.deepEqual(f.raw('CommerceSource').slice(0,source.length),source);assert.equal(JSON.stringify(f.raw('CommerceSource')).includes('not-a-commerce-module'),false);
+ const input={id:'random-stable-client-id',date:'2026-10-08',customer:{name:'Fixture'},items:[{id:'line',name:'Shirt',qty:1,price:10000}]};const saved=f.good('saveCommerceNota',{record:input}).record;assert.equal(saved.noNota,'SA-261008-005');assert.equal(f.good('saveCommerceNota',{record:input}).record.noNota,saved.noNota);
+});
+test('native mutations do not read the large immutable source snapshot and revoked physical account is rejected despite stale cache',()=>{
+ const f=fixture();f.masters();f.h.run(`var commerceNoSourceBase=pkStore_,commerceTablesRead=[];pkStore_=function(){var s=commerceNoSourceBase();if(!s.readTracked){var read=s.read;s.read=function(n){commerceTablesRead.push(n);return read(n);};s.readTracked=true;}return s;};void 0;`);
+ f.good('saveCommerceOrder',{record:f.order()});assert.equal(f.h.run('commerceTablesRead.indexOf("CommerceSource")'),-1);
+ f.good('getCommerceState',{module:'pembelian'},'fixture-admin-token-001');const values=f.h.sheets.Pegawai.values,head=values[0],row=values.find(r=>r[head.indexOf('id')]==='adminfixture');row[head.indexOf('aktif')]=false;
+ f.bad('getCommerceState',{module:'nota'},/nonaktif/,'fixture-admin-token-001');
+});
+test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
+ const f=fixture();f.masters();let a=f.good('saveCommerceOrder',{record:f.order({catatan:'Print fixture'})}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02'})}).record;
+ f.h.run(`var originalCommerceEnv=pkEnv_,lastCommercePdf='';pkEnv_=function(){var e=originalCommerceEnv();e.makePdf=function(html){lastCommercePdf=html;return 'fixture-pdf';};return e;};void 0;`);
+ const proof={[a.id]:a.revision,[b.id]:b.revision};const pdf=f.good('makeCommercePdf',{module:'pembelian',ids:[a.id,b.id],expectedRevisions:proof});assert.equal(pdf.base64,'fixture-pdf');assert.equal(f.h.run('(lastCommercePdf.match(/<article>/g)||[]).length'),2);assert.equal(f.h.run('lastCommercePdf.includes("Print fixture")'),true);
+ f.bad('makeCommercePdf',{module:'pembelian',ids:[a.id,a.id]},/ganda/);f.bad('makeCommercePdf',{module:'nota',ids:[a.id]},/gabungan/);
+ a=f.good('appendCommercePayment',{id:'print-payment',parentId:a.id,expectedRevision:a.revision,jumlah:10000}).record;f.bad('makeCommercePdf',{module:'pembelian',ids:[a.id,b.id],expectedRevisions:proof},/berubah/);
+ f.good('saveCommerceSupplier',{record:{id:'supplier02',nama:'Supplier two'}});f.good('saveCommerceProduct',{record:{id:'product02',nama:'Product two',supplierId:'supplier02'}});const c=f.good('saveCommerceOrder',{record:f.order({id:'order03',produkId:'product02'})}).record;f.bad('makeCommercePdf',{module:'pembelian',ids:[a.id,c.id]},/supplier/);
+});
