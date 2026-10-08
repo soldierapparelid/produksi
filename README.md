@@ -9,6 +9,7 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - `src/import-legacy-v1.js`: pengulangan konverter historis untuk membuktikan bahwa backup cocok dengan impor yang sudah tersimpan; tidak dipakai untuk impor baru.
 - `src/reconcile-legacy.js`: pratinjau pemulihan hubungan sumber dan jembatan bukti pembayaran lama, dengan sidik SHA-256.
 - `src/migration-actions.js`: aksi owner untuk pratinjau, penerapan, dan pemulihan cadangan jurnal.
+- `src/history-corrections.js`: koreksi jumlah fisik riwayat oleh owner dengan jejak perubahan; sumber pembayaran tetap utuh.
 - `index.html`: aplikasi browser, termasuk salinan hasil build core dan konverter. UI tetap diedit di file ini, di luar blok `CORE` sampai sebelum `UI bagian 1`.
 - `apps-script/Core.gs`: hasil build core dan konverter yang sama untuk project Google Apps Script.
 - `apps-script/Server.gs`: adaptor Google Sheets dari project Apps Script Soldier Produksi yang dibaca pada 8 Oktober 2026; memuat endpoint, pemetaan kolom, lock, cache, dan PDF. Tidak memuat ID spreadsheet, deployment, atau kredensial.
@@ -49,6 +50,12 @@ Nomor PO aktif dipertahankan. Catatan potong tetap sama. Laporan jahit lama yang
 PO aktif yang belum dapat dipulihkan disimpan utuh dengan keterangan pemeriksaan. Arsip selesai dipertahankan sebagai riwayat baca saja. Pemulihan tidak mengarang jumlah, menciptakan pembayaran baru, atau menghapus ketidaksesuaian historis.
 
 Penerapan menghitung ulang rencana di server dan menolak pratinjau kedaluwarsa. Semua tabel divalidasi sebelum penulisan produksi pertama. `MigrasiJournal` menyimpan seluruh baris sebelum perubahan beserta sidiknya. Bila layanan terputus di tengah penerapan, penyimpanan transaksi ditahan sampai owner memilih **Pulihkan data sebelum proses**. Pemulihan jurnal dapat diulang jika layanan kembali terputus. Salinan spreadsheet sebelum rilis tetap diperlukan: jurnal bukan transaksi atomik Google Sheets dan tidak mencegah pengeditan manual langsung pada spreadsheet.
+
+## Koreksi jumlah riwayat oleh owner
+
+Pada PO aktif yang masih ditandai perlu pemeriksaan, owner dapat memilih **Koreksi jumlah lama** di detail PO. Pilih catatan potong atau penugasan jahit, isi jumlah per ukuran berdasarkan catatan asli, lalu jelaskan alasan koreksi. Jumlah awal tetap terlihat dan perubahan disimpan dalam `KoreksiRiwayat` bersama waktu, pengguna, serta nilai sebelum dan sesudah. Penyimpanan menolak isian yang telah kedaluwarsa.
+
+Koreksi mengubah jumlah fisik yang ditampilkan dan diperiksa pada alur produksi. Baris potong/penugasan asli, slip pembayaran, tarif, dan perhitungan upah historis tidak ditulis ulang. Koreksi tidak membuat upah tambahan dan tidak menandai pemeriksaan PO selesai; hubungan hitung fisik atau QC yang masih hilang tetap memerlukan bukti sumber. Jumlah yang belum diketahui dibiarkan seperti semula sampai owner mengisinya.
 
 ## Sambungan ke data pusat
 
