@@ -1,6 +1,6 @@
 /* Menyimpan tampilan aplikasi supaya tetap terbuka saat sinyal jelek. Data tetap diambil dari server. */
-var CACHE = 'soldier-produksi-202610080806';
-var FILES = ['./', './index.html', './manifest.webmanifest', './manifest-potong.webmanifest', './manifest-jahit.webmanifest', './manifest-qc.webmanifest', './icon-192.png', './icon-512.png'];
+var CACHE = 'soldier-produksi-202610080830';
+var FILES = ['./', './index.html', './manifest.webmanifest', './manifest-potong.webmanifest', './manifest-jahit.webmanifest', './manifest-qc.webmanifest', './logo-192.png', './logo-512.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
 });

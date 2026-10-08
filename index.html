@@ -8,8 +8,8 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="manifest" id="pk-manifest" href="manifest.webmanifest">
 <script>(function(){try{var d='',h=String(location.hash||'').match(/[#&]d=([a-z]+)/),q=String(location.search||'').match(/[?&]d=([a-z]+)/);if(h)d=h[1];else if(q)d=q[1];else if(!/[#&]k=/.test(String(location.hash||'')))d=localStorage.getItem('pk_div')||'';if(d==='potong'||d==='jahit'||d==='qc'){document.getElementById('pk-manifest').setAttribute('href','manifest-'+d+'.webmanifest');}}catch(e){}})();</script>
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="logo-192.png">
+<link rel="apple-touch-icon" href="logo-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
@@ -82,6 +82,14 @@ svg.ic.s { width: 16px; height: 16px; }
 .brand i { font-style: normal; color: var(--accent); }
 .logo-img { width: 32px; height: 32px; object-fit: contain; flex: none; }
 .logo-img.l { width: 72px; height: 72px; }
+.logo-img.xl { width: 132px; height: 132px; }
+.splash { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 16px; text-align: center; }
+.splash .logo { font-family: var(--f-display); font-weight: 700; font-size: 28px; letter-spacing: .05em; text-transform: uppercase; line-height: 1; }
+.splash .logo i { font-style: normal; color: var(--accent); }
+.splash .tag { color: var(--muted); font-size: 14px; }
+.napas { animation: napas 1.4s ease-in-out infinite; }
+@keyframes napas { 0%, 100% { opacity: .55; transform: scale(.95); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .napas { animation: none; } }
 .sync { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); background: none; border: 0; padding: 6px; border-radius: 99px; }
 .sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .sync.busy .dot { background: var(--warn); animation: pulse 1s infinite; }
@@ -314,7 +322,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    2. Browser, untuk mode coba (data di perangkat)
    Tidak memakai API browser maupun API Apps Script.
 
-   Alur: PO -> Potong -> Kirim ke maklon -> Setor jahit -> Cek/terima
+   Alur: PO -> Potong -> Penugasan jahit -> Setor jahit -> Cek/terima
          -> QC -> Siap jual (input BigSeller) -> Slip upah
 
    Prinsip anti-tabrakan:
@@ -324,7 +332,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.1';
+var APP_VERSION = '1.2';
 
 var SCHEMA = {
   Pegawai:   ['id','nama','divisi','pin','token','gagal','kunci','hp','catatan','aktif','dibuat'],
@@ -333,7 +341,7 @@ var SCHEMA = {
   Potong:    ['id','poId','userId','tanggal','ukuran','total','bahan','kg','rol','tarif','upahId','catatan','dibuat'],
   SlipKirim: ['id','noSlip','poId','maklonId','tanggal','target','ukuran','total','upah','catatan','dibuatOleh','dibuat'],
   SlipSetor: ['id','noSlip','poId','maklonId','tanggal','ukuran','total','reject','upah','catatan','status','dibuatOleh','dibuat','diprosesOleh','diprosesPada','upahId'],
-  QC:        ['id','poId','userId','maklonId','tanggal','ukuran','total','offline','perbaikan','reject','catatan','dibuat'],
+  QC:        ['id','poId','userId','maklonId','tanggal','ukuran','total','offline','perbaikan','reject','catatan','dibuat','setorId'],
   Gudang:    ['id','poId','userId','tanggal','ukuran','total','catatan','dibuat'],
   SlipUpah:  ['id','noSlip','pegawaiId','jenis','tanggal','itemIds','totalQty','totalUpah','potongan','dibayar','catatan','dibuatOleh','dibuat'],
   Gambar:    ['id','data','diubah'],
@@ -449,7 +457,7 @@ function coreAggregate(poRows, potong, kirim, setor, qc, gudang) {
   gudang.forEach(function (r) { var a = byPo[r.poId]; if (a) addSizes(a, 'bigseller', r.ukuran, r.total); });
   for (var id in byPo) {
     var a = byPo[id]; var t = a.total;
-    t.siapKirim = t.potong - t.kirim;                                   /* sudah dipotong, belum dikirim ke maklon */
+    t.siapKirim = t.potong - t.kirim;                                   /* sudah dipotong, belum ditugaskan ke maklon */
     t.sisaMaklon = 0;
     t.siapQC = t.terima - t.qcOk - t.qcOffline - t.qcPerbaikan - t.qcReject; /* sudah diterima, belum di-QC */
     t.stok = t.qcOk - t.bigseller;                                      /* lolos QC, belum diinput ke BigSeller */
@@ -470,7 +478,7 @@ function coreSlipText(type, rec, ctx) {
   var uk = coreParseJSON(rec.ukuran, {});
   if (type === 'kirim' || type === 'setor') {
     var belumSlip = type === 'setor' && !rec.noSlip;
-    L.push(type === 'kirim' ? '*SLIP KIRIM BAHAN KE MAKLON*' : (belumSlip ? '*LAPORAN SETOR HASIL JAHIT*' : '*SLIP SETOR HASIL JAHIT*'));
+    L.push(type === 'kirim' ? '*SLIP PENUGASAN JAHIT*' : (belumSlip ? '*LAPORAN SETOR HASIL JAHIT*' : '*SLIP SETOR HASIL JAHIT*'));
     L.push(belumSlip ? 'Belum dihitung QC, slip belum terbit' : 'No: ' + rec.noSlip);
     L.push('Tanggal: ' + coreTgl(rec.tanggal));
     L.push('Maklon: ' + ((ctx.maklon && ctx.maklon.nama) || '-'));
@@ -634,7 +642,7 @@ function createCore(store, env) {
 
     if (me.divisi === 'jahit') {
       var mine = function (r) { return r.maklonId === me.id; };
-      /* maklon baru melihat harga di slip setor yang sudah terbit, bukan di slip kirim */
+      /* maklon baru melihat harga di slip setor yang sudah terbit, bukan di slip penugasan */
       out.kirim = kirim.filter(mine).map(function (r) { var o = copy(r); o.upah = 0; return o; });
       out.setor = setor.filter(mine);
       out.upah = upah.filter(function (u) { return u.pegawaiId === me.id; });
@@ -732,6 +740,8 @@ function createCore(store, env) {
 
   actions.changePin = function (p) {
     var me = auth(p);
+    /* hanya owner yang memegang PIN: PIN-nya sendiri dan PIN semua pegawai */
+    if (me.divisi !== 'owner') fail('PIN hanya bisa diganti oleh owner. Minta owner menggantinya di menu Pegawai.');
     if (String(me.pin) !== String(p.pinLama || '')) fail('PIN lama salah.');
     var pin = String(p.pinBaru || '').trim(); if (!/^\d{4,6}$/.test(pin)) fail('PIN baru harus 4 sampai 6 angka.');
     store.update('Pegawai', me.id, { pin: pin, token: String(p.token) });   /* perangkat lain otomatis keluar */
@@ -773,12 +783,15 @@ function createCore(store, env) {
         if (!owners.length) fail('Harus ada minimal satu owner aktif.');
       }
       var patch = { nama: nama, divisi: divisi, hp: teks(u.hp, 30), catatan: teks(u.catatan, 200), aktif: u.aktif === undefined ? old.aktif : !!u.aktif };
-      if (u.pin) { if (!/^\d{4,6}$/.test(String(u.pin))) fail('PIN harus 4 sampai 6 angka.'); patch.pin = String(u.pin); patch.gagal = 0; patch.kunci = ''; if (old.id !== me.id) patch.token = ''; }
+      if (u.pin) { if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengatur PIN.'); if (!/^\d{4,6}$/.test(String(u.pin))) fail('PIN harus 4 sampai 6 angka.'); patch.pin = String(u.pin); patch.gagal = 0; patch.kunci = ''; if (old.id !== me.id) patch.token = ''; }
       if (patch.aktif === false || patch.divisi !== old.divisi) patch.token = '';
       store.update('Pegawai', old.id, patch);
       return publicUser(findUser(old.id), true);
     }
-    var pin = String(u.pin || '').trim(); if (!/^\d{4,6}$/.test(pin)) fail('PIN harus 4 sampai 6 angka.');
+    /* akun baru boleh dibuat tanpa PIN (misalnya oleh admin); pemiliknya baru bisa masuk setelah owner mengisi PIN */
+    var pin = String(u.pin || '').trim();
+    if (pin && me.divisi !== 'owner') fail('Hanya owner yang boleh mengatur PIN.');
+    if (pin && !/^\d{4,6}$/.test(pin)) fail('PIN harus 4 sampai 6 angka.');
     var nu = { id: env.id(), nama: nama, divisi: divisi, pin: pin, token: '', gagal: 0, kunci: '', hp: teks(u.hp, 30), catatan: teks(u.catatan, 200), aktif: true, dibuat: nowIso() };
     store.append('Pegawai', nu);
     return publicUser(nu, true);
@@ -1022,9 +1035,17 @@ function createCore(store, env) {
       perbaikan = -hasil;
     } else if (total <= 0 && offline <= 0 && reject <= 0 && perbaikan <= 0) fail('Isi jumlah pcs hasil QC.');
     var maklonId = String(r.maklonId || '');
+    /* hasil QC untuk satu slip setor dari antrean: slipnya harus sudah terbit dan milik PO yang sama */
+    var setorId = String(r.setorId || '');
+    if (setorId) {
+      var slip = findRow('SlipSetor', setorId);
+      if (!slip || slip.poId !== po.id) fail('Slip setor tidak ditemukan.');
+      if (slip.status !== 'diterima') fail('Setoran ini belum dihitung. Hitung dulu, baru diperiksa.');
+      maklonId = slip.maklonId;
+    }
     if (maklonId) { var mk = findUser(maklonId); if (!mk || mk.divisi !== 'jahit') maklonId = ''; }
     var rec = { id: d.id, poId: po.id, userId: me.id, maklonId: maklonId, tanggal: tglOk(r.tanggal) || today(), ukuran: JSON.stringify(ukuran),
-      total: total, offline: offline, perbaikan: perbaikan, reject: reject, catatan: teks(r.catatan, 300), dibuat: nowIso() };
+      total: total, offline: offline, perbaikan: perbaikan, reject: reject, catatan: teks(r.catatan, 300), dibuat: nowIso(), setorId: setorId };
     store.append('QC', rec);
     return rec;
   };
@@ -1179,7 +1200,7 @@ function createCore(store, env) {
     var h = '';
     if (type === 'kirim' || type === 'setor') {
       var po = ctx.po || {}; var maklon = ctx.maklon || {};
-      h += '<div class="judul">' + (type === 'kirim' ? 'SLIP KIRIM BAHAN KE MAKLON' : 'SLIP SETOR HASIL JAHIT') + ' &mdash; ' + esc(rec.noSlip) + '</div>';
+      h += '<div class="judul">' + (type === 'kirim' ? 'SLIP PENUGASAN JAHIT' : 'SLIP SETOR HASIL JAHIT') + ' &mdash; ' + esc(rec.noSlip) + '</div>';
       h += '<table class="info"><tr><td>Tanggal</td><td>' + coreTgl(rec.tanggal) + '</td></tr>' +
         (type === 'kirim' && rec.target ? '<tr><td>Target selesai</td><td>' + coreTgl(rec.target) + '</td></tr>' : '') +
         '<tr><td>Maklon</td><td><b>' + esc(maklon.nama || '-') + '</b>' + (maklon.hp ? ' (' + esc(maklon.hp) + ')' : '') + '</td></tr>' +
@@ -1872,8 +1893,8 @@ var TABS = {
     { id: 'akun', label: 'Akun', icon: 'user' }
   ],
   qc: [
-    { id: 'q-cek', label: 'Setoran', icon: 'inbox' },
-    { id: 'q-qc', label: 'QC', icon: 'shield' },
+    { id: 'q-cek', label: 'Hitung fisik', icon: 'inbox' },
+    { id: 'q-qc', label: 'Antrean QC', icon: 'shield' },
     { id: 'q-riwayat', label: 'Riwayat', icon: 'list' },
     { id: 'akun', label: 'Akun', icon: 'user' }
   ]
@@ -1981,7 +2002,7 @@ function navPips() {
   var st = S.state, o = {};
   var cek = st.setor.filter(function (s) { return s.status === 'diajukan'; }).length;
   if (isAdmin()) { if (cek) o.beranda = cek; }
-  else if (me().divisi === 'qc') { if (cek) o['q-cek'] = cek; }
+  else if (me().divisi === 'qc') { if (cek) o['q-cek'] = cek; var antre = antreanQC().length; if (antre) o['q-qc'] = antre; }
   return o;
 }
 A.tab = function (el) { S.tab = el.getAttribute('data-id'); S.f.q = ''; render(); window.scrollTo(0, 0); };
@@ -2018,6 +2039,8 @@ function gateHtml() {
   var head = '<div class="row">' + logoImg('l') + '<div class="grow"><div class="logo">' + esc(nama) + ' <i>' + esc(appLabel(kunci)) + '</i></div><div class="tag">' +
     esc(kunci ? DIV_APP[kunci].tag : 'Potong, maklon jahit, dan QC dalam satu data.') + '</div></div></div>';
   try { document.title = nama + ' ' + appLabel(kunci); } catch (e) {}
+  /* layar memuat: logo di tengah */
+  if (g.loading && !g.needLink) return '<div class="splash">' + logoImg('xl napas') + '<div class="logo">' + esc(nama) + ' <i>' + esc(appLabel(kunci)) + '</i></div><div class="tag">Memuat…</div></div>';
   var body;
   if (g.needLink) {
     /* versi yang dipasang di alamat web sendiri: tanpa link dari owner, aplikasi tidak tahu data pusatnya di mana */
@@ -2188,14 +2211,14 @@ function poTahap(po) {
   if (t.diajukan > 0) return { k: 'cek', label: 'Setoran menunggu dicek', cls: 'warn' };
   if (t.siapQC > 0) return { k: 'qc', label: 'Siap QC', cls: 'info' };
   if (t.sisaMaklon > 0) return { k: 'maklon', label: 'Di maklon', cls: 'info' };
-  if (t.siapKirim > 0) return { k: 'kirim', label: 'Siap dikirim ke maklon', cls: 'warn' };
+  if (t.siapKirim > 0) return { k: 'kirim', label: 'Siap ditugaskan ke maklon', cls: 'warn' };
   if (!t.potong) return { k: 'potong', label: 'Belum dipotong', cls: '' };
   if (po.jenis !== 'pesanan' && t.stok > 0) return { k: 'jual', label: 'Belum input BigSeller', cls: 'acc' };
   return { k: 'tuntas', label: 'Tuntas', cls: 'ok' };
 }
 function stagesHtml(po) {
   var t = T(po); var base = Math.max(po.total || 0, t.potong || 0, t.kirim || 0, 1);
-  var cells = [['Potong', t.potong, 'c-potong'], ['Kirim', t.kirim, 'c-maklon'], ['Setor', t.terima, 'c-cek'], ['QC', (t.qcOk || 0) + (t.qcOffline || 0), 'c-qc']];
+  var cells = [['Potong', t.potong, 'c-potong'], ['Tugas', t.kirim, 'c-maklon'], ['Setor', t.terima, 'c-cek'], ['QC', (t.qcOk || 0) + (t.qcOffline || 0), 'c-qc']];
   if (po.jenis !== 'pesanan') cells.push(['BigSeller', t.bigseller, 'c-jual']);
   return '<div class="stages' + (cells.length === 4 ? ' four' : '') + '">' + cells.map(function (c) {
     var n = c[1] || 0;
@@ -2222,7 +2245,7 @@ function poCard(po, extra) {
     (po.status === 'aktif' && po.deadline ? deadlineChip(po.deadline) : '') + '</div></div></div>' + stagesHtml(po) + (extra || '') + '</button>';
 }
 
-/* sisa di satu maklon untuk satu PO, per ukuran (dari slip kirim dikurangi setoran) */
+/* sisa di satu maklon untuk satu PO, per ukuran (dari slip penugasan dikurangi setoran) */
 function sisaMaklonUk(poId, maklonId) {
   var o = {};
   S.state.kirim.forEach(function (k) { if (k.poId === poId && k.maklonId === maklonId) for (var s in k.ukuran) o[s] = (o[s] || 0) + coreNum(k.ukuran[s]); });
@@ -2293,7 +2316,7 @@ function slipSheet(type, id) {
   } else {
     /* laporan setor dari maklon baru menjadi slip (bernomor dan berharga) setelah dihitung QC */
     var belumSlip = type === 'setor' && rec.status !== 'diterima';
-    title = type === 'kirim' ? 'Slip kirim bahan' : (belumSlip ? 'Laporan setor' : 'Slip setor jahit');
+    title = type === 'kirim' ? 'Slip penugasan jahit' : (belumSlip ? 'Laporan setor' : 'Slip setor jahit');
     var po = ctx.po; var ss = STATUS_SETOR[rec.status] || [rec.status, ''];
     h = (belumSlip && rec.status === 'diajukan' ? '<div class="note">Belum menjadi slip. Slip dan harganya terbit setelah QC menghitung barang ini.</div>' : '') +
       '<div class="slip"><div class="kop"><span class="row gap-s">' + logoImg() + '<b>' + esc(st.namaUsaha) + '</b></span><span class="small b">' + esc(rec.noSlip || 'Belum ada slip') + '</span></div>' +
@@ -2369,8 +2392,8 @@ VIEWS.akun = function () {
   var u = me();
   return '<div class="head"><h1>Akun</h1></div>' +
     '<div class="card row"><span class="ava l">' + esc(inisial(u.nama)) + '</span><span class="grow"><span class="b">' + esc(u.nama) + '</span><br><span class="muted small">' + esc((DIVISI[u.divisi] || {}).label || '') + '</span></span></div>' +
+    '<div class="note">' + ic('key', 's') + ' PIN diatur oleh owner. Kalau lupa atau ingin diganti, hubungi owner.</div>' +
     '<div class="card flush"><div class="list">' +
-    '<button class="item" data-a="pinOpen">' + ic('key') + '<span class="grow t">Ganti PIN</span>' + ic('chev') + '</button>' +
     '<button class="item" data-a="syncNow">' + ic('sync') + '<span class="grow t">Muat ulang data</span>' + ic('chev') + '</button>' +
     '<button class="item" data-a="logout">' + ic('out') + '<span class="grow t">Keluar</span>' + ic('chev') + '</button></div></div>' +
     '<p class="xs muted">Versi ' + esc(S.state.appVersion || APP_VERSION) + '</p>';
@@ -2425,12 +2448,12 @@ function tindakan() {
       if (dl !== null && dl <= 3) out.push({ w: dl < 0 ? 1 : 2, icon: 'alert', cls: dl < 0 ? 'bad' : 'warn', t: 'Pesanan ' + (po.pelanggan || '') + (dl < 0 ? ' lewat ' + (-dl) + ' hari' : (dl === 0 ? ' jatuh tempo hari ini' : ' jatuh tempo ' + dl + ' hari lagi')), d: po.nama + ' · ' + po.noPO, btn: 'Lihat', a: 'poOpen', id: po.id });
     }
     var t = T(po);
-    if (t.siapKirim > 0) out.push({ w: 3, n: t.siapKirim, icon: 'send', cls: 'info', t: nf(t.siapKirim) + ' pcs sudah dipotong, belum dikirim ke maklon', d: po.nama + ' · ' + po.noPO, btn: 'Kirim', a: 'kirimOpen', id: po.id });
+    if (t.siapKirim > 0) out.push({ w: 3, n: t.siapKirim, icon: 'send', cls: 'info', t: nf(t.siapKirim) + ' pcs sudah dipotong, belum ditugaskan ke maklon', d: po.nama + ' · ' + po.noPO, btn: 'Tugaskan', a: 'kirimOpen', id: po.id });
   });
   /* divisi yang belum punya akun sama sekali */
   [['qc', 'Belum ada akun QC', 'Setoran maklon baru bisa dihitung QC setelah akunnya dibuat. Sementara itu owner yang menghitung.'],
    ['potong', 'Belum ada akun tukang potong', 'Hasil potong belum bisa dicatat dari HP tukang potong.'],
-   ['jahit', 'Belum ada akun maklon jahit', 'Bahan belum bisa dikirim ke maklon.']].forEach(function (x) {
+   ['jahit', 'Belum ada akun maklon jahit', 'Bahan belum bisa ditugaskan ke maklon.']].forEach(function (x) {
     if (!st.users.some(function (u) { return u.aktif && u.divisi === x[0]; })) out.push({ w: 0, icon: 'user', cls: 'warn', t: x[1], d: x[2], btn: 'Tambah', a: 'pegawaiBaru', id: x[0] });
   });
   /* slip yang sudah terbit tetapi harganya masih kosong */
@@ -2465,7 +2488,7 @@ VIEWS.beranda = function () {
     kpi('Di maklon', nf(k.maklon), 'pcs belum disetor', 'po:maklon') +
     kpi('Menunggu dicek', nf(k.cekN), k.cekN ? nf(k.cekPcs) + ' pcs setoran' : 'tidak ada setoran baru', 'po:cek', k.cekN > 0) +
     kpi('Siap QC', nf(k.qc), 'pcs sudah diterima', 'po:qc') +
-    kpi('Belum BigSeller', nf(k.bs), 'pcs lolos QC', 'po:jual') +
+    kpi('Belum BigSeller', nf(k.bs), 'pcs OK QC', 'po:jual') +
     kpi('Upah belum dibayar', rp(k.upah), 'potong + jahit', 'upah', false, true) + '</div>';
 
   var todo = tindakan();
@@ -2529,7 +2552,7 @@ A.kpiGo = function (el) {
 };
 
 /* ---------- tab PO ---------- */
-var TAHAP_OPSI = [['', 'Semua tahap'], ['potong', 'Belum dipotong'], ['kirim', 'Siap dikirim ke maklon'], ['maklon', 'Di maklon'], ['cek', 'Setoran menunggu dicek'], ['qc', 'Siap QC'], ['jual', 'Belum input BigSeller'], ['tuntas', 'Tuntas']];
+var TAHAP_OPSI = [['', 'Semua tahap'], ['potong', 'Belum dipotong'], ['kirim', 'Siap ditugaskan ke maklon'], ['maklon', 'Di maklon'], ['cek', 'Setoran menunggu dicek'], ['qc', 'Siap QC'], ['jual', 'Belum input BigSeller'], ['tuntas', 'Tuntas']];
 function poMasukTahap(po, k) {
   var t = T(po);
   if (k === 'potong') return !t.potong;
@@ -2579,7 +2602,7 @@ function poSheet(id) {
     var b = '';
     if (admin) {
       b += '<button class="btn' + (!t.potong ? ' pri' : '') + '" data-a="potongOpen"' + d + '>' + ic('cut') + 'Catat potong</button>';
-      b += '<button class="btn' + (t.siapKirim > 0 ? ' pri' : '') + '" data-a="kirimOpen"' + d + '>' + ic('send') + 'Kirim ke maklon</button>';
+      b += '<button class="btn' + (t.siapKirim > 0 ? ' pri' : '') + '" data-a="kirimOpen"' + d + '>' + ic('send') + 'Penugasan jahit</button>';
       b += '<button class="btn" data-a="setorOpen"' + d + '>' + ic('inbox') + 'Catat setoran</button>';
       b += '<button class="btn' + (t.siapQC > 0 ? ' pri' : '') + '" data-a="qcOpen"' + d + '>' + ic('shield') + 'Input QC</button>';
       if (po.jenis !== 'pesanan') b += '<button class="btn' + (t.stok > 0 ? ' pri' : '') + '" data-a="gudangOpen"' + d + '>' + ic('tag') + 'Input BigSeller</button>';
@@ -2593,14 +2616,14 @@ function poSheet(id) {
 
   /* per ukuran */
   var sizes = poSizes(po); var au = (po.agg && po.agg.ukuran) || {}; if (au['?']) sizes = sizes.concat(['?']);
-  var cols = [['Target', function (s) { return (po.ukuran || {})[s] || 0; }, po.total], ['Potong', 'potong', t.potong], ['Kirim', 'kirim', t.kirim], ['Setor', 'terima', t.terima], ['Lolos QC', 'qcOk', t.qcOk]];
+  var cols = [['Target', function (s) { return (po.ukuran || {})[s] || 0; }, po.total], ['Potong', 'potong', t.potong], ['Tugas', 'kirim', t.kirim], ['Setor', 'terima', t.terima], ['OK QC', 'qcOk', t.qcOk]];
   if (po.jenis !== 'pesanan') cols.push(['BigSeller', 'bigseller', t.bigseller]);
   if (!po.total) cols.shift();
   var cell = function (n) { return '<td' + (n ? '' : ' class="z"') + '>' + (n ? nf(n) : '–') + '</td>'; };
   h += '<div class="col gap-s"><div class="label">Per ukuran</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ukuran</th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' +
     sizes.map(function (s) { var u = au[s] || {}; return '<tr><td class="b">' + (s === '?' ? 'Tanpa ukuran' : esc(s)) + '</td>' + cols.map(function (c) { return cell(typeof c[1] === 'function' ? c[1](s) : (u[c[1]] || 0)); }).join('') + '</tr>'; }).join('') +
     '</tbody><tfoot><tr><td>Total</td>' + cols.map(function (c) { return '<td>' + nf(c[2] || 0) + '</td>'; }).join('') + '</tr></tfoot></table></div>' +
-    ((t.reject || t.qcReject || t.qcOffline || t.qcPerbaikan) ? '<div class="chips">' + (t.reject ? '<span class="chip bad">Reject jahit ' + nf(t.reject) + '</span>' : '') + (t.qcReject ? '<span class="chip bad">Reject QC ' + nf(t.qcReject) + '</span>' : '') + (t.qcPerbaikan > 0 ? '<span class="chip warn">Diperbaiki ' + nf(t.qcPerbaikan) + '</span>' : '') + (t.qcOffline ? '<span class="chip">Jual offline ' + nf(t.qcOffline) + '</span>' : '') + '</div>' : '') + '</div>';
+    ((t.reject || t.qcReject || t.qcOffline || t.qcPerbaikan) ? '<div class="chips">' + (t.reject ? '<span class="chip bad">Reject jahit ' + nf(t.reject) + '</span>' : '') + (t.qcReject ? '<span class="chip bad">Reject QC ' + nf(t.qcReject) + '</span>' : '') + (t.qcPerbaikan > 0 ? '<span class="chip warn">Diperbaiki ' + nf(t.qcPerbaikan) + '</span>' : '') + (t.qcOffline ? '<span class="chip">Offline ' + nf(t.qcOffline) + '</span>' : '') + '</div>' : '') + '</div>';
 
   /* per maklon */
   var mk = (po.agg && po.agg.maklon) || {}; var mids = Object.keys(mk);
@@ -2643,7 +2666,7 @@ A.poStatusSet = function (el) {
 VIEWS.maklon = function () {
   var st = S.state; var sub = S.sub.maklon || 'ringkas';
   var head = '<div class="head"><div class="grow"><h1>Maklon jahit</h1><div class="sub">Bahan yang keluar, setoran yang masuk, dan sisanya.</div></div></div>' +
-    '<div class="tools">' + seg('maklon', [['ringkas', 'Ringkasan'], ['kirim', 'Slip kirim'], ['setor', 'Slip setor']], sub) + '</div>';
+    '<div class="tools">' + seg('maklon', [['ringkas', 'Ringkasan'], ['kirim', 'Slip penugasan'], ['setor', 'Slip setor']], sub) + '</div>';
   if (sub === 'ringkas') {
     var list = maklonAktif();
     if (!list.length) return head + '<div class="card">' + emptyBox('Belum ada maklon jahit.', '<button class="btn pri sm" data-a="pegawaiOpen">Tambah maklon</button>') + '</div>';
@@ -2657,7 +2680,7 @@ VIEWS.maklon = function () {
         (rows.length ? '<div class="list" style="margin-inline:-14px">' + rows.slice(0, 4).map(function (r) {
           return '<button class="item" data-a="poOpen" data-id="' + esc(r.po.id) + '"><span class="grow"><span class="t">' + esc(r.po.nama) + '</span><br><span class="d">' + (r.x.target ? deadlineChip(r.x.target, 'Target ') : 'tanpa target') + '</span></span><span class="n">' + nf(r.x.sisa) + '</span></button>';
         }).join('') + '</div>' : '<p class="small muted">Tidak ada bahan di maklon ini.</p>') +
-        '<div class="row"><button class="btn sm grow" data-a="maklonOpen" data-id="' + esc(u.id) + '">Lihat semua</button><button class="btn sm pri grow" data-a="kirimPick" data-id="' + esc(u.id) + '">' + ic('send', 's') + 'Kirim bahan</button></div></div>';
+        '<div class="row"><button class="btn sm grow" data-a="maklonOpen" data-id="' + esc(u.id) + '">Lihat semua</button><button class="btn sm pri grow" data-a="kirimPick" data-id="' + esc(u.id) + '">' + ic('send', 's') + 'Tugaskan jahit</button></div></div>';
     }).join('') + '</div>';
   }
   var type = sub; var src = type === 'kirim' ? st.kirim : st.setor;
@@ -2685,14 +2708,14 @@ function maklonSheet(id) {
   rows.sort(function (a, b) { return String(a.x.target || '9') < String(b.x.target || '9') ? -1 : 1; });
   var unpaid = unpaidOf(u);
   var h = '<div class="grid g-kpi" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="kpi"><span class="label">Sisa</span><span class="v">' + nf(sisa) + '</span><span class="u">pcs</span></div><div class="kpi"><span class="label">Dicek</span><span class="v">' + nf(cek) + '</span><span class="u">pcs menunggu</span></div><div class="kpi"><span class="label">Upah</span><span class="v money">' + rp(sumUpah(unpaid)) + '</span><span class="u">belum dibayar</span></div></div>' +
-    '<div class="row wrap"><button class="btn pri" data-a="kirimPick" data-id="' + esc(id) + '">' + ic('send') + 'Kirim bahan</button><button class="btn" data-a="setorPick" data-id="' + esc(id) + '">' + ic('inbox') + 'Catat setoran</button>' + (unpaid.length ? '<button class="btn" data-a="upahOpen" data-id="' + esc(id) + '">' + ic('wallet') + 'Bayar upah</button>' : '') + '</div>';
+    '<div class="row wrap"><button class="btn pri" data-a="kirimPick" data-id="' + esc(id) + '">' + ic('send') + 'Tugaskan jahit</button><button class="btn" data-a="setorPick" data-id="' + esc(id) + '">' + ic('inbox') + 'Catat setoran</button>' + (unpaid.length ? '<button class="btn" data-a="upahOpen" data-id="' + esc(id) + '">' + ic('wallet') + 'Bayar upah</button>' : '') + '</div>';
   h += '<div class="col gap-s"><div class="label">Kerjaan berjalan</div><div class="card flush"><div class="list">' + (rows.length ? rows.map(function (r) {
     return '<button class="item" data-a="poOpen" data-id="' + esc(r.po.id) + '">' + thumb(r.po) + '<span class="grow"><span class="t">' + esc(r.po.nama) + '</span><br><span class="d">dikirim ' + nf(r.x.kirim) + ' · diterima ' + nf(r.x.terima) + (r.x.diajukan ? ' · dicek ' + nf(r.x.diajukan) : '') + '</span><br>' + (r.x.target ? deadlineChip(r.x.target, 'Target ') : '') + '</span><span class="n">' + nf(r.x.sisa) + '</span></button>';
   }).join('') : emptyBox('Tidak ada bahan di maklon ini.')) + '</div></div></div>';
   var slips = st.setor.filter(function (r) { return r.maklonId === id; }).map(function (r) { return { type: 'setor', r: r }; }).concat(st.kirim.filter(function (r) { return r.maklonId === id; }).map(function (r) { return { type: 'kirim', r: r }; }));
   slips.sort(function (a, b) { return String(a.r.tanggal) + String(a.r.dibuat) < String(b.r.tanggal) + String(b.r.dibuat) ? 1 : -1; });
   h += '<div class="col gap-s"><div class="label">Slip terbaru</div><div class="card flush"><div class="list">' + (slips.length ? slips.slice(0, 25).map(function (s) {
-    return '<button class="item" data-a="slip" data-t="' + s.type + '" data-id="' + esc(s.r.id) + '"><span class="chip ' + (s.type === 'kirim' ? 'info' : (STATUS_SETOR[s.r.status] || ['', ''])[1]) + '">' + (s.type === 'kirim' ? 'Kirim' : (STATUS_SETOR[s.r.status] || [s.r.status])[0]) + '</span><span class="grow"><span class="t">' + esc(poNama(s.r.poId)) + '</span><br><span class="d">' + esc(s.r.noSlip) + ' · ' + tgl(s.r.tanggal) + '</span></span><span class="n">' + nf(s.r.total) + '</span></button>';
+    return '<button class="item" data-a="slip" data-t="' + s.type + '" data-id="' + esc(s.r.id) + '"><span class="chip ' + (s.type === 'kirim' ? 'info' : (STATUS_SETOR[s.r.status] || ['', ''])[1]) + '">' + (s.type === 'kirim' ? 'Tugas' : (STATUS_SETOR[s.r.status] || [s.r.status])[0]) + '</span><span class="grow"><span class="t">' + esc(poNama(s.r.poId)) + '</span><br><span class="d">' + esc(s.r.noSlip) + ' · ' + tgl(s.r.tanggal) + '</span></span><span class="n">' + nf(s.r.total) + '</span></button>';
   }).join('') : emptyBox('Belum ada slip.')) + '</div></div></div>';
   return sheetHtml(u.nama, h);
 }
@@ -2768,7 +2791,8 @@ VIEWS.lain = function () {
     (mode === 'demo' ? item('demoReset', 'trash', 'Kosongkan data coba', 'Hapus semua data di perangkat ini dan mulai dari nol') : '') +
     item('pasangOpen', 'shield', mode === 'demo' ? 'Cara menyambungkan ke pegawai' : 'Keamanan &amp; link pegawai', mode === 'demo' ? 'Pasang di Google Sheets milik Anda' : 'Siapa yang bisa membuka aplikasi ini') + '</div></div></div>' +
     '<div class="col gap-s"><div class="label">Akun</div><div class="card flush"><div class="list">' +
-    item('pinOpen', 'key', 'Ganti PIN') + item('syncNow', 'sync', 'Muat ulang data') + item('logout', 'out', 'Keluar') + '</div></div></div>' +
+    (u.divisi === 'owner' ? item('pinOpen', 'key', 'Ganti PIN saya', 'PIN pegawai diganti dari menu Pegawai') : '') + item('syncNow', 'sync', 'Muat ulang data') + item('logout', 'out', 'Keluar') + '</div></div></div>' +
+    (u.divisi === 'owner' ? '' : '<div class="note">' + ic('key', 's') + ' PIN diatur oleh owner.</div>') +
     '<p class="xs muted">Versi ' + esc(st.appVersion || APP_VERSION) + '</p>';
 };
 function backHead(title, sub) {
@@ -2896,7 +2920,7 @@ VIEWS['j-slip'] = function () {
   return '<div class="head"><div class="grow"><h1>Slip</h1><div class="sub">Ketuk slip untuk melihat, menyalin, atau mengunduhnya.</div></div></div>' +
     '<div class="tools">' + seg('jslip', [['setor', 'Slip setor'], ['kirim', 'Bahan diterima']], sub) + '</div>' +
     (sub === 'setor' && tunggu ? '<div class="note">' + tunggu + ' laporan setor masih menunggu dihitung QC. Slipnya muncul di sini setelah dihitung.</div>' : '') +
-    '<div class="card flush"><div class="list">' + (rows.length ? rows.slice(0, 150).map(function (r) { return slipRow(sub, r); }).join('') : emptyBox(sub === 'kirim' ? 'Belum ada slip kirim bahan.' : 'Belum ada slip setor. Slip terbit setelah QC menghitung setoran Anda.')) + '</div></div>';
+    '<div class="card flush"><div class="list">' + (rows.length ? rows.slice(0, 150).map(function (r) { return slipRow(sub, r); }).join('') : emptyBox(sub === 'kirim' ? 'Belum ada slip penugasan jahit.' : 'Belum ada slip setor. Slip terbit setelah QC menghitung setoran Anda.')) + '</div></div>';
 };
 VIEWS['j-upah'] = function () {
   var st = S.state; var tunggu = 0;
@@ -2910,40 +2934,70 @@ VIEWS['q-cek'] = function () {
   var st = S.state;
   var tunggu = st.setor.filter(function (s) { return s.status === 'diajukan'; }).sort(function (a, b) { return String(a.dibuat) < String(b.dibuat) ? -1 : 1; });
   var baru = st.setor.filter(function (s) { return s.status === 'diterima' && s.diprosesOleh === me().id; }).sort(function (a, b) { return String(a.diprosesPada) < String(b.diprosesPada) ? 1 : -1; }).slice(0, 8);
-  return '<div class="head"><div class="grow"><h1>Setoran maklon</h1><div class="sub">Hitung barang yang datang, lalu terima.</div></div><button class="btn" data-a="setorLangsung">' + ic('plus') + 'Catat langsung</button></div>' +
+  return '<div class="head"><div class="grow"><h1>Hitung fisik</h1><div class="sub">Setiap setoran maklon muncul di sini. Hitung barangnya, lalu terima. Slip terbit dan masuk Antrean QC.</div></div><button class="btn" data-a="setorLangsung">' + ic('plus') + 'Catat langsung</button></div>' +
     (tunggu.length ? '<div class="grid g-cards">' + tunggu.map(function (s) {
       var po = D.po[s.poId] || { nama: 'PO terhapus' };
       return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">Laporan setor · ' + esc(lalu(s.dibuat)) + '</div>' +
         '<div class="row"><span class="ava">' + esc(inisial(namaUser(s.maklonId))) + '</span><span class="b">' + esc(namaUser(s.maklonId)) + '</span></div></div><span class="total-big">' + nf(s.total) + '</span></div>' +
         '<div class="chips">' + sizeChips(s.ukuran) + (s.reject ? ' <span class="chip bad">Reject ' + nf(s.reject) + '</span>' : '') + '</div>' + (s.catatan ? '<div class="small muted">' + esc(s.catatan) + '</div>' : '') +
         '<button class="btn pri" data-a="terimaOpen" data-id="' + esc(s.id) + '">' + ic('check') + 'Hitung &amp; terima</button></div>';
-    }).join('') + '</div>' : '<div class="card">' + emptyBox('Tidak ada setoran yang menunggu dicek.') + '</div>') +
+    }).join('') + '</div>' : '<div class="card">' + emptyBox('Tidak ada setoran yang menunggu dihitung.') + '</div>') +
     (baru.length ? '<div class="card flush"><div class="sec-h"><h3>Baru Anda terima</h3></div><div class="list">' + baru.map(function (r) { return slipRow('setor', r); }).join('') + '</div></div>' : '');
 };
 A.setorLangsung = function () {
   var list = poAktif().filter(function (p) { return T(p).sisaMaklon > 0; }).map(function (p) { var q = Object.create(p); q._n = T(p).sisaMaklon; return q; });
   pickPO('Setoran untuk PO mana?', list, function (poId) { openSetor(poId, ''); }, 'Tidak ada PO yang sedang di maklon.');
 };
+/* Antrean QC: slip setor yang sudah dihitung dan belum selesai diperiksa, yang paling lama di atas.
+   Hasil QC yang dicatat per slip mengurangi slip itu. Hasil QC lama yang dicatat per PO (tanpa slip)
+   dianggap menghabiskan slip PO itu mulai dari yang paling tua. */
+function antreanQC() {
+  var st = S.state; var perSlip = {}; var perSlipUk = {}; var tanpaSlip = {};
+  st.qc.forEach(function (q) {
+    var n = coreNum(q.total) + coreNum(q.offline) + coreNum(q.reject) + coreNum(q.perbaikan);
+    if (q.setorId) {
+      perSlip[q.setorId] = (perSlip[q.setorId] || 0) + n;
+      var u = perSlipUk[q.setorId] = perSlipUk[q.setorId] || {}; for (var s in q.ukuran) u[s] = (u[s] || 0) + coreNum(q.ukuran[s]);
+    } else tanpaSlip[q.poId] = (tanpaSlip[q.poId] || 0) + n;
+  });
+  var slips = st.setor.filter(function (s) { return s.status === 'diterima' && s.total > 0 && D.po[s.poId] && D.po[s.poId].status === 'aktif'; })
+    .sort(function (a, b) { return String(a.tanggal) + String(a.diprosesPada || a.dibuat) < String(b.tanggal) + String(b.diprosesPada || b.dibuat) ? -1 : 1; });
+  var out = [];
+  slips.forEach(function (s) {
+    var sisa = s.total - (perSlip[s.id] || 0);
+    var lama = tanpaSlip[s.poId] || 0; var ambil = Math.min(pos(sisa), pos(lama)); sisa -= ambil; tanpaSlip[s.poId] = lama - ambil;
+    if (sisa <= 0) return;
+    var uk = {}; var ada = false;
+    if (!ambil) for (var k in s.ukuran) { var r = coreNum(s.ukuran[k]) - ((perSlipUk[s.id] || {})[k] || 0); if (r > 0) { uk[k] = r; ada = true; } }
+    out.push({ s: s, sisa: sisa, uk: ada ? uk : null });
+  });
+  return out;
+}
 VIEWS['q-qc'] = function () {
-  var st = S.state;
+  var st = S.state; var antre = antreanQC();
   S.listFn = function () {
-    var rows = st.po.filter(function (p) { var t = T(p); return p.status === 'aktif' && (t.siapQC > 0 || t.qcPerbaikan > 0) && cocok(S.f.q, [p.nama, p.noPO, p.series, p.pelanggan]); });
-    rows.sort(function (a, b) { return T(b).siapQC - T(a).siapQC; });
-    if (!rows.length) return '<div class="card">' + emptyBox('Tidak ada barang yang menunggu QC.') + '</div>';
-    return '<div class="grid g-cards">' + rows.slice(0, 80).map(function (po) {
-      var t = T(po);
-      return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + poMeta(po) + '</div>' +
-        '<div class="chips">' + (t.qcPerbaikan > 0 ? '<span class="chip warn">' + nf(t.qcPerbaikan) + ' pcs diperbaiki</span>' : '') + (po.deadline ? deadlineChip(po.deadline, 'Deadline ') : '') + '</div></div>' +
-        '<span class="col gap-s right"><span class="total-big">' + nf(pos(t.siapQC)) + '</span><span class="xs muted">siap QC</span></span></div>' +
-        '<div class="row"><button class="btn sm grow" data-a="poOpen" data-id="' + esc(po.id) + '">Rincian</button><button class="btn pri sm grow" data-a="qcOpen" data-id="' + esc(po.id) + '">' + ic('shield', 's') + 'Input QC</button></div></div>';
+    var rows = antre.filter(function (x) { var po = D.po[x.s.poId] || {}; return cocok(S.f.q, [po.nama, po.noPO, x.s.noSlip, namaUser(x.s.maklonId)]); });
+    if (!rows.length) return '<div class="card">' + emptyBox(antre.length ? 'Tidak ada yang cocok.' : 'Antrean kosong. Slip masuk ke sini setelah setoran maklon dihitung di tab Hitung fisik.') + '</div>';
+    return '<div class="grid g-cards">' + rows.slice(0, 80).map(function (x, i) {
+      var s = x.s; var po = D.po[s.poId] || { nama: 'PO terhapus' };
+      return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + esc(s.noSlip) + ' · dihitung ' + tgl(String(s.diprosesPada || s.tanggal).slice(0, 10)) + '</div>' +
+        '<div class="row"><span class="ava">' + esc(inisial(namaUser(s.maklonId))) + '</span><span class="b">' + esc(namaUser(s.maklonId)) + '</span></div></div>' +
+        '<span class="col gap-s right"><span class="total-big">' + nf(x.sisa) + '</span><span class="xs muted">' + (x.sisa < s.total ? 'sisa dari ' + nf(s.total) : 'pcs') + '</span></span></div>' +
+        '<div class="chips">' + sizeChips(x.uk || s.ukuran) + '</div>' +
+        '<button class="btn pri" data-a="qcSlipOpen" data-id="' + esc(s.id) + '">' + ic('shield') + 'Periksa</button></div>';
     }).join('') + '</div>';
   };
-  var siap = 0; st.po.forEach(function (p) { if (p.status === 'aktif') siap += pos(T(p).siapQC); });
+  var siap = 0; antre.forEach(function (x) { siap += x.sisa; });
   var hari = 0; st.qc.forEach(function (r) { if (r.tanggal === todayYmd()) hari += r.total + coreNum(r.offline) + coreNum(r.reject) + pos(coreNum(r.perbaikan)); });
-  return '<div class="head"><div class="grow"><h1>QC</h1><div class="sub">Barang yang sudah diterima dari maklon dan belum diperiksa.</div></div></div>' +
-    miniKpi([['Siap QC', nf(siap), 'pcs menunggu', siap > 0], ['Hari ini', nf(hari), 'pcs diperiksa']]) +
-    '<div class="tools">' + searchBox('q', 'Cari barang atau nomor PO') + '</div><div id="list">' + S.listFn() + '</div>';
+  var perbaikan = st.po.filter(function (p) { return p.status === 'aktif' && T(p).qcPerbaikan > 0; });
+  return '<div class="head"><div class="grow"><h1>Antrean QC</h1><div class="sub">Slip yang sudah dihitung dan menunggu diperiksa. Yang paling lama di atas.</div></div></div>' +
+    miniKpi([['Antrean', nf(antre.length), 'slip · ' + nf(siap) + ' pcs', antre.length > 0], ['Hari ini', nf(hari), 'pcs diperiksa']]) +
+    '<div class="tools">' + searchBox('q', 'Cari barang, slip, atau nama maklon') + '</div><div id="list">' + S.listFn() + '</div>' +
+    (perbaikan.length ? '<div class="card flush"><div class="sec-h"><h3>Sedang diperbaiki maklon</h3></div><div class="list">' + perbaikan.map(function (po) {
+      return '<div class="item">' + thumb(po) + '<span class="grow"><span class="t">' + esc(po.nama) + '</span><br><span class="d">' + nf(T(po).qcPerbaikan) + ' pcs dikembalikan untuk dibetulkan</span></span><button class="btn sm" data-a="qcOpen" data-id="' + esc(po.id) + '">Sudah kembali</button></div>';
+    }).join('') + '</div></div>' : '');
 };
+A.qcSlipOpen = function (el) { var s = findSlip('setor', el.getAttribute('data-id')); if (!s) return toast('Slip ini sudah tidak ada.', true); openQC(s.poId, s.id); };
 VIEWS['q-riwayat'] = function () {
   var st = S.state;
   var rows = st.qc.slice().sort(function (a, b) { return String(a.tanggal) + String(a.dibuat) < String(b.tanggal) + String(b.dibuat) ? 1 : -1; });
@@ -2999,12 +3053,12 @@ A.kirimOpen = function (el) { openKirim(el.getAttribute('data-id'), ''); };
 function openKirim(poId, maklonId) {
   var fid = newId();
   openSheet(function () {
-    var po = D.po[poId]; if (!po) return sheetHtml('Kirim ke maklon', emptyBox('PO tidak ditemukan.'));
-    var list = maklonAktif(); if (!list.length) return sheetHtml('Kirim ke maklon', emptyBox('Belum ada maklon jahit. Tambahkan dulu di menu Lainnya › Pegawai.'));
+    var po = D.po[poId]; if (!po) return sheetHtml('Penugasan jahit', emptyBox('PO tidak ditemukan.'));
+    var list = maklonAktif(); if (!list.length) return sheetHtml('Penugasan jahit', emptyBox('Belum ada maklon jahit. Tambahkan dulu di menu Lainnya › Pegawai.'));
     var sp = sizesSplit(po); var au = (po.agg && po.agg.ukuran) || {}; var hint = {}, maks = {};
     sp.main.forEach(function (s) { var n = (au[s] || {}).siapKirim || 0; if (n > 0) { hint[s] = 'siap ' + n; maks[s] = n; } });
     var t = T(po);
-    return sheetHtml('Kirim ke maklon', '<div class="col" data-form="kirim" data-siap="' + pos(t.siapKirim) + '">' + hid('id', fid) + hid('poId', po.id) + poHead(po) +
+    return sheetHtml('Penugasan jahit', '<div class="col" data-form="kirim" data-siap="' + pos(t.siapKirim) + '">' + hid('id', fid) + hid('poId', po.id) + poHead(po) +
       fSelect('Maklon jahit', 'maklonId', [['', '— pilih maklon —']].concat(list.map(function (u) { return [u.id, u.nama]; })), maklonId || (list.length === 1 ? list[0].id : '')) +
       '<div class="col gap-s"><div class="label">Jumlah dikirim per ukuran (pcs)</div>' + sizeGrid(sp.main, { hint: hint, extra: sp.extra, maks: pos(t.siapKirim) ? maks : null, maksLabel: 'Isi semua yang siap' }) + '</div>' + sumLine('Total dikirim') +
       '<div class="f-row">' + fTanggal('Tanggal kirim', 'tanggal') + fTanggal('Target selesai', 'target', '') + '</div>' +
@@ -3017,7 +3071,7 @@ A.kirimSave = function (el) {
   if (!total) return toast('Isi jumlah pcs yang dikirim.', true);
   var go = function (btn) {
     return act(btn, req('createKirim', { kirim: { id: v.id, poId: v.poId, maklonId: v.maklonId, tanggal: v.tanggal, target: v.target, ukuran: uk, upah: v.upah, catatan: v.catatan } }))
-      .then(function (rec) { dropForm(f); toast('Slip kirim dibuat.'); if (rec && rec.id) openSlip('kirim', rec.id); });
+      .then(function (rec) { dropForm(f); toast('Slip penugasan dibuat.'); if (rec && rec.id) openSlip('kirim', rec.id); });
   };
   if (total > siap) confirmBox({ title: 'Melebihi hasil potong', text: 'Yang sudah dipotong dan belum dikirim hanya ' + nf(siap) + ' pcs, Anda mengisi ' + nf(total) + ' pcs. Tetap simpan?', ok: 'Tetap simpan' }, go);
   else go(el).catch(quiet);
@@ -3095,7 +3149,7 @@ function openTerima(id) {
 A.terimaSave = function (el) {
   var f = topForm(); var v = formVals(f); var uk = sizeVals(f); var reject = pos(coreInt(v.reject));
   if (!coreSumSizes(uk) && !reject) return toast('Isi jumlah yang diterima.', true);
-  act(el, req('prosesSetor', { id: v.id, keputusan: 'terima', ukuran: uk, reject: reject, upah: v.upah, catatan: v.catatan })).then(function (rec) { dropForm(f); toast('Setoran diterima. Slip ' + ((rec && rec.noSlip) || '') + ' terbit.'); }).catch(quiet);
+  act(el, req('prosesSetor', { id: v.id, keputusan: 'terima', ukuran: uk, reject: reject, upah: v.upah, catatan: v.catatan })).then(function (rec) { dropForm(f); toast('Slip ' + ((rec && rec.noSlip) || '') + ' terbit dan masuk antrean QC.'); }).catch(quiet);
 };
 A.terimaTolak = function () {
   var f = topForm(); var v = formVals(f);
@@ -3106,19 +3160,30 @@ A.terimaTolak = function () {
 
 /* ---------- QC ---------- */
 A.qcOpen = function (el) { openQC(el.getAttribute('data-id')); };
-function openQC(poId) {
+/* setorId diisi kalau QC dibuka dari antrean: hasilnya menempel pada slip setor itu dan pada maklonnya */
+function openQC(poId, setorId) {
   var fid = newId();
   openSheet(function () {
     var po = D.po[poId]; if (!po) return sheetHtml('Input QC', emptyBox('PO tidak ditemukan.'));
     var sp = sizesSplit(po); var au = (po.agg && po.agg.ukuran) || {}; var hint = {}, maks = {}; var any = false; var t = T(po);
-    sp.main.forEach(function (s) { var n = (au[s] || {}).siapQC || 0; if (n > 0) { hint[s] = 'siap ' + n; maks[s] = n; any = true; } });
+    var slip = setorId ? findSlip('setor', setorId) : null; var antre = null;
+    if (setorId) {
+      if (!slip) return sheetHtml('Periksa QC', emptyBox('Slip ini sudah tidak ada.'));
+      antre = antreanQC().filter(function (x) { return x.s.id === setorId; })[0];
+      if (!antre) return sheetHtml('Periksa QC', '<div class="note ok">Slip ' + esc(slip.noSlip) + ' sudah selesai diperiksa.</div>');
+      var uk = antre.uk || {};
+      Object.keys(slip.ukuran || {}).forEach(function (s) { if (sp.main.indexOf(s) < 0) { sp.main.push(s); sp.extra = sp.extra.filter(function (x) { return x !== s; }); } });
+      sp.main.forEach(function (s) { if (uk[s] > 0) { hint[s] = 'slip ' + uk[s]; maks[s] = uk[s]; any = true; } });
+    } else sp.main.forEach(function (s) { var n = (au[s] || {}).siapQC || 0; if (n > 0) { hint[s] = 'siap ' + n; maks[s] = n; any = true; } });
     var mk = Object.keys((po.agg && po.agg.maklon) || {}).map(function (id) { return [id, namaUser(id)]; });
-    return sheetHtml('Input QC', '<div class="col" data-form="qc" data-siap="' + pos(t.siapQC) + '">' + hid('id', fid) + hid('poId', po.id) + poHead(po) +
-      (t.qcPerbaikan > 0 ? '<label class="check"><input type="checkbox" name="dariPerbaikan" data-c="qcPerbaikan"><span>Ini hasil barang <b>perbaikan</b> yang sudah kembali (' + nf(t.qcPerbaikan) + ' pcs sedang diperbaiki)</span></label>' : '') +
-      '<div class="col gap-s"><div class="label">Lolos QC per ukuran (pcs)</div>' + sizeGrid(sp.main, { hint: hint, extra: sp.extra, maks: any ? maks : null, maksLabel: 'Semua lolos' }) + '</div>' +
-      '<div class="f-row three">' + fNum('Jual offline', 'offline', '', 'step="1" data-add') + '<label class="field" id="f-perbaikan"><span>Perbaikan</span><input type="number" inputmode="numeric" min="0" step="1" name="perbaikan" data-add></label>' + fNum('Reject', 'reject', '', 'step="1" data-add') + '</div>' +
-      '<p class="xs muted">Jual offline: layak jual tapi tidak masuk stok online. Perbaikan: dikembalikan untuk dibetulkan. Reject: tidak bisa dipakai.</p>' + sumLine('Total diperiksa') +
-      '<div class="f-row">' + (mk.length ? fSelect('Jahitan dari', 'maklonId', [['', '— semua / tidak tahu —']].concat(mk), mk.length === 1 ? mk[0][0] : '') : '<span></span>') + fTanggal('Tanggal', 'tanggal') + '</div>' + fCatatan() + '</div>', footSave('qcSave'));
+    var siap = slip ? antre.sisa : pos(t.siapQC);
+    return sheetHtml(slip ? 'Periksa ' + slip.noSlip : 'Input QC', '<div class="col" data-form="qc" data-siap="' + siap + '">' + hid('id', fid) + hid('poId', po.id) + hid('setorId', slip ? slip.id : '') + poHead(po) +
+      (slip ? '<dl class="kv"><dt>Jahitan</dt><dd class="b">' + esc(namaUser(slip.maklonId)) + '</dd><dt>Diperiksa</dt><dd>' + nf(antre.sisa) + ' pcs' + (antre.sisa < slip.total ? ' (sisa dari ' + nf(slip.total) + ')' : '') + '</dd></dl>' : '') +
+      (!slip && t.qcPerbaikan > 0 ? '<label class="check"><input type="checkbox" name="dariPerbaikan" data-c="qcPerbaikan"><span>Ini hasil barang <b>perbaikan</b> yang sudah kembali (' + nf(t.qcPerbaikan) + ' pcs sedang diperbaiki)</span></label>' : '') +
+      '<div class="col gap-s"><div class="label">OK per ukuran (pcs)</div>' + sizeGrid(sp.main, { hint: hint, extra: sp.extra, maks: any ? maks : null, maksLabel: 'Semua OK' }) + '</div>' +
+      '<div class="f-row three">' + fNum('Offline', 'offline', '', 'step="1" data-add') + '<label class="field" id="f-perbaikan"><span>Perbaikan</span><input type="number" inputmode="numeric" min="0" step="1" name="perbaikan" data-add></label>' + fNum('Reject', 'reject', '', 'step="1" data-add') + '</div>' +
+      '<p class="xs muted">Offline: layak jual tapi tidak masuk stok online. Perbaikan: dikembalikan ke maklon untuk dibetulkan. Reject: tidak bisa dipakai.</p>' + sumLine('Total diperiksa') +
+      '<div class="f-row">' + (!slip && mk.length ? fSelect('Jahitan dari', 'maklonId', [['', '— semua / tidak tahu —']].concat(mk), mk.length === 1 ? mk[0][0] : '') : '<span></span>') + fTanggal('Tanggal', 'tanggal') + '</div>' + fCatatan() + '</div>', footSave('qcSave'));
   });
 }
 C.qcPerbaikan = function (el) { var f = el.closest('[data-form]'); var p = $('#f-perbaikan', f); p.hidden = el.checked; if (el.checked) $('input', p).value = ''; recalc(f); };
@@ -3127,10 +3192,10 @@ A.qcSave = function (el) {
   var ok = coreSumSizes(uk), off = pos(coreInt(v.offline)), per = v.dariPerbaikan ? 0 : pos(coreInt(v.perbaikan)), rej = pos(coreInt(v.reject)); var total = ok + off + per + rej; var siap = coreNum(f.getAttribute('data-siap'));
   if (!total) return toast('Isi jumlah pcs hasil QC.', true);
   var go = function (btn) {
-    return act(btn, req('createQC', { qc: { id: v.id, poId: v.poId, maklonId: v.maklonId, tanggal: v.tanggal, ukuran: uk, offline: off, perbaikan: per, reject: rej, dariPerbaikan: !!v.dariPerbaikan, catatan: v.catatan } }))
-      .then(function () { dropForm(f); toast('Hasil QC tersimpan.'); });
+    return act(btn, req('createQC', { qc: { id: v.id, poId: v.poId, setorId: v.setorId, maklonId: v.maklonId, tanggal: v.tanggal, ukuran: uk, offline: off, perbaikan: per, reject: rej, dariPerbaikan: !!v.dariPerbaikan, catatan: v.catatan } }))
+      .then(function () { dropForm(f); toast(v.setorId && total >= siap ? 'Hasil QC tersimpan. Slip ini keluar dari antrean.' : 'Hasil QC tersimpan.'); });
   };
-  if (!v.dariPerbaikan && total > siap) confirmBox({ title: 'Melebihi yang siap QC', text: 'Barang yang sudah diterima dan belum di-QC ' + nf(siap) + ' pcs, yang diisi ' + nf(total) + ' pcs. Tetap simpan?', ok: 'Tetap simpan' }, go);
+  if (!v.dariPerbaikan && total > siap) confirmBox({ title: v.setorId ? 'Melebihi isi slip' : 'Melebihi yang siap QC', text: (v.setorId ? 'Slip ini tinggal ' : 'Barang yang sudah dihitung dan belum di-QC ') + nf(siap) + ' pcs, yang diisi ' + nf(total) + ' pcs. Tetap simpan?', ok: 'Tetap simpan' }, go);
   else go(el).catch(quiet);
 };
 
@@ -3299,18 +3364,23 @@ function openPegawai(id, divisiAwal) {
     var v = p || { nama: '', divisi: DIVISI[divisiAwal] ? divisiAwal : 'jahit', hp: '', aktif: true };
     var div = Object.keys(DIVISI).filter(function (d) { return !DIVISI[d].admin || me().divisi === 'owner'; }).map(function (d) { return [d, DIVISI[d].label]; });
     var belumPin = !!p && p.adaPin === false;
+    var owner = me().divisi === 'owner';
     var pin = p && !belumPin ? '' : String(1000 + Math.floor(Math.random() * 9000));
     return sheetHtml(p ? 'Ubah pegawai' : 'Pegawai baru', '<div class="col" data-form="pegawai">' + hid('id', p ? p.id : '') +
       fText('Nama', 'nama', v.nama, 'maxlength="60"') + fSelect('Divisi', 'divisi', div, v.divisi) +
-      '<div class="f-row">' + fText('Nomor HP (boleh kosong)', 'hp', v.hp, 'inputmode="tel" maxlength="30"') + fText(p ? 'PIN baru' : 'PIN (4–6 angka)', 'pin', pin, 'inputmode="numeric" maxlength="6" autocomplete="off"', belumPin ? 'Pegawai ini belum punya PIN. Angka ini usulan, boleh diganti.' : (p ? 'Kosongkan kalau tidak diganti.' : '')) + '</div>' +
-      '<p class="xs muted">Tukang potong mencatat hasil potong. Maklon jahit melihat bahan yang dipegangnya dan menyetor hasil. QC menghitung setoran dan mencatat hasil periksa. Admin bisa melakukan semua seperti owner, kecuali mengatur akun owner.</p>' +
+      '<div class="f-row">' + fText('Nomor HP (boleh kosong)', 'hp', v.hp, 'inputmode="tel" maxlength="30"') +
+      (owner ? fText(p ? 'PIN baru' : 'PIN (4–6 angka)', 'pin', pin, 'inputmode="numeric" maxlength="6" autocomplete="off"', belumPin ? 'Pegawai ini belum punya PIN. Angka ini usulan, boleh diganti.' : (p ? 'Kosongkan kalau tidak diganti.' : ''))
+        : '<div class="field"><span>PIN</span><em>Hanya owner yang mengatur PIN.' + (p ? '' : ' Akun ini baru bisa dipakai setelah owner mengisi PIN-nya.') + '</em></div>') + '</div>' +
+      '<p class="xs muted">Tukang potong mencatat hasil potong. Maklon jahit melihat bahan yang dipegangnya dan menyetor hasil. QC menghitung setoran dan memeriksa hasilnya. Admin bisa melakukan semua seperti owner, kecuali mengatur PIN dan akun owner. Pegawai tidak bisa mengganti PIN-nya sendiri.</p>' +
       (p ? '<label class="check"><input type="checkbox" name="aktif"' + (v.aktif ? ' checked' : '') + '><span>Aktif (boleh masuk aplikasi)</span></label>' : '') + '</div>', footSave('pegawaiSave'));
   });
 }
 A.pegawaiSave = function (el) {
   var f = topForm(); var v = formVals(f);
   if (!v.nama.trim()) return toast('Isi nama.', true);
-  if (!v.id && !/^\d{4,6}$/.test(v.pin)) return toast('PIN harus 4 sampai 6 angka.', true);
+  /* kolom PIN hanya ada untuk owner; admin membuat akun tanpa PIN, lalu owner yang mengisinya */
+  var owner = me().divisi === 'owner'; if (!owner) v.pin = '';
+  if (owner && !v.id && !/^\d{4,6}$/.test(v.pin)) return toast('PIN harus 4 sampai 6 angka.', true);
   if (v.id && v.pin && !/^\d{4,6}$/.test(v.pin)) return toast('PIN harus 4 sampai 6 angka.', true);
   var u = { id: v.id, nama: v.nama, divisi: v.divisi, hp: v.hp, pin: v.pin };
   if (v.id) u.aktif = !!v.aktif;
@@ -3322,7 +3392,7 @@ A.pegawaiSave = function (el) {
 function bagikanAkun(nama, pin, divisi) {
   /* tukang mendapat link aplikasi divisinya sendiri; owner dan admin mendapat link lengkap */
   var st = S.state.settings; var link = linkFor(DIV_APP[divisi] ? divisi : '');
-  var teks = 'Aplikasi ' + st.namaUsaha + ' ' + appLabel(divisi) + (link ? '\nBuka: ' + link : '') + '\nPilih nama: ' + nama + '\nPIN: ' + pin + '\nPIN bisa diganti di menu Akun.';
+  var teks = 'Aplikasi ' + st.namaUsaha + ' ' + appLabel(divisi) + (link ? '\nBuka: ' + link : '') + '\nPilih nama: ' + nama + '\nPIN: ' + pin + '\nPIN hanya bisa diganti oleh owner.';
   S.shareText = teks;
   openSheet(function () {
     return sheetHtml('Kirim ke ' + nama, '<p class="small muted">Salin lalu kirim lewat WhatsApp. PIN hanya ditampilkan sekali ini.</p><div class="slip" style="white-space:pre-wrap;font-size:14px">' + esc(teks) + '</div>' +
@@ -3359,10 +3429,10 @@ function imporSheet() {
     h = '<p>Pilih file backup dari aplikasi lama (misalnya <b>soldier-full-backup-….json</b>). File dibaca di perangkat ini, dirapikan, lalu dimasukkan ke data baru.</p>' +
       '<label class="btn pri">' + ic('up') + 'Pilih file backup<input type="file" accept=".json,application/json" data-c="imporFile" hidden></label>' +
       (imp.err ? '<div class="note bad">' + esc(imp.err) + '</div>' : '') +
-      '<div class="col gap-s"><div class="label">Yang dirapikan otomatis</div><ul class="small" style="margin:0;padding-left:18px"><li>Barang yang tadinya satu baris per ukuran digabung menjadi satu PO per barang.</li><li>Catatan kembar akibat sinkron lama dibuang.</li><li>Sisa di maklon dihitung ulang dari slip kirim dan setoran, bukan dari angka yang tersimpan.</li><li>Puluhan kolom status BigSeller diganti satu catatan jumlah.</li></ul></div>';
+      '<div class="col gap-s"><div class="label">Yang dirapikan otomatis</div><ul class="small" style="margin:0;padding-left:18px"><li>Barang yang tadinya satu baris per ukuran digabung menjadi satu PO per barang.</li><li>Catatan kembar akibat sinkron lama dibuang.</li><li>Sisa di maklon dihitung ulang dari slip penugasan dan setoran, bukan dari angka yang tersimpan.</li><li>Puluhan kolom status BigSeller diganti satu catatan jumlah.</li></ul></div>';
   } else if (imp.stage === 'ringkas') {
     var r = imp.conv.rows; var aktif = r.PO.filter(function (p) { return p.status === 'aktif'; }).length;
-    var rows = [['Pegawai', r.Pegawai.length], ['Produk', r.Produk.length], ['PO aktif', aktif], ['PO arsip', r.PO.length - aktif], ['Catatan potong', r.Potong.length], ['Slip kirim ke maklon', r.SlipKirim.length], ['Slip setor', r.SlipSetor.length], ['Catatan QC', r.QC.length], ['Input BigSeller', r.Gudang.length], ['Gambar', imp.conv.images.length], ['Catatan kembar dibuang', imp.conv.info.duplikat]];
+    var rows = [['Pegawai', r.Pegawai.length], ['Produk', r.Produk.length], ['PO aktif', aktif], ['PO arsip', r.PO.length - aktif], ['Catatan potong', r.Potong.length], ['Slip penugasan jahit', r.SlipKirim.length], ['Slip setor', r.SlipSetor.length], ['Catatan QC', r.QC.length], ['Input BigSeller', r.Gudang.length], ['Gambar', imp.conv.images.length], ['Catatan kembar dibuang', imp.conv.info.duplikat]];
     h = '<div class="note ok">File terbaca: ' + nf(imp.conv.info.baris) + ' baris data lama.</div>' +
       '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Akan dimasukkan</th><th>Jumlah</th></tr></thead><tbody>' + rows.map(function (x) { return '<tr><td>' + x[0] + '</td><td>' + nf(x[1]) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
       '<div class="col gap-s" data-form="impor"><div class="label">Upah di data lama</div><p class="small muted">Di aplikasi lama tidak ada satu pun upah yang ditandai sudah dibayar. Pilih bagaimana memperlakukannya:</p>' +
@@ -3414,7 +3484,7 @@ A.imporGo = function () {
   imp.q = q; imp.total = q.length; imp.done = 0; imp.masuk = 0; imp.gambar = 0; imp.pins = []; imp.ukuranSent = false;
   A.imporRun();
 };
-var NAMA_SHEET = { Pegawai: 'pegawai', Produk: 'produk', PO: 'PO', Potong: 'catatan potong', SlipKirim: 'slip kirim', SlipSetor: 'slip setor', QC: 'catatan QC', Gudang: 'input BigSeller' };
+var NAMA_SHEET = { Pegawai: 'pegawai', Produk: 'produk', PO: 'PO', Potong: 'catatan potong', SlipKirim: 'slip penugasan', SlipSetor: 'slip setor', QC: 'catatan QC', Gudang: 'input BigSeller' };
 A.imporRun = function () {
   var imp = S.imp; imp.stage = 'jalan'; paintTop();
   var step = function () {
