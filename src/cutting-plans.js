@@ -1,13 +1,19 @@
 /* Prepared materials reserve availability; only the linked Potong row consumes
    physical stock. The link is the authoritative use marker, requiring one write. */
-function coreCutPlanRows(plans, cuts) {
-  var used = {};
+function coreCutPlanRows(plans, cuts, poRows) {
+  var used = {}, poIds = {};
+  (poRows || []).forEach(function (r) { poIds[r.id] = true; });
   (cuts || []).forEach(function (r) { if (r.rencanaId) { if (!used[r.rencanaId]) used[r.rencanaId] = []; used[r.rencanaId].push(r); } });
   return (plans || []).map(function (r) {
     var out = {}; Object.keys(r).forEach(function (key) { out[key] = r[key]; });
     out.bahanList = coreParseJSON(r.bahanList, []);
+    out.alokasiBahan = coreParseJSON(r.alokasiBahan, []);
+    out.legacyBahanList = coreParseJSON(r.legacyBahanList, out.alokasiBahan.length ? [] : out.bahanList);
+    out.legacyRol = Math.max(0,coreNum(r.rol)-out.alokasiBahan.length);
+    out.poDraft = coreParseJSON(r.poDraft, null);
     var match = used[r.id] || [];
     out.status = match.length ? 'terpakai' : r.status;
+    if (!match.length && r.status === 'siap' && out.poDraft && poRows && !poIds[r.poId]) out.status = 'menyiapkan';
     out.potongId = match.length ? match[0].id : '';
     out.userId = match.length ? match[0].userId : '';
     out.duplicateUse = match.length > 1;
@@ -53,18 +59,21 @@ function coreCutCheckAvailable(list, availability) {
   });
 }
 function coreCutPlanIntent(row) {
-  return JSON.stringify({ poId: String(row.poId || ''), bahanList: coreParseJSON(row.bahanList, []).map(function (b) { return { nama: String(b.nama), qty: coreNum(b.qty), satuan: String(b.satuan || '') }; }), rol: coreNum(row.rol), catatan: String(row.catatan || ''), status: row.status || 'siap' });
+  var allocations = coreParseJSON(row.alokasiBahan,[]), materials = coreParseJSON(row.bahanList,[]);
+  return JSON.stringify({ poId: String(row.poId || ''), bahanList: materials.map(function (b) { return { nama: String(b.nama), qty: coreNum(b.qty), satuan: String(b.satuan || '') }; }), alokasiBahan:allocations, legacyBahanList:coreParseJSON(row.legacyBahanList,allocations.length ? [] : materials), rol: coreNum(row.rol), catatan: String(row.catatan || ''), status: row.status || 'siap' });
 }
 /* Bulk replacements must preserve the authoritative use link and its source,
    including payroll snapshots. Reservations are never imported or recreated. */
-function coreCutValidateReplacement(beforeCuts, afterCuts, plans, afterPO) {
-  var before = {}, after = {}, poIds = {}, planIds = {}, links = {};
+function coreCutValidateReplacement(beforeCuts, afterCuts, plans, afterPO, beforePO) {
+  var before = {}, after = {}, poIds = {}, beforePoIds = {}, planIds = {}, links = {};
+  (beforePO || []).forEach(function (r) { beforePoIds[r.id] = true; });
   (beforeCuts || []).forEach(function (r) { before[r.id] = r; });
   (afterCuts || []).forEach(function (r) { after[r.id] = r; });
   (afterPO || []).forEach(function (r) { poIds[r.id] = r; });
   var useIds = {}; (beforeCuts || []).forEach(function (r) { if (r.rencanaId) useIds[r.rencanaId] = true; });
   (plans || []).forEach(function (r) {
     planIds[r.id] = r;
+    if (!poIds[r.poId] && beforePO && !beforePoIds[r.poId] && coreParseJSON(r.poDraft,null) && !useIds[r.id]) return;
     if (!poIds[r.poId]) throw new Error('Persiapan potong masih menunjuk PO yang harus dipertahankan.');
     if (r.status === 'siap' && !useIds[r.id] && poIds[r.poId].status !== 'aktif') throw new Error('PO dengan persiapan potong yang belum dipakai harus tetap aktif. Batalkan persiapan terlebih dahulu.');
   });

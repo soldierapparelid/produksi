@@ -23,16 +23,19 @@ function ui() {
     form.headers=['invoiceId','invoice','tanggal','supplier','sumber','catatan'].map(function(k){return field(k,({invoiceId:'invoice-ui-1',invoice:' BON-01 ',tanggal:'2026-10-08',supplier:'Supplier contoh',sumber:'Toko',catatan:'Catatan contoh'})[k]);});
     function row(values){var r={fields:[],meta:{},remove:function(){form.rows=form.rows.filter(function(x){return x!==r;});}};
       var defaults={bahan:'',qty:'',satuan:'kg',rol:'1',harga:''};Object.keys(defaults).forEach(function(k){r.fields.push(field(k,values&&values[k]!==undefined?values[k]:defaults[k],'',r));});
-      ['[data-invoice-number]','[data-invoice-line-total]','[data-bahan-status]'].forEach(function(k){r.meta[k]={textContent:''};});r.button=field('','','invoiceRemove',r);return r;}
+      ['[data-invoice-number]','[data-invoice-line-total]','[data-bahan-status]','[data-invoice-line-qty]'].forEach(function(k){r.meta[k]={textContent:''};});
+      r.rolls=[];r.meta['[data-invoice-rolls]']={insertAdjacentHTML:function(){addRoll(r,'');}};r.button=field('','','invoiceRemove',r);return r;}
+    function addRoll(r,qty){var roll={fields:[field('rollQty',qty)],meta:{'[data-roll-number]':{textContent:''}},remove:function(){r.rolls=r.rolls.filter(function(x){return x!==roll;});}};roll.button=field('','','invoiceRollRemove',r);roll.button.closest=function(selector){return selector==='[data-invoice-row]'?r:selector==='[data-invoice-roll]'?roll:form;};r.rolls.push(roll);return roll;}
     form.rows=[row({bahan:'Katun Combed',qty:'2',satuan:'kg',rol:'1',harga:'10000'}),row({bahan:'Linen',qty:'3',satuan:'meter',rol:'2',harga:'4000'})];
     var saveButton=field('','','invoiceSave'),addButton=field('','','invoiceAdd'),checkButton=field('','','invoiceCheck'),retryButton=field('','','invoiceRetry');
     form.meta['[data-invoice-total]']={textContent:''};form.meta['[data-invoice-quantity]']={textContent:''};
     form.meta['[data-invoice-notice]']={hidden:true,innerHTML:''};
     form.meta['[data-invoice-rows]']={insertAdjacentHTML:function(_,text){insertedHtml=text;form.rows.push(row());}};var insertedHtml='';
-    function names(scope){return scope===form?form.headers.concat.apply(form.headers,form.rows.map(function(r){return r.fields;})):scope.fields||[];}
+    function names(scope){return scope===form?form.headers.concat.apply(form.headers,form.rows.map(function(r){return names(r);})):scope.fields.concat.apply(scope.fields,(scope.rolls||[]).map(function(r){return r.fields;}));}
     function $$(selector,scope){scope=scope||form;
       if(selector==='[name]')return names(scope);
       if(selector==='[data-invoice-row]')return form.rows.slice();
+      if(selector==='[data-invoice-roll]')return scope===form?[].concat.apply([],form.rows.map(function(r){return r.rolls;})):scope.rolls||[];
       if(selector==='[data-a="invoiceSave"]')return scope===sheet?[saveButton]:[];
       if(selector==='input,select,textarea,button')return names(scope).concat(form.rows.map(function(r){return r.button;}),[addButton],form.meta['[data-invoice-notice]'].hidden?[]:[checkButton,retryButton]);
       return [];}
@@ -55,7 +58,8 @@ function ui() {
   return { c, run, json, resolve, reject };
 }
 function savedRows(inv) {
-  return inv.items.map((r, i) => ({ id: inv.id + '_' + inv.items.length + '_' + (i + 1), invoiceId: inv.id, jenis: 'beli',
+  const flat=inv.items.flatMap(r=>r.rolls?r.rolls.map(roll=>({...r,qty:roll.qty,rol:1,stockMode:'roll',rollLabel:roll.rollLabel})):r);
+  return flat.map((r, i) => ({ id: inv.id + '_' + flat.length + '_' + (i + 1), invoiceId: inv.id, jenis: 'beli',stockMode:r.stockMode||'',rollLabel:r.rollLabel||'',
     bahan: r.bahan, qty: Number(r.qty), satuan: r.satuan, rol: Number(r.rol), harga: Number(r.harga), total: Math.round(Number(r.qty) * Number(r.harga)),
     tanggal: inv.tanggal, invoice: inv.invoice.trim(), supplier: inv.supplier.trim(), sumber: inv.sumber.trim(), catatan: inv.catatan }));
 }
@@ -76,6 +80,23 @@ test('invoice form lists existing materials and suppliers and keeps its generate
   assert.equal((view.match(/data-invoice-row>/g) || []).length, 1);
   assert.equal(u.run('sheetRender()'), view);
   assert.equal(u.run('ids'), 1);
+});
+
+test('one invoice records five and three unequal roll weights, sums each material and preserves per-roll identity on retry',async()=>{
+  const u=ui();u.run("form.rows[1].fields[0].value='Rib';form.rows[1].fields[2].value='kg';[1,2,3.125,4,5].forEach(function(q){addRoll(form.rows[0],q);});[6,7.25,8].forEach(function(q){addRoll(form.rows[1],q);});R.invoiceBahan(form)");
+  assert.match(u.run("form.rows[0].meta['[data-invoice-line-qty]'].textContent"),/5 rol · 15,125 kg/);
+  assert.match(u.run("form.rows[1].meta['[data-invoice-line-qty]'].textContent"),/3 rol · 21,25 kg/);
+  assert.match(u.run("form.meta['[data-invoice-quantity]'].textContent"),/2 baris · 8 rol · 36,375 kg/);
+  assert.equal(u.run("form.meta['[data-invoice-total]'].textContent"),'Rp 236250');
+  const inv=await uncertain(u);assert.deepEqual(inv.items.map(r=>r.rolls.map(x=>Number(x.qty))),[[1,2,3.125,4,5],[6,7.25,8]]);
+  const check=u.run('A.invoiceCheck(checkButton)');u.resolve(1,{me:{id:'owner'},stok:savedRows(inv).filter((r,i)=>i===3||i===7)});await check;
+  assert.equal(u.run('form._invoiceRetryAllowed'),true);const retry=u.run('A.invoiceRetry(retryButton)');assert.deepEqual(u.json('requests[2].payload.invoice'),inv);u.resolve(2,{invoiceId:inv.id});await retry;
+  const wrong=savedRows(inv);wrong[0].rollLabel='Rol berbeda';assert.equal(u.run(`invoiceBahanMatches(${JSON.stringify(inv)},${JSON.stringify(wrong)})`),false);
+});
+
+test('roll controls keep at least one roll and invalid weight is rejected before any write',()=>{
+  const u=ui();u.run("addRoll(form.rows[0],1);addRoll(form.rows[0],2);A.invoiceRollRemove(form.rows[0].rolls[0].button);A.invoiceRollRemove(form.rows[0].rolls[0].button)");assert.equal(u.run('form.rows[0].rolls.length'),1);
+  for(const bad of ['','0','-1','1.2345','NaN']){u.run(`form.rows[0].rolls[0].fields[0].value=${JSON.stringify(bad)};A.invoiceSave(saveButton)`);assert.equal(u.run('requests.length'),0);}
 });
 
 test('two materials retain one header, match canonical names/units and recalculate add/remove totals', () => {
@@ -188,4 +209,12 @@ test('invoice grouping keeps old purchases independent even when their printed i
   const groups = u.json(`stokInvoiceGroups([{id:'old1',invoice:'BON',total:10,rol:1},{id:'old2',invoice:'BON',total:20,rol:2},
     {id:'new1',invoiceId:'batch1',invoice:'BON',total:30,rol:3},{id:'new2',invoiceId:'batch1',invoice:'BON',total:40,rol:4}])`);
   assert.deepEqual(groups.map(g => [g.id, g.rows.length, g.total, g.rol]), [['', 1, 10, 1], ['', 1, 20, 2], ['batch1', 2, 70, 7]]);
+});
+test('eight roll receipts remain one invoice and aggregate canonical material names into two detail groups',()=>{
+ const u=ui(),rows=Array.from({length:8},(_,i)=>({id:'roll'+i,invoiceId:'one-invoice',bahan:i<5?(i%2?' katun  combed ':'Katun Combed'):'Rib',satuan:'kg',qty:i+1,rol:1,total:(i+1)*100,stockMode:'roll',rollLabel:'Rol '+(i+1)}));
+ const groups=u.json(`stokInvoiceGroups(${JSON.stringify(rows)})`);assert.equal(groups.length,1);assert.equal(groups[0].rol,8);
+ const materials=u.json(`stokInvoiceMaterials(${JSON.stringify(rows)})`);assert.deepEqual(materials.map(g=>[g.rows.length,g.qty,g.rol]),[[5,15,5],[3,21,3]]);
+});
+test('non-kilogram materials retain aggregate quantities instead of sending unsupported identified-roll data',()=>{
+ const u=ui();u.run("addRoll(form.rows[1],99);R.invoiceBahan(form)");const item=u.json('invoiceBahanValues(form).items[1]');assert.equal(item.satuan,'meter');assert.equal(item.qty,'3');assert.equal(item.rolls,undefined);assert.match(u.run("invoiceBahanRowsHtml({bahan:'Linen'})"),/tanpa membuat identitas rol kilogram/);
 });

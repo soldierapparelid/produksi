@@ -37,6 +37,7 @@ function ui() {
     function fTanggal(){return '';}function sizeGrid(){return '';}function sumLine(){return '';}function fCatatan(){return '';}
     function footSave(){return '';}function emptyBox(s){return s;}var rendered='';
   `, c);
+  vm.runInContext(part('function poPrepareOwner()', 'function rollStockRows('), c);
   vm.runInContext(part('function openPO(id, produkId)', 'C.poJenisForm ='), c);
   vm.runInContext(part('function poDraftGambarHtml()', 'C.poGambar ='), c);
   vm.runInContext(part('A.poSave = function', 'A.poDelete ='), c);
