@@ -278,7 +278,9 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 13.5px; font-vari
 .toast.bad { background: var(--bad); color: #fff; }
 
 /* ---------- masuk ---------- */
-.gate { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+/* tinggi satu layar penuh supaya layar masuk dan layar memuat berada di tengah layar, bukan menempel di atas */
+.gate, .splash { min-height: 100vh; min-height: 100dvh; }
+.gate { display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
 .gate-in { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 18px; }
 .gate .logo { font-family: var(--f-display); font-weight: 700; font-size: 34px; letter-spacing: .05em; text-transform: uppercase; line-height: 1; }
 .gate .logo i { font-style: normal; color: var(--accent); }
@@ -333,7 +335,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '202610081114';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '202610081128';</script>
 <script>
 (function () {
 'use strict';
