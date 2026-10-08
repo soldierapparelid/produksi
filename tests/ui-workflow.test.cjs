@@ -21,11 +21,11 @@ function context() {
   return c;
 }
 function json(c, expr) { return JSON.parse(vm.runInContext(`JSON.stringify(${expr})`, c)); }
-test('QC queue admits a completed size while another size waits for physical count', () => {
+test('QC queue waits until the whole PO has been physically counted', () => {
   const c = context();
   vm.runInContext(`S.state.setor=[{id:'s',poId:'p',status:'diterima',ukuran:{M:40,L:20},total:60,tanggal:'2026-10-08'}];
-    D.po.p={status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true},L:{readyQC:false}}}};`, c);
-  assert.deepEqual(json(c, 'antreanQC().map(x=>({uk:x.uk,sisa:x.sisa,waiting:x.waiting}))'), [{ uk: { M: 40 }, sisa: 40, waiting: { L: 20 } }]);
+    D.po.p={status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0},L:{readyQC:false,target:40,kirim:40,sisaMaklon:20,diajukan:0,diterima:20,rejectJahit:0}}}};`, c);
+  assert.deepEqual(json(c, 'antreanQC().map(x=>({uk:x.uk,sisa:x.sisa,waiting:x.waiting}))'), []);
 });
 
 test('historical QC ambiguity holds only its baseline count, while a new source stays selectable', () => {
@@ -33,11 +33,11 @@ test('historical QC ambiguity holds only its baseline count, while a new source 
   vm.runInContext(`S.state.setor=[
     {id:'baseline',poId:'p',status:'diterima',ukuran:{M:20},total:20,tanggal:'2026-10-01'},
     {id:'fresh',poId:'p',status:'diterima',ukuran:{M:10},total:10,tanggal:'2026-10-08'}];
-    D.po.p={status:'aktif',workflow:{issues:[],blockedQcSources:{baseline:['M']},ukuran:{M:{readyQC:true}}}};`,c);
+    D.po.p={status:'aktif',workflow:{issues:[],blockedQcSources:{baseline:['M']},ukuran:{M:{readyQC:true,target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0}}}};`,c);
   assert.deepEqual(json(c,'antreanQC().map(x=>({id:x.s.id,qty:x.sisa}))'),[{id:'fresh',qty:10}]);
 });
 
-test('dashboard distinguishes eligible L50 from counted M10 still waiting on its M40 target', () => {
+test('dashboard holds all sixty counted pieces while the rest of the PO is still at sewing', () => {
   const c = context();
   vm.runInContext(`function pos(n){return Math.max(0,Number(n)||0);} function T(po){return po.agg.total;}
     function esc(s){return String(s);} function nf(n){return String(n);} function ic(){return '';}
@@ -55,13 +55,13 @@ test('dashboard distinguishes eligible L50 from counted M10 still waiting on its
     D.po.p=po;`, c);
   vm.runInContext(between('function qcBalance(', 'function poTahap('), c);
   vm.runInContext(between('VIEWS.beranda =', 'function tglPanjang('), c);
-  assert.deepEqual(json(c, 'qcBalance(po)'), { ready: 50, waiting: 10, readyUkuran: { L: 50 }, waitingUkuran: { M: 10 } });
+  assert.deepEqual(json(c, 'qcBalance(po)'), { ready: 0, waiting: 60, readyUkuran: {}, waitingUkuran: { M: 10, L: 50 } });
   const view = vm.runInContext('VIEWS.beranda()', c);
-  assert.match(view, /data-id="po:qc"><span class="label">Siap QC<\/span><span class="v">50<\/span>/);
-  assert.match(view, /10 pcs menunggu kelengkapan ukuran/);
-  assert.match(view, /title="Menunggu kelengkapan ukuran: 10"/);
-  assert.match(view, /title="Siap QC: 50"/);
-  assert.doesNotMatch(vm.runInContext('qcEntryButton(po)', c), /disabled/);
+  assert.match(view, /data-id="po:qc"><span class="label">Siap QC<\/span><span class="v">0<\/span>/);
+  assert.match(view, /60 pcs menunggu seluruh PO lengkap/);
+  assert.match(view, /title="Sebagian dihitung · menunggu jahit lengkap: 60"/);
+  assert.doesNotMatch(view, /title="Siap QC: 50"/);
+  assert.match(vm.runInContext('qcEntryButton(po)', c), /disabled/);
   vm.runInContext(`S.state.setor[0].ukuran={M:10};S.state.setor[0].total=10;po.workflow=coreWorkflow([po],cuts,assignments,counts,[],[]).p;`, c);
   assert.match(vm.runInContext('qcEntryButton(po)', c), /disabled[^>]*>QC belum siap/);
 });
@@ -74,7 +74,7 @@ test('QC chooser refreshes source and repair choices when returning after a save
     function namaUser(){return 'Ali';} function tgl(s){return s;} function emptyBox(s){return s;}
     function sheetHtml(title,html){return title+html;} function openSheet(fn,opt){renders.push(fn);options.push(opt);}
     S.state.setor=[{id:'s',noSlip:'SS-001',poId:'p',maklonId:'w',status:'diterima',ukuran:{M:40},total:40}];
-    D.po.p={id:'p',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,siapQC:40}}}};`, c);
+    D.po.p={id:'p',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,siapQC:40,target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0}}}};`, c);
   vm.runInContext(between('function qcBalance(', 'function poTahap('), c);
   vm.runInContext(between('function openQC(', 'A.qcRepairOpen ='), c);
   vm.runInContext(`openQC('p')`, c);

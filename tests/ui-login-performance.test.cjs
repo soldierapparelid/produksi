@@ -43,12 +43,14 @@ test('login choices are available from local cache in Apps Script without cachin
 });
 function login(){
   const c=vm.createContext({console});
-  vm.runInContext(`var A={},APP_VERSION='1.4.2',calls=0,renders=0,synced=0,applied=0,writes={},resolveLogin,rejectLogin;
+  vm.runInContext(`var A={},APP_VERSION='1.4.2',calls=0,renders=0,synced=0,applied=0,writes={},resolveLogin,rejectLogin,waitTimers={},timerId=0,marks=[];
     var S={token:'',gate:{user:{id:'example'},pin:'1234',err:''}};
     var Api={call:function(){calls++;return new Promise(function(resolve,reject){resolveLogin=resolve;rejectLogin=reject;});}};
     var LS={set:function(k,v){writes[k]=v;}};
     function tokenKey(){return 'token';}function lastKey(){return 'last';}function render(){renders++;}
-    function applyState(){applied++;}function startSync(){synced++;}`,c);
+    function applyState(){applied++;}function startSync(){synced++;}
+    function setTimeout(fn,ms){var id=++timerId;waitTimers[id]={fn:fn,ms:ms};return id;}function clearTimeout(id){delete waitTimers[id];}
+    function tanda(name){marks.push(name);}`,c);
   vm.runInContext(part('A.pinGo = function','A.setup = function'),c);return c;
 }
 test('PIN submit starts visible loading immediately, rejects duplicate taps and opens only after server success',async()=>{
@@ -67,6 +69,27 @@ test('incorrect PIN resets the loading state and a superseded login cannot resto
   const d=login();const other=vm.runInContext('A.pinGo()',d);
   vm.runInContext("S.gate={user:null,pin:''};resolveLogin({token:'late-session',state:{}})",d);await other;
   assert.equal(vm.runInContext('S.token',d),'');assert.equal(vm.runInContext('applied',d),0);
+});
+
+test('long login shows a waiting explanation without resending PIN, and success clears its timer',async()=>{
+  const c=login(),done=vm.runInContext('A.pinGo()',c);
+  assert.equal(vm.runInContext('waitTimers[1].ms',c),6000);
+  vm.runInContext('waitTimers[1].fn();A.pinGo()',c);
+  assert.equal(vm.runInContext('S.gate.waitingLong',c),true);assert.equal(vm.runInContext('calls',c),1);assert.equal(vm.runInContext('applied',c),0);
+  assert.match(part('function gateHtml()', 'function connectLink('),/Masih menunggu jawaban server/);
+  vm.runInContext("resolveLogin({token:'verified',state:{me:{id:'example'}}})",c);await done;
+  assert.equal(vm.runInContext('Object.keys(waitTimers).length',c),0);assert.equal(vm.runInContext('calls',c),1);
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(marks)',c)),['pk-pin-kirim','pk-pin-server','pk-pin-tampil']);
+});
+
+test('incomplete or wrong-user login response never caches a session and permits a deliberate fresh attempt',async()=>{
+  for(const response of [{token:'x'},{token:'x',state:{me:{id:'someone-else'}}},null]){
+    const c=login(),done=vm.runInContext('A.pinGo()',c);
+    vm.runInContext(`resolveLogin(${JSON.stringify(response)})`,c);await done;
+    assert.equal(vm.runInContext('S.token',c),'');assert.equal(vm.runInContext('applied',c),0);assert.equal(vm.runInContext('Object.keys(writes).length',c),0);
+    assert.equal(vm.runInContext('S.gate.sending',c),false);assert.match(vm.runInContext('S.gate.err',c),/masukkan PIN dan coba lagi/);
+    assert.equal(vm.runInContext('Object.keys(waitTimers).length',c),0);
+  }
 });
 
 test('a bootstrap change to the selected user cannot accept a stale login in the same gate object',async()=>{

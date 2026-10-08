@@ -40,14 +40,19 @@ function app() {
   return { run, call, seed, count, inspect, state: token => call('sync', {}, token), pay: () => run('corePayroll(db.Potong,db.SlipSetor,db.QC,db.SlipUpah)'), db: sheet => run(`db[${JSON.stringify(sheet)}]`) };
 }
 
-test('QC gates each complete size; partial count and sewing reports do not unlock it', () => {
+test('QC waits for all sizes of a PO; physical counts and slips remain available earlier', () => {
   const a = app(); a.seed(); a.count({ M: 20 });
   assert.throws(() => a.inspect({ M: 20 }), /belum lengkap/);
-  a.count({ M: 20 }, 'count02'); a.inspect({ M: 20 });
+  a.count({ M: 20 }, 'count02');
+  assert.throws(() => a.inspect({ M: 20 }), /PO belum lengkap/);
   const w = a.state().po[0].workflow;
   assert.equal(w.ukuran.M.readyQC, true);
-  assert.equal(w.ukuran.M.siapQC, 20);
+  assert.equal(w.ukuran.M.siapQC, 40);
   assert.equal(w.ukuran.L.readyQC, false);
+  assert.equal(w.readyQC, false);
+  a.count({ L: 60 }, 'count03');
+  a.inspect({ M: 20 });
+  assert.equal(a.state().po[0].workflow.readyQC, true);
   const b = app(); b.seed({ M: 40 });
   b.call('createSetor', { setor: { id: 'report1', poId: 'po00001', ukuran: { M: 40 } } }, 'worker-token-12345678');
   assert.equal(b.db('SlipSetor')[0].status, 'diajukan');
