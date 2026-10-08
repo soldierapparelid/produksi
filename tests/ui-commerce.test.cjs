@@ -1,0 +1,129 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const html=fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8');
+const block=html.slice(html.indexOf('/* COMMERCE UI START'),html.indexOf('/* COMMERCE UI END */'));
+assert.ok(block.length>10000,'native commerce implementation exists');
+function harness(){
+  const requests=[],context=vm.createContext({console,setTimeout,clearTimeout,request(action,payload){return new Promise((resolve,reject)=>requests.push({action,payload,resolve,reject}));}});
+  vm.runInContext(`var A={},C={},R={},VIEWS={},S={token:'session-one',state:{me:{id:'owner',divisi:'owner'},settings:{}},f:{},sub:{},tab:'beranda'},Api={mode:function(){return 'gas';}},messages=[],renders=0,drops=0,prints=[],pdfs=[],nextId=0,lastSheet='';
+  function me(){return S.state.me;}function isAdmin(){return !!S.state&&['owner','admin'].includes(me().divisi);}function req(a,p){return request(a,p);}function refresh(){renders++;}function render(){renders++;}function toast(t,b){messages.push({text:t,bad:!!b});}function quiet(){}function nf(x){return String(Number(x)||0);}function nfQty(x){return nf(x);}function rp(x){return 'Rp'+String(Number(x)||0);}function tgl(x){return String(x||'');}function todayYmd(){return '2026-10-08';}function newId(){return 'new_'+(++nextId);}function ic(){return '';}
+  function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function act(el,p){return Promise.resolve(p).catch(function(e){toast(e.message,true);throw e;});}function emptyBox(x){return '<p>'+esc(x)+'</p>';}function seg(){return '';}function searchBox(){return '';}function cocok(q,a){return !q||a.join(' ').toLowerCase().includes(q.toLowerCase());}function paintList(){}function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fCatatan(x){return '<textarea name="catatan">'+esc(x)+'</textarea>';}function footSave(x){return x;}function sheetHtml(t,b,f){return '<h2>'+esc(t)+'</h2>'+b+(f||'');}
+  var currentForm={values:{},rows:[],note:{hidden:true,innerHTML:''},fields:[],sheet:{buttons:[]},getAttribute:function(k){return k==='data-module'?this.module:null;},closest:function(){return this.sheet;}};
+  function topForm(){return currentForm;}function formVals(f){return f.values||{};}function $(s,f){if(s==='[data-commerce-note]')return f.note;if(s==='[data-commerce-total]')return f.totalNode||null;if(s==='[data-commerce-import-proof]')return f.proof;if(s==='[data-a="commerceImportApply"]')return f.apply;return null;}function $$(s,f){if(s==='[data-commerce-line]')return f.rows||[];if(s==='.sheet-f button')return f.buttons||[];return f.fields||[];}
+  function openSheet(fn){lastSheet=fn();}function dropForm(){drops++;}function slipCetak(models){prints.push(models);return Promise.resolve();}function slipUnduh(action,payload){pdfs.push({action:action,payload:payload});return Promise.resolve();}function coreCommerceSlipModel(m,r){return {reference:r.id,module:m,rows:r.items};}
+  var window={scrollTo:function(){}};
+  `,context);
+  const helperStart=html.indexOf('function fTanggal('),helperEnd=html.indexOf('/* ---------- hitungan PO',helperStart);vm.runInContext(html.slice(helperStart,helperEnd),context);vm.runInContext(block,context);
+  const run=code=>vm.runInContext(code,context);const json=code=>JSON.parse(run('JSON.stringify('+code+')'));
+  function seed(module,data){run(`var e=commerceEntry(${JSON.stringify(module)});e.data=${JSON.stringify(data)};e.version=10;e.tried=true;`);}
+  function form(values,module,rows=[]){run(`currentForm.values=${JSON.stringify(values)};currentForm.module=${JSON.stringify(module)};currentForm._commerceScope=commerceScope();currentForm.rows=${JSON.stringify(rows)}.map(function(r){return {values:r.values,getAttribute:function(){return r.id;}};});`);}
+  return {context,requests,run,json,seed,form};
+}
+function reply(module,data,version=10){return {module,actor:{id:'owner',divisi:'owner'},version,...data};}
+const turn=()=>new Promise(r=>setImmediate(r));
+
+test('dashboard cards do not fetch commerce or include commerce in login',()=>{
+  const h=harness(),markup=h.run('commerceHomeCards()');assert.equal(h.requests.length,0);for(const title of ['HPP produk','Pembelian produk','Nota penjualan'])assert.match(markup,new RegExp(title));
+  assert.match(html,/evHtml[^\n]+commerceHomeCards\(\)/);assert.ok(!html.slice(html.indexOf('function beginSessionLoad'),html.indexOf('function beginSessionLoad')+2500).includes('getCommerceState'));
+});
+test('first view lazily requests only its module and coalesces concurrent taps',async()=>{
+  const h=harness();const first=h.run("commerceFetch('pembelian',false)"),second=h.run("commerceFetch('pembelian',true)");assert.equal(first,second);assert.equal(h.requests.length,1);assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{module:'pembelian'});h.requests[0].resolve(reply('pembelian',{suppliers:[],products:[],orders:[]}));await first;assert.equal(h.run("commerceData('pembelian').orders.length"),0);assert.equal(h.run("commerceEntry('nota').tried"),false);
+});
+test('late commerce data cannot survive logout, role change, or another account',async()=>{
+  for(const change of ["S.token='other'","S.state.me={id:'owner',divisi:'admin'}","S.state.me={id:'other',divisi:'owner'}"]){const h=harness(),p=h.run("commerceFetch('nota')");h.run(change);h.requests[0].resolve(reply('nota',{notes:[{id:'private'}]}));await assert.rejects(p,/Sesi/);assert.equal(h.run("commerceData('nota').notes"),undefined);}
+});
+test('wrong actor or incomplete reply does not become ready',async()=>{
+  for(const result of [{module:'nota',actor:{id:'other',divisi:'owner'},notes:[],version:1},{module:'nota',actor:{id:'owner',divisi:'owner'},version:1}]){const h=harness(),p=h.run("commerceFetch('nota')");h.requests[0].resolve(result);await assert.rejects(p,/belum lengkap/);assert.equal(h.run("commerceEntry('nota').data"),null);}
+});
+test('a pre-write lazy read cannot overwrite the post-write snapshot',async()=>{
+  const h=harness(),old=h.run("commerceFetch('nota')");h.run("commerceInvalidate('nota')");const newer=h.run("commerceFetch('nota',true)");h.requests[1].resolve(reply('nota',{notes:[{id:'saved'}]},12));await newer;h.requests[0].resolve(reply('nota',{notes:[]},11));await assert.rejects(old,/data berubah/);assert.equal(h.run("commerceData('nota').notes[0].id"),'saved');assert.equal(h.run("commerceEntry('nota').version"),12);
+});
+test('financial uncertainty freezes the same intent, performs no automatic retry, and verifies by event ID',async()=>{
+  const h=harness();h.seed('nota',{notes:[{id:'n',revision:'before',events:[]}]});h.form({},'nota');const p=h.run("commerceMutation('nota','appendCommercePayment',{id:'payment-fixed',module:'nota',parentId:'n',expectedRevision:'before',tanggal:'2026-10-08',jumlah:50,metode:'cash'},currentForm,null)");h.requests[0].reject(Object.assign(new Error('Connection lost'),{uncertain:true}));await p;assert.equal(h.requests.length,1);assert.equal(h.run('currentForm._commerceLocked'),true);assert.equal(h.run('currentForm._commerceIntent.payload.id'),'payment-fixed');
+  const check=h.run("A.commerceCheck({closest:function(){return currentForm;}})");h.requests[1].resolve(reply('nota',{notes:[{id:'n',revision:'after',payments:[{id:'payment-fixed',jumlah:50}]}]},11));await check;assert.equal(h.run('drops'),1);assert.equal(h.requests.length,2);
+});
+test('a write success triggers one fresh commerce read even when an older read is running',async()=>{
+  const h=harness();h.form({},'nota');const old=h.run("commerceFetch('nota')"),save=h.run("commerceMutation('nota','saveCommerceNota',{record:{id:'fixed'}},currentForm,null)");h.requests[1].resolve({record:{id:'fixed'}});await turn();assert.equal(h.requests.length,3);assert.equal(h.requests[2].action,'getCommerceState');h.requests[2].resolve(reply('nota',{notes:[{id:'fixed'}]},12));await save;h.requests[0].resolve(reply('nota',{notes:[]},11));await assert.rejects(old);assert.equal(h.run("commerceData('nota').notes[0].id"),'fixed');assert.equal(h.run('drops'),1);
+});
+test('order save preserves item identity and sends initial DP in the same request',async()=>{
+  const h=harness();h.form({id:'order-one',revision:'',produkId:'product-one',hargaSatuan:'100',tanggalOrder:'2026-10-08',catatan:'',dp:'50',metode:'transfer'},'pembelian',[{id:'line-M',values:{lineName:'M',lineQty:'2'}},{id:'line-L',values:{lineName:'L',lineQty:'3'}}]);h.run('A.commerceOrderSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceOrder');const p=h.requests[0].payload;assert.equal(p.record.initialPayment.jumlah,50);assert.deepEqual(JSON.parse(JSON.stringify(p.record.items)),[{id:'line-M',nama:'M',jumlah:2},{id:'line-L',nama:'L',jumlah:3}]);assert.equal(p.record.id,'order-one');
+});
+test('invalid fractional quantities and excessive order DP never reach server',()=>{
+  for(const invalid of [{qty:'1.5',dp:'0'},{qty:'1',dp:'101'}]){const h=harness();h.form({id:'o',revision:'',produkId:'p',hargaSatuan:'100',tanggalOrder:'2026-10-08',catatan:'',dp:invalid.dp,metode:'cash'},'pembelian',[{id:'i',values:{lineName:'M',lineQty:invalid.qty}}]);h.run('A.commerceOrderSave(null)');assert.equal(h.requests.length,0);assert.equal(h.json('messages').at(-1).bad,true);}
+});
+test('nota rounding follows item discounts then invoice discount then shipping',()=>{
+  const h=harness();assert.deepEqual(h.json('commerceNotaTotals([{qty:3,price:999,discPercent:12.5},{qty:2,price:500,discPercent:0}],10,700)'),{subtotal:3622,discountAmount:362,total:3960});assert.throws(()=>h.run("commerceNumber('101','Diskon',false,100)"));
+});
+test('cash nota records tendered money separately from applied payment and change',()=>{
+  const h=harness();h.form({id:'note-fixed',revision:'',date:'2026-10-08',customerName:'Buyer',customerType:'walkin',phone:'',address:'',discountPercent:'0',shipping:'0',notes:'',dp:'200',metode:'cash'},'nota',[{id:'i',values:{lineName:'Shirt',size:'M',color:'Blue',qty:'1',price:'150',discPercent:'0'}}]);h.run('A.commerceNotaSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.record.initialPayment.jumlah,150);assert.equal(h.requests[0].payload.record.initialPayment.tenderedAmount,200);
+});
+test('historic receipt holds remain visible and do not offer fabricated receipt allocation or editing',()=>{
+  const h=harness();h.seed('pembelian',{orders:[{id:'old',legacy:true,receiptReview:true,needsReview:true,reviewReasons:['Unknown source item'],productName:'Product',items:[{id:'i',nama:'M',jumlah:10}],events:[{id:'old-receipt'}],payments:[],receipts:[],totalHarga:100,totalPaid:0,balance:100,totalReceived:2}]});const body=h.run("commerceDetail('pembelian','old')");assert.match(body,/Unknown source item/);assert.ok(!body.includes('data-a="commerceReceiptOpen"'));assert.ok(!body.includes('data-a="commerceOrderOpen"'));assert.match(body,/commercePaymentOpen/);
+});
+test('void and cancellation controls are owner-only; admin retains payment entry',()=>{
+  const h=harness();h.seed('nota',{notes:[{id:'n',customer:{name:'B'},items:[],payments:[{id:'p',jumlah:1}],events:[{id:'p'}],total:2,totalPaid:1,balance:1}]});let body=h.run("commerceDetail('nota','n')");assert.match(body,/commerceVoidOpen/);h.run("S.state.me.divisi='admin'");h.seed('nota',{notes:[{id:'n',customer:{name:'B'},items:[],payments:[{id:'p',jumlah:1}],events:[{id:'p'}],total:2,totalPaid:1,balance:1}]});body=h.run("commerceDetail('nota','n')");assert.ok(!body.includes('commerceVoidOpen'));assert.match(body,/commercePaymentOpen/);
+});
+test('print and PDF use the same module and stable record ID; customer text is escaped',async()=>{
+  const h=harness();h.seed('nota',{notes:[{id:'n',customer:{name:'<script>oops</script>'},items:[{id:'i',name:'<img onerror=x>',qty:1,price:5}],payments:[],total:5,totalPaid:0,balance:5}]});const el="{getAttribute:function(k){return k==='data-m'?'nota':'n';}}";await h.run('A.commercePrint('+el+')');await h.run('A.commercePdf('+el+')');assert.equal(h.run('prints[0][0].reference'),'n');assert.deepEqual(h.json('pdfs[0]'),{action:'makeCommercePdf',payload:{module:'nota',id:'n'}});const markup=h.run("commerceDetail('nota','n')");assert.ok(!markup.includes('<script>oops'));assert.match(markup,/&lt;script&gt;/);
+});
+test('incomplete HPP can show evidence but cannot start a pricing simulation',()=>{
+  const h=harness();h.seed('hpp',{models:[{id:'m',nama:'Model',series:'Series',sizes:['M'],configured:false,hppTotal:100,config:{value:{}},warnings:['Missing price']}],config:{},revision:'r'});h.run("A.commerceHppSim({getAttribute:function(){return 'm';}})");assert.match(h.json('messages').at(-1).text,/Lengkapi/);const body=h.run('VIEWS.hpp()');assert.match(body,/Periksa biaya/);assert.ok(!body.includes('Rp100 / pcs'));
+});
+test('HPP explicit review is required and settings use the captured revision',()=>{
+  const h=harness();h.form({modelId:'m',revision:'hpp-before',reviewed:false},'hpp');h.run('currentForm._commerceModel={id:"m",kain:{complete:true,perPcs:10},potong:{complete:true,perPcs:2}};A.commerceHppSave(null)');assert.equal(h.requests.length,0);h.run("currentForm.values={modelId:'m',revision:'hpp-before',reviewed:true,jahitMode:'manual',hargaJahit:'5',biayaLain:'2',ketLain:'Packing',targetMargin:'30'};A.commerceHppSave(null)");assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.expectedRevision,'hpp-before');assert.equal(h.requests[0].payload.config.costSchema,2);assert.equal(h.requests[0].payload.config.costsReviewed,true);
+});
+test('owner import cannot apply without a verified ready proof or while a source file is still reading',()=>{
+  const h=harness();h.form({},'hpp');h.run('currentForm._commerceFiles={backup:{}};currentForm._commerceReads={reference:1};A.commerceImportPreview(null);A.commerceImportApply(null)');assert.equal(h.requests.length,0);assert.match(h.json('messages').at(-1).text,/Tunggu file/);
+});
+test('read-only commerce actions use read timeout behavior, not uncertain write messages',()=>{
+  const line=html.split('\n').find(s=>s.includes('var readOnly ='));assert.match(line,/getCommerceState/);assert.match(line,/makeCommercePdf/);assert.match(line,/previewCommerceImport/);assert.ok(!line.includes('appendCommercePayment'));
+});
+
+test('status filtering rereads the current selection and query without another server read',()=>{
+  const h=harness();h.seed('nota',{notes:[{id:'open',status:'belum',customer:{name:'First'},items:[],total:10},{id:'paid',status:'lunas',customer:{name:'Second'},items:[],total:20}]});h.run('VIEWS.nota()');assert.match(h.run('S.listFn()'),/open/);h.run("S.f['commerceStatus-nota']='lunas'");let result=h.run('S.listFn()');assert.ok(!result.includes('data-id="open"'));assert.match(result,/data-id="paid"/);h.run("S.f.q='First'");assert.match(h.run('S.listFn()'),/Tidak ada catatan/);assert.equal(h.requests.length,0);
+});
+
+test('both import files survive overlapping reads and no preview runs against half-read inputs',()=>{
+  const h=harness();h.form({},'hpp');h.run(`currentForm._commerceFiles={};currentForm.proof={textContent:''};currentForm.sheet.apply={disabled:false};var readers=[];function FileReader(){readers.push(this);this.readAsText=function(){};}
+    function fileEl(slot){return {files:[{size:20,name:slot+'.json'}],getAttribute:function(){return slot;},closest:function(){return currentForm;}};}
+    C.commerceImportFile(fileEl('backup'));C.commerceImportFile(fileEl('reference'));A.commerceImportPreview(null);`);
+  assert.equal(h.requests.length,0);h.run("readers[0].result='{}';readers[0].onload();readers[1].result='{}';readers[1].onload();");assert.deepEqual(h.json('Object.keys(currentForm._commerceFiles).sort()'),['backup','reference']);assert.deepEqual(h.json('Object.keys(currentForm._commerceReads)'),[]);
+});
+
+test('HPP uses the actual price engine and preserves recommended marketplace prices on save',()=>{
+  const h=harness();vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src/commerce-hpp.js'),'utf8'),h.context);h.seed('hpp',{models:[],config:{marketplace:{shop:{nama:'Shop',fee:10,fixedPerPcs:1}},pajak:1},revision:'old'});
+  h.form({modelId:'m',revision:'old',reviewed:true,jahitMode:'manual',hargaJahit:'5',biayaLain:'2',ketLain:'Packing',targetMargin:'20'},'hpp');h.run('currentForm._commerceModel={id:"m",kain:{complete:true,perPcs:100},potong:{complete:true,perPcs:10}};A.commerceHppSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.hargaJual.shop,200);
+  assert.match(h.run("commerceHppEvidence({kain:{details:[{jenis:'Unpriced',qty:2,unit:'kg',avgHarga:null,totalCost:null}]}})"),/Belum diketahui/);
+});
+
+test('the actual shared commerce model is accepted by the same print normalizer, including held receipts and note discounts',()=>{
+  const h=harness(),source=fs.readFileSync(path.resolve(__dirname,'../src/commerce.js'),'utf8');h.run('var coreRupiah=rp,coreRibuan=nf;function coreNum(n){return Number(n)||0;}');
+  vm.runInContext(source.slice(source.indexOf('function coreCommerceSlipModel('),source.indexOf('function coreInstallCommerceActions(')),h.context);
+  vm.runInContext(html.slice(html.indexOf('function slipTeks('),html.indexOf('function slipTabel(')),h.context);
+  h.run(`var row={id:'n',noNota:'SA-261008-003',date:'2026-10-08',customer:{name:'Customer',phone:'000',address:'Street'},items:[{name:'Product',size:'M',color:'Blue',qty:2,price:100,discPercent:10,subtotal:180}],subtotal:180,discountPercent:10,discountAmount:18,shipping:5,total:167,totalPaid:167,balance:0,status:'lunas',notes:'Handle carefully',payments:[{tanggal:'2026-10-08',metode:'cash',jumlah:167,tenderedAmount:200,change:33}],needsReview:true,reviewReasons:['Source needs review']};var normalized=slipNormal(coreCommerceSlipModel('nota',row,{}));`);
+  assert.equal(h.run('normalized.rows[0][4]'),'10%');assert.ok(h.json('normalized.summary').some(r=>r.label==='Ongkir'));assert.ok(h.json('normalized.sections').some(r=>r.title==='Perlu diperiksa'));assert.ok(h.json('normalized.sections').some(r=>r.title==='Riwayat pembayaran'));
+});
+
+test('grouped purchase documents require unique orders with the same frozen supplier identity',()=>{
+  const h=harness();h.run("var groupRows=[{id:'a',supplierSnapshot:{id:'supplier-1'}},{id:'b',supplierSnapshot:{id:'supplier-1'}},{id:'c',supplierSnapshot:{id:'supplier-2'}},{id:'legacy'}];");
+  assert.deepEqual(h.json("commerceGroupSelection(groupRows,['b','a']).map(r=>r.id)"),['b','a']);
+  for(const ids of [[],['a','a'],['a','c'],['legacy'],['missing'],Array.from({length:21},(_,i)=>'id'+i)])assert.throws(()=>h.run('commerceGroupSelection(groupRows,'+JSON.stringify(ids)+')'));
+  assert.equal(h.requests.length,0);
+});
+
+test('group print and PDF preserve individual order models and the revisions selected for printing',async()=>{
+  const h=harness();h.form({},'pembelian');h.run("currentForm._commerceGroupRows=[{id:'a',revision:'rev-a',supplierSnapshot:{id:'s'},items:[{id:'a-M',jumlah:2}]},{id:'b',revision:'rev-b',supplierSnapshot:{id:'s'},items:[{id:'b-L',jumlah:3}]}];currentForm._commerceGroupIds=['b','a'];");
+  await h.run('A.commerceGroupPrint(null)');await h.run('A.commerceGroupPdf(null)');
+  assert.deepEqual(h.json('prints[0].map(r=>({id:r.reference,items:r.rows}))'),[{id:'b',items:[{id:'b-L',jumlah:3}]},{id:'a',items:[{id:'a-M',jumlah:2}]}]);
+  assert.deepEqual(h.json('pdfs[0]'),{action:'makeCommercePdf',payload:{module:'pembelian',ids:['b','a'],expectedRevisions:{b:'rev-b',a:'rev-a'}}});
+  assert.equal(h.requests.length,0,'printing does not create payment or receipt events');
+});
+
+test('an open group-print selection cannot export after the actor or session changes',async()=>{
+  for(const change of ["S.token='new-session'","S.state.me={id:'other',divisi:'owner'}","S.state.me.divisi='potong'"]){
+    const h=harness();h.form({},'pembelian');h.run("currentForm._commerceGroupRows=[{id:'a',revision:'r',supplierSnapshot:{id:'s'}}];currentForm._commerceGroupIds=['a'];"+change);
+    await h.run('A.commerceGroupPrint(null)');await h.run('A.commerceGroupPdf(null)');
+    assert.equal(h.run('prints.length'),0);assert.equal(h.run('pdfs.length'),0);assert.match(h.json('messages').at(-1).text,/Sesi berubah/);
+  }
+});

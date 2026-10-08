@@ -54,6 +54,7 @@ test('dashboard holds all sixty counted pieces while the rest of the PO is still
     S.state.po=[po];S.state.potong=[];S.state.kirim=[];S.state.setor=counts;S.state.gudang=[];S.state.users=[];
     D.po.p=po;`, c);
   vm.runInContext(between('function qcBalance(', 'function poTahap('), c);
+  vm.runInContext(between('function commerceHomeCards(', 'A.commerceGo ='), c);
   vm.runInContext(between('VIEWS.beranda =', 'function tglPanjang('), c);
   assert.deepEqual(json(c, 'qcBalance(po)'), { ready: 0, waiting: 60, readyUkuran: {}, waitingUkuran: { M: 10, L: 50 } });
   const view = vm.runInContext('VIEWS.beranda()', c);
