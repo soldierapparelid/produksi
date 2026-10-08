@@ -115,3 +115,17 @@ test('group PDF preserves separate order ledgers and requires matching immutable
  a=f.good('appendCommercePayment',{id:'print-payment',parentId:a.id,expectedRevision:a.revision,jumlah:10000}).record;f.bad('makeCommercePdf',{module:'pembelian',ids:[a.id,b.id],expectedRevisions:proof},/berubah/);
  f.good('saveCommerceSupplier',{record:{id:'supplier02',nama:'Supplier two'}});f.good('saveCommerceProduct',{record:{id:'product02',nama:'Product two',supplierId:'supplier02'}});const c=f.good('saveCommerceOrder',{record:f.order({id:'order03',produkId:'product02'})}).record;f.bad('makeCommercePdf',{module:'pembelian',ids:[a.id,c.id]},/supplier/);
 });
+test('purchase PDF identifies each frozen product independently of its variant and later master renames',()=>{
+ const f=fixture();f.masters();const a=f.good('saveCommerceOrder',{record:f.order({items:[{id:'black',nama:'Hitam',jumlah:3}]})}).record;
+ const product=f.state().products[0];f.good('saveCommerceProduct',{record:{...product,nama:'Later master rename'},expectedRevision:product.revision});
+ f.good('saveCommerceProduct',{record:{id:'product-other',nama:'Second product',supplierId:'supplier01'}});
+ const b=f.good('saveCommerceOrder',{record:f.order({id:'order-other',produkId:'product-other',items:[{id:'black-other',nama:'Hitam',jumlah:2}]})}).record;
+ f.h.context.FROZEN_ORDER=f.state().orders.find(r=>r.id===a.id);
+ const model=f.h.run(`coreCommerceSlipModel('pembelian',FROZEN_ORDER,{})`);
+ assert.deepEqual(model.columns.map(c=>c.label),['Barang','Varian','Qty','Harga','Subtotal']);assert.equal(model.rows[0][0],'Product Fixture');assert.equal(model.rows[0][1],'Hitam');assert.equal(model.rows[0][2],'3');
+ f.h.run(`var nameTestEnv=pkEnv_,nameTestPdf='';pkEnv_=function(){var e=nameTestEnv();e.makePdf=function(html){nameTestPdf=html;return 'fixture-pdf';};return e;};void 0;`);
+ f.good('makeCommercePdf',{module:'pembelian',ids:[a.id,b.id]});const html=f.h.run('nameTestPdf'),articles=html.match(/<article>[\s\S]*?<\/article>/g);
+ assert.equal(articles.length,2);assert.match(articles[0],/Product Fixture/);assert.match(articles[0],/Hitam/);assert.match(articles[1],/Second product/);assert.doesNotMatch(html,/Later master rename/);
+ const unknown=f.h.run(`coreCommerceSlipModel('pembelian',{id:'legacy-missing',productSnapshot:{},productName:'Unproven current name',items:[{nama:'Hitam',jumlah:1}],hargaSatuan:10},{})`);
+ assert.equal(unknown.rows[0][0],'Nama produk tidak tersedia');assert.equal(unknown.rows[0][1],'Hitam');
+});
