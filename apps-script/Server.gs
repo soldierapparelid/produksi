@@ -6,7 +6,11 @@ function pkProps_() {
   if (!PK_PROPS_) PK_PROPS_ = PropertiesService.getScriptProperties().getProperties() || {};
   return PK_PROPS_;
 }
-var PK_CACHE_TTL_ = 1800;
+/* Versioned production rows can survive a work break. Google may evict these
+   earlier; cache misses still read Sheets. Keep the account-cache lifetime
+   unchanged, and always recheck physical account rows for staged sign-in. */
+var PK_CACHE_TTL_ = 21600;
+var PK_CACHE_ACCOUNT_TTL_ = 1800;
 var PK_CACHE_POTONG_ = 80000;
 var PK_CELL_MAX_ = 49000;
 function pkSchema_() { return APP_VERSION + ':' + coreHash(JSON.stringify(SCHEMA) + '|' + JSON.stringify(TYPES)); }
@@ -58,22 +62,26 @@ function pkStore_() {
          Transaction commits still publish synchronously below. */
       if (readFill && readCacheBatch) { readCacheQueue[name] = { text: teks, version: String(v), epoch: String(pkProps_().ve || '0') }; return; }
       var k = kunciCache(name, v); var grup = {}; var n = 0;
+      var ttl = name === 'Pegawai' ? PK_CACHE_ACCOUNT_TTL_ : PK_CACHE_TTL_;
       for (var i = 0; i < m; i++) {
         grup[k + '|' + i] = teks.substr(i * PK_CACHE_POTONG_, PK_CACHE_POTONG_); n++;
-        if (n === 4) { c.putAll(grup, PK_CACHE_TTL_); grup = {}; n = 0; }
+        if (n === 4) { c.putAll(grup, ttl); grup = {}; n = 0; }
       }
       grup[k] = String(m);
-      c.putAll(grup, PK_CACHE_TTL_);
+      c.putAll(grup, ttl);
     } catch (e) {}
   }
   function flushReadCache() {
     var queued = readCacheQueue; readCacheQueue = {};
     var c = lemari(); if (!c) return;
-    var group = {}, parts = 0;
-    function flush() { if (!Object.keys(group).length) return; try { c.putAll(group, PK_CACHE_TTL_); } catch (e) {} group = {}; parts = 0; }
+    var group = {}, parts = 0, groupTtl = PK_CACHE_TTL_;
+    function flush() { if (!Object.keys(group).length) return; try { c.putAll(group, groupTtl); } catch (e) {} group = {}; parts = 0; }
     Object.keys(queued).forEach(function (name) {
       var q = queued[name];
       if (q.version !== versiTab(name) || q.epoch !== String(pkProps_().ve || '0')) return;
+      var ttl = name === 'Pegawai' ? PK_CACHE_ACCOUNT_TTL_ : PK_CACHE_TTL_;
+      if (ttl !== groupTtl) flush();
+      groupTtl = ttl;
       var key = kunciCache(name, q.version), count = Math.ceil(q.text.length / PK_CACHE_POTONG_) || 1;
       for (var i = 0; i < count; i++) {
         if (parts === 4) flush();
@@ -130,7 +138,9 @@ function pkStore_() {
     if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name);
     if (!ada && !penuh) { dariCache([name]); if (cache[name]) return cache[name]; }
     var sh = book().getSheetByName(name) || ensure(name);
-    var values = sh.getLastRow() > 0 ? sh.getDataRange().getValues() : [SCHEMA[name]];
+    /* getDataRange already contains the actual used rows (or one blank cell
+       for an empty sheet). Avoid a separate getLastRow RPC on every cold read. */
+    var values = sh.getDataRange().getValues();
     var head = values[0].map(function (h) { return String(h).trim(); });
     var cols = SCHEMA[name]; var idx = cols.map(function (c) { return head.indexOf(c); });
     if (idx.some(function (i) { return i < 0; })) {
@@ -144,7 +154,7 @@ function pkStore_() {
       if (o[k] === '') continue;
       rowNo[o[k]] = i + 1; rows.push(o);
     }
-    cache[name] = { sh: sh, head: head, rows: rows, rowNo: rowNo, last: values.length, max: sh.getMaxRows(), extra: head.some(function (h) { return h && cols.indexOf(h) < 0; }) };
+    cache[name] = { sh: sh, head: head, rows: rows, rowNo: rowNo, last: values.length, extra: head.some(function (h) { return h && cols.indexOf(h) < 0; }) };
     if (!penuh) keCache(name, rows, versiTab(name), true);
     return cache[name];
   }
@@ -162,6 +172,9 @@ function pkStore_() {
     });
     if (!data.length) return;
     var start = t.last + 1;
+    /* Capacity is needed only when appending, never for a read or row update.
+       A prior full read/fresh/checkpoint can therefore be reused without it. */
+    if (t.max === undefined) t.max = t.sh.getMaxRows();
     var kurang = start + data.length - 1 - t.max;
     if (kurang > 0) { t.sh.insertRowsAfter(t.max, kurang + 200); t.max += kurang + 200; }
     var range = t.sh.getRange(start, 1, data.length, t.head.length);
@@ -254,7 +267,7 @@ function pkStore_() {
       t.rows = t.rows.filter(function (x) { return x[k] !== id; });
       delete t.rowNo[id];
       for (var key in t.rowNo) if (t.rowNo[key] > r) t.rowNo[key]--;
-      t.last--; t.max--; changed(name);
+      t.last--; if (t.max !== undefined) t.max--; changed(name);
     },
     replaceAll: function (name, list) {
       var t = load(name, true); var k = keyOf(name);

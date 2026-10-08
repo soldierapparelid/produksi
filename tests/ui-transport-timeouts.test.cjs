@@ -71,3 +71,13 @@ test('synchronous action failure and transport construction failure never strand
   const done=t.run(`Api.call=function(){throw new Error('serialize failed');};req('getState',{}).catch(function(e){return e;})`);
   assert.match((await done).message,/serialize failed/);assert.equal(t.run('S.busy'),0);
 });
+test('an old request cannot install previous account state or sign out a newer session',async()=>{
+  for(const rejected of [false,true]){
+    const t=transport(),done=t.run("req('getState',{}).catch(function(e){return e;})");
+    t.run("S.token='new_session';S.state={me:{id:'new-user'}};var signouts=0;signOutLocal=function(){signouts++;}");
+    if(rejected)t.ok(JSON.stringify({ok:false,error:'Sesi berakhir. Silakan login.'}));
+    else t.ok(JSON.stringify({ok:true,data:{state:{me:{id:'previous-user'}},data:{}}}));
+    await done;
+    assert.equal(t.run('S.token'),'new_session');assert.equal(t.run('S.state.me.id'),'new-user');assert.equal(t.run('applied'),0);assert.equal(t.run('signouts'),0);assert.equal(t.run('S.busy'),0);
+  }
+});

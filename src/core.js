@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.4.3';
+var APP_VERSION = '1.4.4';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -855,11 +855,15 @@ function createCore(store, env) {
     return out;
   }
 
-  function loginResult(u, opt) {
+  function deferredSession(u, token) {
+    return { token: token, me: publicUser(u, true), deferredState: true, appVersion: APP_VERSION, workflowVersion: WORKFLOW_VERSION, contractVersion: WORKFLOW_VERSION };
+  }
+  function loginResult(u, opt, allowDeferred) {
     var token = genToken();
     var list = tokensOf(u); list.push(token);
     while (list.length > MAX_SESI) list.shift();
     store.update('Pegawai', u.id, { token: list.join(','), gagal: 0, kunci: '' });
+    if (allowDeferred && opt && opt.deferState === true) return deferredSession(findUser(u.id), token);
     return { token: token, state: buildState(findUser(u.id), opt) };
   }
 
@@ -867,6 +871,13 @@ function createCore(store, env) {
   var actions = {};
 
   actions.bootstrap = function (p) {
+    /* Resume only after checking the current account row. The caller can show
+       this verified identity while fetching its scoped production state once. */
+    if (p && p.deferState === true && p.token) {
+      if (store.fresh) store.fresh('Pegawai');
+      var resumed = null; try { resumed = auth(p); } catch (e) {}
+      if (resumed) return deferredSession(resumed, String(p.token));
+    }
     var us = users();
     var st = settings();
     /* aplikasi per divisi hanya menerima daftar nama divisinya sendiri */
@@ -919,7 +930,7 @@ function createCore(store, env) {
       store.update('Pegawai', u.id, patch);
       return { salah: true, pesan: g >= MAX_GAGAL ? 'PIN salah ' + MAX_GAGAL + ' kali. Akun dikunci ' + MENIT_KUNCI + ' menit.' : 'PIN salah. Sisa percobaan: ' + (MAX_GAGAL - g) + '.' };
     }
-    return loginResult(u, p);
+    return loginResult(u, p, true);
   };
 
   actions.logout = function (p) {
@@ -2039,7 +2050,10 @@ function createCore(store, env) {
          authenticated load rather than altering its verified result response. */
       skipAutoCompletion = action === 'applyLegacyMigration' || action === 'recoverLegacyMigration';
       try {
-        if (durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
+        /* Login is allowed during recovery; the opt-in authentication response
+           needs no production/settings reads. Its subsequent getState still
+           checks durable recovery status and all production writes keep it. */
+        if (!(action === 'login' && payload.deferState === true) && durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
         var data = fn(payload);
         if (NO_STATE[action]) return data;
         var out = { data: data };

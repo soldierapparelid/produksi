@@ -332,7 +332,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261008-slip-desain1';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261008-staged-login1';</script>
 <script>
 (function () {
 'use strict';
@@ -354,7 +354,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.4.3';
+var APP_VERSION = '1.4.4';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -1194,11 +1194,15 @@ function createCore(store, env) {
     return out;
   }
 
-  function loginResult(u, opt) {
+  function deferredSession(u, token) {
+    return { token: token, me: publicUser(u, true), deferredState: true, appVersion: APP_VERSION, workflowVersion: WORKFLOW_VERSION, contractVersion: WORKFLOW_VERSION };
+  }
+  function loginResult(u, opt, allowDeferred) {
     var token = genToken();
     var list = tokensOf(u); list.push(token);
     while (list.length > MAX_SESI) list.shift();
     store.update('Pegawai', u.id, { token: list.join(','), gagal: 0, kunci: '' });
+    if (allowDeferred && opt && opt.deferState === true) return deferredSession(findUser(u.id), token);
     return { token: token, state: buildState(findUser(u.id), opt) };
   }
 
@@ -1206,6 +1210,13 @@ function createCore(store, env) {
   var actions = {};
 
   actions.bootstrap = function (p) {
+    /* Resume only after checking the current account row. The caller can show
+       this verified identity while fetching its scoped production state once. */
+    if (p && p.deferState === true && p.token) {
+      if (store.fresh) store.fresh('Pegawai');
+      var resumed = null; try { resumed = auth(p); } catch (e) {}
+      if (resumed) return deferredSession(resumed, String(p.token));
+    }
     var us = users();
     var st = settings();
     /* aplikasi per divisi hanya menerima daftar nama divisinya sendiri */
@@ -1258,7 +1269,7 @@ function createCore(store, env) {
       store.update('Pegawai', u.id, patch);
       return { salah: true, pesan: g >= MAX_GAGAL ? 'PIN salah ' + MAX_GAGAL + ' kali. Akun dikunci ' + MENIT_KUNCI + ' menit.' : 'PIN salah. Sisa percobaan: ' + (MAX_GAGAL - g) + '.' };
     }
-    return loginResult(u, p);
+    return loginResult(u, p, true);
   };
 
   actions.logout = function (p) {
@@ -2378,7 +2389,10 @@ function createCore(store, env) {
          authenticated load rather than altering its verified result response. */
       skipAutoCompletion = action === 'applyLegacyMigration' || action === 'recoverLegacyMigration';
       try {
-        if (durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
+        /* Login is allowed during recovery; the opt-in authentication response
+           needs no production/settings reads. Its subsequent getState still
+           checks durable recovery status and all production writes keep it. */
+        if (!(action === 'login' && payload.deferState === true) && durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
         var data = fn(payload);
         if (NO_STATE[action]) return data;
         var out = { data: data };
@@ -4035,7 +4049,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.4.3';
+var UI_VERSION = '1.4.4';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -4353,7 +4367,7 @@ function bacaToken() {
   return t;
 }
 var S = {
-  boot: null, token: '', state: null,
+  boot: null, token: '', state: null, sessionLoad: null,
   tab: '', sub: {}, f: { q: '', poStatus: 'aktif', poTahap: '', poJenis: '', slipMaklon: '' },
   busy: 0, off: false, lastSync: 0, seq: 0, wantAll: false, pending: null,
   gate: { user: null, pin: '', err: '', setup: null },
@@ -4435,6 +4449,7 @@ function applyState(st, dariSimpanan) {
 /* panggil server; token ikut otomatis; jawaban aksi tulis membawa data terbaru */
 function req(action, payload) {
   payload = payload || {};
+  if (S.sessionLoad && !S.state) return Promise.reject(new Error('Data akun masih dimuat. Tunggu sampai halaman siap sebelum menggunakan fitur produksi.'));
   if (S.token && payload.token === undefined) payload.token = S.token;
   if (S.wantAll) payload.semua = true;
   var workflowWrite = /^(savePO|setStatusPO|saveInvoiceBahan|saveRencanaPotong|createPotong|createKirim|createSetor|prosesSetor|createQC|createGudang|createUpah|deleteRecord|ubahHarga|tandaiLunas|importRows|gantiImpor|applyLegacyMigration|recoverLegacyMigration|saveHistoryCorrection)$/;
@@ -4442,21 +4457,22 @@ function req(action, payload) {
     return Promise.reject(new Error('Pembaruan alur produksi di server belum selesai. Data tetap bisa dilihat; hubungi owner sebelum menyimpan perubahan.'));
   }
   payload.workflowVersion = 2;
+  var requestToken = S.token;
   S.busy++; paintSync();
   var request; try { request = Api.call(action, payload); } catch (error) { request = Promise.reject(error); }
   return Promise.resolve(request).then(function (res) {
     S.busy--; S.off = false;
-    try { if (res && res.state && res.state.me) { applyState(res.state); res = res.data; refresh(); } }
+    try { if (S.token !== requestToken) throw new Error('Sesi sudah berubah. Jawaban permintaan sebelumnya diabaikan.'); if (res && res.state && res.state.me) { applyState(res.state); res = res.data; refresh(); } }
     finally { paintSync(); }
     return res;
   }, function (err) {
-    S.busy--; if (err.net) S.off = true; paintSync();
+    S.busy--; if (S.token !== requestToken) { paintSync(); throw err; } if (err.net) S.off = true; paintSync();
     if (/Sesi berakhir|Silakan login|dinonaktifkan/.test(err.message || '')) { signOutLocal(); }
     throw err;
   });
 }
 function signOutLocal() {
-  S.token = ''; S.state = null; LS.del(tokenKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null }; closeAll();
+  clearSessionLoad(); S.token = ''; S.state = null; LS.del(tokenKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null }; closeAll();
   boot();
 }
 
@@ -4472,7 +4488,7 @@ function sync(force, ringan) {
   var urut = S.seq;
   S.busy++; paintSync();
   return Api.call('sync', payload).then(function (res) {
-    S.busy--; syncing = false; S.off = false;
+    S.busy--; syncing = false; if (S.token !== payload.token) return; S.off = false;
     tanda('pk-server');
     /* jawaban yang berangkat sebelum sebuah penyimpanan selesai bisa lebih tua dari data di layar: dilewati,
        sinkron berikutnya yang menyamakan */
@@ -4480,7 +4496,7 @@ function sync(force, ringan) {
     else S.lastSync = Date.now();
     paintSync();
   }, function (err) {
-    S.busy--; syncing = false; if (err.net) S.off = true; paintSync();
+    S.busy--; syncing = false; if (S.token !== payload.token) return; if (err.net) S.off = true; paintSync();
     if (/Sesi berakhir|Silakan login|dinonaktifkan/.test(err.message || '')) signOutLocal();
   });
 }
@@ -4739,7 +4755,7 @@ function paintList() { var el = $('#list'); if (el && S.listFn) { el.innerHTML =
 function render() {
   var root = $('#app'); if (!root) return;
   S.pending = false; S.listFn = null;
-  if (!S.state) { root.innerHTML = gateHtml(); return; }
+  if (!S.state) { root.innerHTML = S.sessionLoad ? sessionLoadingHtml() : gateHtml(); return; }
   var tabs = tabsFor();
   if (!tabs.some(function (t) { return t.id === S.tab; })) S.tab = tabs[0].id;
   var pips = navPips();
@@ -4917,6 +4933,58 @@ function pinKey(k) {
   var h = ''; for (var i = 0; i < Math.max(4, g.pin.length); i++) h += '<i' + (i < g.pin.length ? ' class="f"' : '') + '></i>'; d.innerHTML = h;
   var note = $('.gate .note.bad'); if (note) note.hidden = true;
 }
+/* Authentication is complete before this shell is shown. It deliberately has
+   no production state, totals, enabled tabs, or restored prior-account data. */
+function clearSessionLoad() {
+  if (S.sessionLoad && S.sessionLoad.timer) clearTimeout(S.sessionLoad.timer);
+  S.sessionLoad = null;
+}
+function sessionLoadingHtml() {
+  var model = S.sessionLoad, actor = model.me, admin = coreIsAdmin(actor), tabs = admin ? TABS.admin : (TABS[actor.divisi] || []);
+  var business = (S.boot && S.boot.namaUsaha) || 'Soldier', label = appLabel(admin ? '' : actor.divisi);
+  var message = model.error ? 'Akun sudah masuk, tetapi data produksi belum berhasil dimuat.' : (model.slow ? 'Sesi sudah terverifikasi. Server masih menyiapkan data produksi dan riwayat yang sesuai akun Anda.' : 'Sesi sudah terverifikasi. Sedang mengambil data produksi akun Anda.');
+  return '<div class="app"><header class="top"><div class="top-in">' + logoImg() + '<span class="brand grow cut">' + esc(business) + ' <i>' + esc(label) + '</i></span><span class="chip ok">Sesi terverifikasi</span><span class="who"><span class="ava">' + esc(inisial(actor.nama)) + '</span><span>' + esc(actor.nama) + '</span></span></div></header>' +
+    '<div class="body"><nav class="nav" aria-label="Menu sedang dimuat">' + tabs.map(function(t) { return '<button disabled aria-disabled="true" title="Tersedia setelah data akun selesai dimuat">' + ic(t.icon) + '<span>' + esc(t.label) + '</span></button>'; }).join('') + '</nav>' +
+    '<main class="page"><div class="head"><div class="grow"><h1>' + (model.error ? 'Data belum siap' : 'Memuat data produksi') + '</h1><div class="sub" role="status" aria-live="polite">' + esc(message) + '</div></div></div>' +
+    (model.error ? '<div class="note warn">' + esc(model.error) + '</div>' : '<div class="card col" aria-busy="true"><b>Menyiapkan pekerjaan, progres, dan riwayat</b><p class="muted small">Data dan tombol produksi akan tampil setelah pemuatan selesai.</p></div>') +
+    '<div class="row wrap">' + (model.error ? '<button class="btn pri" data-a="sessionRetry">Coba muat data lagi</button>' : '') + '<button class="btn" data-a="logout">Keluar</button></div></main></div></div>';
+}
+function beginSessionLoad(res) {
+  clearSessionLoad();
+  var actor = res.me;
+  var model = { token: res.token, me: { id: actor.id, nama: actor.nama, divisi: actor.divisi }, loading: false, error: '', slow: false, timer: null };
+  S.sessionLoad = model; S.state = null; S.seq++; S.wantAll = false; S.tab = ''; S.sub = {}; S.f.q = '';
+  D = { user: {}, po: {}, produk: {} }; closeAll(); render();
+  if (typeof tanda === 'function') tanda('pk-auth-shell');
+  hydrateSession(model);
+  return model;
+}
+function hydrateSession(model) {
+  if (!model || S.sessionLoad !== model || S.token !== model.token || model.loading) return model && model.request;
+  model.loading = true; model.error = ''; model.slow = false; render();
+  model.timer = setTimeout(function () { if (S.sessionLoad === model && model.loading) { model.slow = true; render(); } }, 6000);
+  var response;
+  try { response = Api.call('getState', { token: model.token, av: APP_VERSION, workflowVersion: 2 }); }
+  catch (error) { response = Promise.reject(error); }
+  function current() { return S.sessionLoad === model && S.token === model.token; }
+  function finished() { clearTimeout(model.timer); model.timer = null; model.loading = false; }
+  model.request = Promise.resolve(response).then(function (state) {
+    finished(); if (!current()) return;
+    var locked = typeof Api.div === 'function' ? Api.div() : '';
+    if (state && state.me && (state.me.id !== model.me.id || state.me.divisi !== model.me.divisi || (locked && state.me.divisi !== locked))) { signOutLocal(); toast('Akun atau divisi sesi berubah. Silakan masuk kembali.', true); return; }
+    if (!state || !state.me) throw new Error('Data akun belum lengkap. Coba muat data lagi.');
+    if (!state.settings || !Array.isArray(state.po) || !Array.isArray(state.users) || !Array.isArray(state.produk) || !Array.isArray(state.potong) || !Array.isArray(state.kirim) || !Array.isArray(state.setor) || !Array.isArray(state.qc) || !Array.isArray(state.gudang) || !Array.isArray(state.upah)) throw new Error('Data akun belum lengkap. Coba muat data lagi.');
+    if (typeof tanda === 'function') tanda('pk-data-server');
+    clearSessionLoad(); applyState(state); startSync(); render();
+    if (typeof tanda === 'function') tanda('pk-pin-tampil');
+  }).catch(function (error) {
+    finished(); if (!current()) return;
+    if (/Sesi berakhir|Silakan login|dinonaktifkan/.test((error && error.message) || '')) { signOutLocal(); toast('Sesi tidak lagi berlaku. Silakan masuk kembali.', true); return; }
+    model.error = (error && error.message) || 'Server belum mengirim data produksi. Coba muat data lagi.'; render();
+  });
+  return model.request;
+}
+A.sessionRetry = function () { return hydrateSession(S.sessionLoad); };
 A.pinGo = function () {
   var g = S.gate; if (!g.user || g.sending) return;
   if (g.pin.length < 4) { g.err = 'PIN minimal 4 angka.'; return render(); }
@@ -4925,15 +4993,21 @@ A.pinGo = function () {
   if (typeof tanda === 'function') tanda('pk-pin-kirim');
   var waitMessage = setTimeout(function () { if (S.gate === g && g.sending) { g.waitingLong = true; render(); } }, 6000);
   function finished() { clearTimeout(waitMessage); g.sending = false; g.waitingLong = false; }
-  return Api.call('login', { userId: loginUserId, pin: g.pin, av: APP_VERSION, workflowVersion: 2 }).then(function (res) {
+  var request;
+  try { request = Api.call('login', { userId: loginUserId, pin: g.pin, av: APP_VERSION, workflowVersion: 2, deferState: true }); }
+  catch (error) { request = Promise.reject(error); }
+  return Promise.resolve(request).then(function (res) {
     finished();
     if (S.gate !== g) return;
     if (!g.user || g.user.id !== loginUserId) return render();
     if (res && res.salah) { g.pin = ''; g.err = res.pesan; return render(); }
-    if (!res || !res.token || !res.state || !res.state.me || res.state.me.id !== loginUserId) { g.pin = ''; g.err = 'Jawaban masuk belum lengkap. Silakan masukkan PIN dan coba lagi.'; return render(); }
+    var verified = res && (res.deferredState === true ? res.me : res.state && res.state.me);
+    var locked = typeof Api.div === 'function' ? Api.div() : '';
+    if (!res || !res.token || !verified || verified.id !== loginUserId || (res.deferredState === true && !verified.divisi) || (locked && verified.divisi !== locked)) { g.pin = ''; g.err = 'Jawaban masuk belum lengkap atau tidak sesuai akun. Silakan masukkan PIN dan coba lagi.'; return render(); }
     if (typeof tanda === 'function') tanda('pk-pin-server');
     S.token = res.token; LS.set(tokenKey(), res.token); LS.set(lastKey(), loginUserId);
     S.gate = { user: null, pin: '', err: '', setup: null }; S.tab = '';
+    if (res.deferredState === true) { beginSessionLoad(res); return; }
     applyState(res.state); startSync(); render();
     if (typeof tanda === 'function') tanda('pk-pin-tampil');
   }, function (e) { finished(); if (S.gate !== g) return; if (!g.user || g.user.id !== loginUserId) return render(); g.pin = ''; g.err = e.message || 'Gagal masuk.'; render(); });
@@ -4956,7 +5030,7 @@ A.connect = function () {
 };
 A.connectGo = function () {
   if (!Api.connect($('#conn-url').value)) return toast('Link tidak dikenali. Salin lagi link dari owner.', true);
-  closeAll(); S.token = ''; LS.del(tokenKey()); LS.del(bootKey()); hapusSnap(); S.state = null; S.boot = null; S.gate.needLink = false; boot();
+  clearSessionLoad(); closeAll(); S.token = ''; LS.del(tokenKey()); LS.del(bootKey()); hapusSnap(); S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null, needLink: false }; boot();
 };
 /* tombol pasang: browser memberi tahu kalau aplikasi ini bisa dipasang di layar utama */
 var installEvt = null;
@@ -4967,7 +5041,7 @@ A.install = function () {
   installEvt.prompt();
   installEvt.userChoice.then(function () { installEvt = null; S.canInstall = false; render(); }, quiet);
 };
-A.disconnect = function () { Api.disconnect(); S.token = ''; LS.del(tokenKey()); LS.del(bootKey()); hapusSnap(); S.state = null; S.boot = null; boot(); };
+A.disconnect = function () { clearSessionLoad(); Api.disconnect(); S.token = ''; LS.del(tokenKey()); LS.del(bootKey()); hapusSnap(); S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; boot(); };
 
 /* ---------- form: baca nilai & hitung ulang ---------- */
 function formVals(root) {
@@ -5377,7 +5451,7 @@ A.logout = function () {
   confirmBox({ title: 'Keluar dari aplikasi?', text: 'Anda perlu memasukkan PIN lagi untuk masuk.', ok: 'Keluar' }, function () {
     var tk = S.token;
     Api.call('logout', { token: tk }).catch(quiet);
-    S.token = ''; S.state = null; LS.del(tokenKey()); LS.del(lastKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null };
+    clearSessionLoad(); S.token = ''; S.state = null; LS.del(tokenKey()); LS.del(lastKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null };
     setTimeout(function () { closeAll(); boot(); }, 120);
     return Promise.resolve();
   });
@@ -8138,7 +8212,7 @@ document.addEventListener('keydown', function (ev) {
 window.addEventListener('hashchange', function () {
   if (!Api.rehash()) return;
   if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); }
-  S.token = bacaToken(); S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; closeAll(); boot();
+  clearSessionLoad(); S.token = bacaToken(); S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; closeAll(); boot();
 });
 
 /* nama yang terakhir masuk di perangkat ini langsung dipilih, supaya tinggal memasukkan PIN */
@@ -8154,6 +8228,7 @@ function pilihTerakhir() {
    3. selain itu -> layar memuat seperti biasa. */
 var bootKe = 0;
 function boot(snap) {
+  if (S.sessionLoad && S.token === S.sessionLoad.token) { render(); return; }
   if (Api.mode() === 'demo' && window.PK_HOSTED) { S.gate.loading = false; S.gate.bootErr = ''; S.gate.needLink = true; S.boot = null; render(); return; }
   S.gate.needLink = false; S.gate.bootErr = ''; S.gate.luring = '';
   var ke = ++bootKe;
@@ -8170,19 +8245,24 @@ function boot(snap) {
   else S.gate.loading = true;
   render(); if (!S.gate.loading || gateDepan()) tanda('pk-tampil');
   var kirim = S.token;
-  var payload = { token: S.token }; if (S.wantAll) payload.semua = true;
+  var payload = { token: S.token, deferState: true }; if (S.wantAll) payload.semua = true;
   if (Api.div()) payload.divisi = Api.div();
   Api.call('bootstrap', payload).then(function (res) {
     if (ke !== bootKe) return;                    /* sudah ada pemuatan yang lebih baru */
     tanda('pk-server');
     simpanBoot(res);
     /* orangnya sudah masuk selagi daftar nama disegarkan: sesinya tidak disentuh */
-    if (S.state || S.token !== kirim) { S.boot = res; return; }
+    if (S.state || S.sessionLoad || S.token !== kirim) { if (Array.isArray(res.users)) S.boot = res; return; }
     var sedangPin = !!S.gate.user;
-    S.gate.loading = false; S.gate.luring = ''; S.boot = res;
+    S.gate.loading = false; S.gate.luring = ''; if (Array.isArray(res.users)) S.boot = res;
     /* jendela yang dikunci ke satu divisi tidak dipakai masuk oleh divisi lain; sesi jendela lain tidak disentuh */
-    if (res.state && Api.div() && res.state.me.divisi !== Api.div()) { res.state = null; S.token = ''; LS.del(tokenKey()); LS.del(lastKey()); }
+    var verified = res.state && res.state.me || (res.deferredState && res.me);
+    if (verified && Api.div() && verified.divisi !== Api.div()) { S.token = ''; LS.del(tokenKey()); LS.del(lastKey()); hapusSnap(); S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; boot(); return; }
     if (Api.mode() === 'demo' && res.needSetup && !LS.get('pk_demo_seeded')) { seedDemo(); return; }
+    if (res.deferredState === true && res.me && res.me.id && res.me.divisi && res.token && res.token === kirim) {
+      S.token = res.token; S.gate = { user: null, pin: '', err: '', setup: null }; beginSessionLoad(res); tanda('pk-tampil'); return;
+    }
+    if (res.deferredState === true) { S.gate.bootErr = 'Jawaban sesi belum lengkap. Coba muat ulang aplikasi.'; render(); return; }
     if (res.state) { S.token = res.token; if (LS.get(tokenKey()) !== S.token) LS.set(tokenKey(), S.token); applyState(res.state); startSync(); }
     else {
       if (S.token) { S.token = ''; LS.del(tokenKey()); hapusSnap(); }
@@ -8197,7 +8277,7 @@ function boot(snap) {
     }
     render(); tanda('pk-tampil');
   }, function (e) {
-    if (ke !== bootKe || S.state) return;
+    if (ke !== bootKe || S.state || S.sessionLoad || S.token !== kirim) return;
     S.gate.loading = false;
     /* daftar nama dari simpanan tetap ditampilkan; cukup diberi tahu bahwa server belum terhubung */
     if (dilukis) S.gate.luring = (e && e.message) || 'Server tidak bisa dihubungi.'; else S.gate.bootErr = (e && e.message) || 'Gagal memuat.';
@@ -8292,7 +8372,7 @@ function seedDemo() {
    di dalam aplikasi muncul baris kecil "Versi baru siap" supaya isian yang sedang diketik tidak hilang. */
 function versiBaruSiap() {
   if (S.versiBaru) return; S.versiBaru = true;
-  if (!S.state && !S.gate.pin && !S.gate.sending && !sheets.length) {
+  if (!S.state && !S.sessionLoad && !S.gate.pin && !S.gate.sending && !sheets.length) {
     var baru = true;
     try { baru = !window.sessionStorage.getItem('pk_muat'); window.sessionStorage.setItem('pk_muat', '1'); } catch (e) {}
     if (baru) { location.reload(); return; }
