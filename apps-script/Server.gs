@@ -156,6 +156,43 @@ function pkStore_() {
       if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name);
       rows.forEach(function (row) { SCHEMA[name].forEach(function (col) { toCell(col, row[col]); }); });
     },
+    /* Migration boundaries must verify Sheets, not the rows just staged in this
+       execution or ScriptCache. Keep dirty/kotor intact for the outer lock's
+       version publication after the durable read-back succeeds. */
+    checkpoint: function (names) {
+      names = names || [];
+      names.forEach(function (name) { if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name); });
+      SpreadsheetApp.flush();
+      /* A hard execution timeout may skip lock.finally and its version update.
+         Remove the durable tables' old cache metadata now so a cold request
+         cannot mistake the pre-migration snapshot for the flushed Sheets. */
+      if (names.length) {
+        var persistent = lemari();
+        if (!persistent) throw new Error('Cache belum dapat disegarkan. Coba pemulihan kembali sebelum melanjutkan.');
+        names.forEach(function (name) { persistent.remove(kunciCache(name, versiTab(name))); });
+      }
+      names.forEach(function (name) { delete cache[name]; load(name, true); });
+    },
+    /* A migration journal contains schema fields only. Refuse layouts whose
+       extra data could otherwise disappear when source IDs are replaced. */
+    validateMigrationLayout: function (names) {
+      names = names || [];
+      names.forEach(function (name) { if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name); });
+      names.forEach(function (name) {
+        var sh = book().getSheetByName(name); if (!sh || !sh.getLastRow()) return;
+        var values = sh.getDataRange().getValues(), head = values[0].map(function (value) { return String(value == null ? '' : value).trim(); });
+        var seen = Object.create(null);
+        head.forEach(function (key, col) {
+          if (key && Object.prototype.hasOwnProperty.call(seen, key)) throw new Error('Tabel ' + name + ' memiliki judul kolom ganda. Rapikan judul sebelum pemulihan riwayat.');
+          if (key) seen[key] = true;
+          if (SCHEMA[name].indexOf(key) >= 0) return;
+          for (var row = 1; row < values.length; row++) {
+            if (values[row][col] !== '' && values[row][col] !== null && values[row][col] !== undefined)
+              throw new Error('Tabel ' + name + ' memiliki data pada kolom tambahan. Simpan dan rapikan kolom tersebut sebelum pemulihan riwayat.');
+          }
+        });
+      });
+    },
     append: function (name, row) { writeRows(name, [row]); },
     appendMany: function (name, rows) { writeRows(name, rows); },
     prefetch: function (names) { dariCache(names); },

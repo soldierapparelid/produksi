@@ -5,7 +5,41 @@
    Data baru: satu PO per SKU/ukuran/siklus agar riwayat tidak saling bercampur.
    Id dibuat tetap (bukan acak), jadi impor ulang tidak membuat dobel.
    ============================================================ */
-function convertBackup(backup) {
+/* Same legacy tariff resolution as production-payroll.js: immutable snapshot first,
+   otherwise the worker's own product tariff history as of the source event. Never use
+   a modal product tariff or a different worker's rate to fill missing evidence. */
+function importPositiveRate(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return 0;
+  if (typeof value === 'string' && !value.trim()) return 0;
+  var n = Number(value); return isFinite(n) && n > 0 && n <= 9007199254740991 ? n : 0;
+}
+function importRateDate(value) {
+  if (value == null || value === '') return NaN;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return isFinite(value) ? value : NaN;
+  var text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    var parts = text.split('-').map(Number), date = new Date(parts[0], parts[1] - 1, parts[2]);
+    return date.getFullYear() === parts[0] && date.getMonth() === parts[1] - 1 && date.getDate() === parts[2] ? date.getTime() : NaN;
+  }
+  return Date.parse(text);
+}
+function importLegacyRateFor(worker, series, product, date) {
+  if (!worker) return 0;
+  var rawKey = String(series || '') + '|' + String(product || ''), key = rawKey.replace(/[.#$\/\[\]]/g, '_');
+  var current = worker.tarif || {}, histories = worker.tarifHistory || {}, raw = histories[key] || histories[rawKey] || [];
+  var entries = (raw instanceof Array ? raw : (typeof raw === 'object' ? Object.keys(raw).map(function (k) { return raw[k]; }) : []));
+  var history = entries.filter(function (e) { return e && typeof e === 'object'; }).map(function (e, i) { return { time: importRateDate(e.effectiveAt), rate: importPositiveRate(e.rate), index: i }; }).filter(function (e) { return isFinite(e.time); });
+  var at = importRateDate(date);
+  if (history.length && isFinite(at)) {
+    history.sort(function (a, b) { return b.time - a.time || b.index - a.index; });
+    for (var i = 0; i < history.length; i++) if (history[i].time <= at) return history[i].rate;
+    return 0;
+  }
+  return importPositiveRate(current[key] != null ? current[key] : current[rawKey]);
+}
+function convertBackup(backup, options) {
+  options = options || {};
   /* Dua bentuk sumber dikenali: file backup penuh aplikasi lama ({ produksi: {...} }) dan ekspor database
      aplikasi lama ({ soldier: { produksi, stokBahan, gajiHarian, produksi_meta } } atau isi "soldier" langsung). */
   var root = (backup && backup.soldier && typeof backup.soldier === 'object') ? backup.soldier : (backup || {});
@@ -18,8 +52,8 @@ function convertBackup(backup) {
   var src = (root.produksi && typeof root.produksi === 'object') ? root.produksi : {};
   var items = daftar(src.produksi);
   var images = (src.images && typeof src.images === 'object') ? src.images : {};
-  var rows = { Pegawai: [], Produk: [], PO: [], Potong: [], SlipKirim: [], SlipSetor: [], QC: [], Gudang: [], StokBahan: [], Karyawan: [], GajiHarian: [], Kasbon: [] };
-  var info = { duplikat: 0, baris: items.length, catatan: [] };
+  var rows = { Pegawai: [], Produk: [], PO: [], Potong: [], SlipKirim: [], SlipSetor: [], QC: [], Gudang: [], GudangLama: [], StokBahan: [], Karyawan: [], GajiHarian: [], Kasbon: [] };
+  var info = { duplikat: 0, baris: items.length, catatan: [], lineage: [], review: [], requiresReview: false };
   var used = {};
   function claim(id) { id = String(id); if (!/^[A-Za-z0-9_-]{6,48}$/.test(id) || used[id]) return ''; used[id] = 1; return id; }
   function gen(prefix, key) { var base = prefix + coreHash(key); var id = base, n = 1; while (used[id]) id = base + (n++).toString(36); used[id] = 1; return id; }
@@ -46,6 +80,7 @@ function convertBackup(backup) {
   });
   /* daftar tukang di aplikasi lama: hanya id dan nama yang diambil. PIN lama tidak pernah ikut dipindahkan. */
   var meta = (root.produksi_meta && typeof root.produksi_meta === 'object') ? root.produksi_meta : {};
+  var payrollWorkers = arr(meta.tukangJahit);
   arr(meta.tukangJahit).forEach(function (t) { regPeg(t.id, t.nama, 'jahit'); });
   arr(meta.tukang).forEach(function (t) { regPeg(t.id, t.nama, 'potong'); });
   function maklonByName(n) {
@@ -98,7 +133,9 @@ function convertBackup(backup) {
   }
   function stopped(e) { return e.deleted === true || e.isDeleted === true || !!e.deletedAt || e.cancelled === true || e.canceled === true || !!e.cancelledAt || !!e.canceledAt || /^(deleted|cancelled|canceled|dihapus|dibatalkan|batal)$/i.test(String(e.status || '')); }
   var sourceKeys = {};
-  function addCycle(it, c, tag, archive) {
+  function cycleIdentity(c, archive) { return archive ? 'archive:' + (c.id || c.cycleId || coreHash(canonical(c))) : 'current'; }
+  var cycleSources = {};
+  function addCycle(it, c, tag, archive, aliases) {
     var size = up(it.size), sourceId = String(it.id || '');
     var label = (it.series || '') + ' / ' + it.namaBarang + ' / ' + (size || 'tanpa ukuran') + ' / ' + (archive ? (c.label || c.tanggalArsip || tag) : 'aktif');
     function problem(msg) { throw new Error('Impor belum dijalankan: ' + label + '. ' + msg + ' Periksa catatan asal dahulu; tidak ada jumlah atau pembayaran yang ditebak.'); }
@@ -124,7 +161,7 @@ function convertBackup(backup) {
     function identity(e, i) { return e.id != null && e.id !== '' ? 'id:' + e.id : 'row:' + i + ':' + coreHash(canonical(e)); }
     if (!size) problem('Ukuran SKU belum diisi.');
     if (!sourceId) problem('Identitas SKU belum tersedia.');
-    var cycleKey = archive ? 'archive:' + (c.id || c.cycleId || coreHash(canonical(c))) : 'current';
+    var cycleKey = cycleIdentity(c, archive);
     var key = 'I2|' + sourceId + '|' + size + '|' + cycleKey;
     var cycleContent = canonical(c);
     if (sourceKeys['cycle:' + key]) {
@@ -138,7 +175,14 @@ function convertBackup(backup) {
       pelanggan: isOffline(it) ? coreTitle(it._offlineCustomer || String(it.series || '').replace(/^OFFLINE-/i, '')) : '',
       deadline: it._offlineDeadline || '', ukuran: {}, total: 0, bahan: '', catatan: (archive ? 'Arsip ' + (c.label || c.tanggalArsip || '') : it.poKet || ''),
       gambar: '', status: 'aktif', dibuat: '', dibuatOleh: '', diubah: '', selesaiPada: '', asal: 'lama', imporVersion: 2,
-      imporReview: '', imporSumber: JSON.stringify({ skuId: sourceId, ukuran: size, siklus: cycleKey, arsip: !!archive, statusAsal: c.poAktif, label: c.label || '' }) };
+      imporReview: '', imporSumber: JSON.stringify({ skuId: sourceId, ukuran: size, siklus: cycleKey, arsip: !!archive, statusAsal: c.poAktif, label: c.label || '', aliases: aliases || [] }) };
+    cycleSources[po.id] = { skuId: sourceId, ukuran: size, siklus: cycleKey, aliases: aliases || [], source: c };
+    function provenance(field, e, i) { return { skuId: sourceId, ukuran: size, siklus: cycleKey, entryId: e.id != null && e.id !== '' ? String(e.id) : '', field: field, index: i, baseline: true, aliases: aliases || [] }; }
+    function pushSource(table, record, field, e, i) {
+      var src = provenance(field, e, i);
+      if (table === 'SlipSetor' || table === 'QC' || table === 'GudangLama' || table === 'Gudang') record.imporSumber = JSON.stringify(src);
+      rows[table].push(record); info.lineage.push({ table: table, id: record.id, poId: po.id, source: src });
+    }
     if (isOffline(it)) { po.ukuran[size] = pcs(it._offlineQty, 'pesanan'); po._img = it._offlineGambar || ''; }
     function uk(n) { var o = {}; if (n) o[size] = n; return o; }
     function worker(e) {
@@ -146,6 +190,15 @@ function convertBackup(backup) {
       if (!id) id = maklonByName(e.tukang || e.tukangJahit || e.tukangNama || (e.payroll || {}).workerName);
       if (!id || !peg[id] || peg[id].divisi !== 'jahit') problem('Tukang jahit pada ' + (e.id || e.tanggal || 'catatan') + ' belum dapat dicocokkan secara pasti.');
       return id;
+    }
+    function sourceRate(e, wid, required, source) {
+      var captured = e.payroll || source && source.payroll || {}, rate = !captured.rateMissing ? importPositiveRate(captured.rate) : 0;
+      if (!rate) {
+        var matches = payrollWorkers.filter(function (w) { return String(w.id == null ? '' : w.id).trim() === String(wid).trim(); });
+        if (matches.length === 1) rate = importLegacyRateFor(matches[0], it.series, it.namaBarang, e.inputAt || e.tanggal || '');
+      }
+      if (!rate && required) problem('Tarif asli ' + (e.id || e.tanggal || 'catatan') + ' belum tersedia.');
+      return rate;
     }
     function uniqueAcrossCycles(field, e) {
       if (e.id == null || e.id === '') return;
@@ -160,9 +213,9 @@ function convertBackup(backup) {
       uniqueAcrossCycles('potong', e);
       var bl = arr(e.bahanList).filter(function (b) { return b.jenis || coreNum(b.kg) > 0; }).map(function (b) { return { nama: String(b.jenis || '').trim(), qty: coreNum(b.kg) }; });
       var bahan = e.jenisBahan || (bl[0] || {}).nama || '';
-      rows.Potong.push({ id: gen('pt', key + '|potong|' + identity(e, i)), poId: po.id, userId: e.tukangId ? String(e.tukangId) : solePotong,
+      pushSource('Potong', { id: gen('pt', key + '|potong|' + identity(e, i)), poId: po.id, userId: e.tukangId ? String(e.tukangId) : solePotong,
         tanggal: e.tanggal || '', ukuran: uk(n), total: n, bahan: bahan, kg: coreNum(e.kiloan), rol: arr(e.rols).length,
-        tarif: coreNum(e.tarif), upahId: paid(e.dibayar) ? LUNAS_LAMA : '', catatan: e.ket || '', dibuat: iso(e.inputAt, e.tanggal), bahanList: bl.length ? bl : '', asal: 'lama' });
+        tarif: coreNum(e.tarif), upahId: paid(e.dibayar) ? LUNAS_LAMA : '', catatan: e.ket || '', dibuat: iso(e.inputAt, e.tanggal), bahanList: bl.length ? bl : '', asal: 'lama' }, 'potong', e, i);
       if (!po.bahan && bahan) po.bahan = bahan;
     });
     assignments.forEach(function (e, i) {
@@ -173,8 +226,8 @@ function convertBackup(backup) {
       sewing.forEach(function (j) { if (e.id != null && String(j.assignmentId) === String(e.id) && coreNum(j.tarif) > 0) linkedRates[coreNum(j.tarif)] = true; });
       var rates = Object.keys(linkedRates), rate = coreNum(e.tarif || e.upah);
       if (!(rate > 0) && rates.length === 1) rate = Number(rates[0]);
-      rows.SlipKirim.push({ id: gen('sk', key + '|assign|' + identity(e, i)), noSlip: '', poId: po.id, maklonId: wid,
-        tanggal: e.tanggal || '', target: e.targetTanggal || '', ukuran: uk(n), total: n, upah: rate > 0 ? rate : 0, catatan: e.ket || '', dibuatOleh: '', dibuat: iso(e.editedAt, e.tanggal), asal: 'lama' });
+      pushSource('SlipKirim', { id: gen('sk', key + '|assign|' + identity(e, i)), noSlip: '', poId: po.id, maklonId: wid,
+        tanggal: e.tanggal || '', target: e.targetTanggal || '', ukuran: uk(n), total: n, upah: rate > 0 ? rate : 0, catatan: e.ket || '', dibuatOleh: '', dibuat: iso(e.editedAt, e.tanggal), asal: 'lama' }, 'assignJahit', e, i);
     });
     var reported = {}, counted = {}, acceptedByHf = {}, countByQc = {};
     function group(id) { return reported[id] || (reported[id] = { good: 0, rejected: 0, entries: [], paid: 0 }); }
@@ -192,36 +245,79 @@ function convertBackup(backup) {
       if (h.id == null || h.id === '') problem('Hitung fisik perlu ID tetap untuk hubungan QC.');
       uniqueAcrossCycles('hitungFisik', h);
       var wid = worker(h), g = group(wid), payroll = h.payroll || {};
-      if (!(Number(payroll.rate) > 0) || payroll.rateMissing) problem('Tarif asli hitung fisik ' + h.id + ' belum tersedia.');
+      var rate = !payroll.rateMissing ? importPositiveRate(payroll.rate) : 0;
+      if (!rate) {
+        var matches = payrollWorkers.filter(function (w) { return String(w.id == null ? '' : w.id).trim() === String(wid).trim(); });
+        if (matches.length === 1) rate = importLegacyRateFor(matches[0], it.series, it.namaBarang, h.inputAt || h.tanggal || '');
+      }
+      if (!rate) problem('Tarif asli hitung fisik ' + h.id + ' belum tersedia.');
       if (!coreTglOk(h.tanggal)) problem('Tanggal hitung fisik ' + h.id + ' tidak valid.');
       counted[wid] = (counted[wid] || 0) + n;
       if (counted[wid] > g.good) problem('Hitungan melampaui laporan jahit baik milik tukang.');
       if (g.paid > 0 && g.paid !== g.good) problem('Sebagian laporan jahit sudah dibayar; hubungan pembayaran dengan hitungan perlu dipastikan.');
       var rec = { id: gen('ss', key + '|count|' + identity(h, i)), noSlip: '', poId: po.id, maklonId: wid, tanggal: h.tanggal,
-        ukuran: uk(n), total: n, reject: 0, rejectUkuran: {}, upah: Number(payroll.rate), catatan: 'Hitung fisik asal ' + h.id, status: 'diterima',
+        ukuran: uk(n), total: n, reject: 0, rejectUkuran: {}, upah: rate, catatan: 'Hitung fisik asal ' + h.id, status: 'diterima',
         dibuatOleh: '', dibuat: iso(h.inputAt, h.tanggal), diprosesOleh: h.inputBy || '', diprosesPada: iso(h.inputAt, h.tanggal),
-        upahId: paid(h.dibayar) || g.paid > 0 ? LUNAS_LAMA : '', asal: 'lama' };
+        upahId: paid(h.dibayar) || g.paid > 0 ? LUNAS_LAMA : '', asal: 'lama', workflowVersion: Number(h.workflowVersion) === 2 && h.countStage === 'verified' ? 2 : 1 };
       acceptedByHf[String(h.id)] = { record: rec, source: h };
       if (h.qcId != null && h.qcId !== '') {
         if (countByQc[String(h.qcId)]) problem('Satu QC menunjuk beberapa hitungan asal.');
         countByQc[String(h.qcId)] = acceptedByHf[String(h.id)];
       }
-      rows.SlipSetor.push(rec);
+      pushSource('SlipSetor', rec, 'hitungFisik', h, i);
     });
     Object.keys(reported).forEach(function (wid) {
-      var g = reported[wid], consumed = counted[wid] || 0;
-      if (g.entries.length > 1 && consumed > 0 && consumed < g.good) problem('Hitungan sebagian berasal dari beberapa laporan tanpa tautan pasti; sisa tiap laporan harus dipastikan sebelum impor.');
+      var g = reported[wid], consumed = counted[wid] || 0, pendingTotal = g.good - consumed;
+      if (g.paid > 0 && pendingTotal > 0) problem('Laporan sudah dibayar tetapi sebagian belum memiliki hitungan fisik.');
+      if (pendingTotal > 0) {
+        var reportIds = g.entries.map(function (item) { return identity(item.entry, item.index); }).sort();
+        var lastDate = g.entries.reduce(function (d, item) { return item.entry.tanggal > d ? item.entry.tanggal : d; }, '');
+        var pendingRow = { id: gen('ss', key + '|pending-worker|' + wid), noSlip: '', poId: po.id, maklonId: wid,
+          tanggal: lastDate, ukuran: uk(pendingTotal), total: pendingTotal, reject: 0, rejectUkuran: {}, upah: 0,
+          catatan: 'Sisa laporan jahit belum dihitung; agregat tukang, bukan alokasi laporan.', status: 'diajukan',
+          dibuatOleh: '', dibuat: iso('', lastDate), diprosesOleh: '', diprosesPada: '', upahId: '', asal: 'lama', workflowVersion: 1 };
+        pushSource('SlipSetor', pendingRow, 'jahit', { id: '' }, -1);
+        var pendingProvenance = coreParseJSON(pendingRow.imporSumber, {}); pendingProvenance.reportIds = reportIds;
+        pendingProvenance.reportedGood = g.good; pendingProvenance.counted = consumed; pendingRow.imporSumber = JSON.stringify(pendingProvenance);
+        info.lineage[info.lineage.length - 1].source = pendingProvenance;
+      }
       g.entries.forEach(function (item) {
-        var take = Math.min(consumed, item.good); consumed -= take;
-        var pending = item.good - take, e = item.entry;
-        if (pending > 0 && paid(e.dibayar)) problem('Laporan sudah dibayar tetapi sebagian belum memiliki hitungan fisik.');
-        if (pending) rows.SlipSetor.push({ id: gen('ss', key + '|pending|' + identity(e, item.index)), noSlip: '', poId: po.id, maklonId: wid,
-          tanggal: e.tanggal || '', ukuran: uk(pending), total: pending, reject: 0, rejectUkuran: {}, upah: 0, catatan: 'Sisa laporan jahit belum dihitung; sumber ' + (e.id || ''), status: 'diajukan',
-          dibuatOleh: '', dibuat: iso(e.inputAt, e.tanggal), diprosesOleh: '', diprosesPada: '', upahId: '', asal: 'lama' });
-        if (item.reject) rows.SlipSetor.push({ id: gen('ss', key + '|sewing-reject|' + identity(e, item.index)), noSlip: '', poId: po.id, maklonId: wid,
+        var e = item.entry;
+        if (item.reject) pushSource('SlipSetor', { id: gen('ss', key + '|sewing-reject|' + identity(e, item.index)), noSlip: '', poId: po.id, maklonId: wid,
           tanggal: e.tanggal || '', ukuran: {}, total: 0, reject: item.reject, rejectUkuran: uk(item.reject), upah: 0, catatan: 'Reject laporan jahit asal ' + (e.id || ''), status: 'diterima',
-          dibuatOleh: '', dibuat: iso(e.inputAt, e.tanggal), diprosesOleh: '', diprosesPada: iso(e.inputAt, e.tanggal), upahId: paid(e.dibayar) ? LUNAS_LAMA : '', asal: 'lama' });
+          dibuatOleh: '', dibuat: iso(e.inputAt, e.tanggal), diprosesOleh: '', diprosesPada: iso(e.inputAt, e.tanggal), upahId: paid(e.dibayar) ? LUNAS_LAMA : '', asal: 'lama', workflowVersion: 2 }, 'jahit', e, item.index);
       });
+    });
+    /* Older batch screens wrote the count and inspection together without IDs
+       linking the two. Match only the same unambiguous evidence accepted by
+       ProductionPayroll.collectProduct; a timestamp/quantity alone is insufficient. */
+    var batchLinks = {}, ambiguousBatch = {}, batchCandidates = [], batchReverse = {}, explicitHf = {};
+    function legacyWorkerKey(e) {
+      var raw = e.tukangJahit || e.tukang || e.tukangId || '';
+      function normalize(v) { return String(v == null ? '' : v).normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase(); }
+      var value = String(raw).trim(), found = payrollWorkers.filter(function (w) { return String(w.id == null ? '' : w.id).trim() === value; });
+      if (!found.length) found = payrollWorkers.filter(function (w) { return normalize(w.nama || w.name) === normalize(value); });
+      return found.length === 1 && found[0].id != null && String(found[0].id).trim() ? 'id:' + found[0].id : 'name:' + normalize(raw);
+    }
+    quality.forEach(function (q) { if (q.hfId != null && q.hfId !== '') explicitHf[String(q.hfId)] = true; });
+    quality.forEach(function (q, i) {
+      if (Number(q.workflowVersion) === 2 || (q.hfId != null && q.hfId !== '') || countByQc[String(q.id)] || !/batch/.test(q.inputVia || '')) return;
+      var at = importRateDate(q.inputAt); if (!isFinite(at)) return;
+      var total = pcs(q.ok, 'QC OK') + pcs(q.reject, 'QC reject') + pcs(q.perbaikan == null ? q.kotor : q.perbaikan, 'QC perbaikan') + pcs(q.offline, 'QC offline');
+      var near = counts.filter(function (h) {
+        var ht = importRateDate(h.inputAt);
+        return !(Number(h.workflowVersion) === 2 && h.countStage === 'verified') && !(h.qcId != null && h.qcId !== '') &&
+          !explicitHf[String(h.id)] && /batch/.test(h.inputVia || '') && h.tanggal === q.tanggal && legacyWorkerKey(h) === legacyWorkerKey(q) &&
+          isFinite(ht) && Math.abs(ht - at) <= 2000;
+      });
+      var exact = near.filter(function (h) { return total > 0 && pcs(h.jumlah, 'hitung fisik') === total; });
+      batchCandidates.push({ index: i, exact: exact, near: near });
+      exact.forEach(function (h) { var id = String(h.id); batchReverse[id] = (batchReverse[id] || 0) + 1; });
+    });
+    batchCandidates.forEach(function (candidate) {
+      var h = candidate.exact[0];
+      if (candidate.exact.length === 1 && batchReverse[String(h.id)] === 1) batchLinks[candidate.index] = acceptedByHf[String(h.id)];
+      else if (candidate.near.length) ambiguousBatch[candidate.index] = true;
     });
     var consumedHf = {}, importedQc = {};
     quality.forEach(function (q, i) {
@@ -230,15 +326,21 @@ function convertBackup(backup) {
       }
       if (q.payrollCancelled) problem('QC dibatalkan untuk upah tetapi masih tersimpan.');
       uniqueAcrossCycles('qc', q);
-      var linked = q.hfId != null && q.hfId !== '' ? acceptedByHf[String(q.hfId)] : countByQc[String(q.id)];
-      if (!linked) problem('QC ' + (q.id || q.tanggal || i) + ' tidak mempunyai tautan hitung fisik yang pasti.');
-      if (consumedHf[linked.record.id]) problem('Satu hitungan memiliki lebih dari satu QC.');
+      var linked = q.hfId != null && q.hfId !== '' ? acceptedByHf[String(q.hfId)] : countByQc[String(q.id)] || batchLinks[i];
+      var standalone = !linked && Number(q.workflowVersion) !== 2 && !(q.hfId != null && q.hfId !== '') && q.id != null && q.id !== '';
+      /* A manual pre-v2 inspection is independent evidence. An explicit missing
+         reference, or an ambiguous batch candidate, is never reclassified as manual. */
+      if (standalone && ambiguousBatch[i]) problem('QC batch ' + q.id + ' tidak mempunyai tautan hitung fisik yang pasti.');
+      if (!linked && !standalone) problem('QC ' + (q.id || q.tanggal || i) + ' tidak mempunyai tautan hitung fisik yang pasti.');
+      if (linked && consumedHf[linked.record.id]) problem('Satu hitungan memiliki lebih dari satu QC.');
       if (q.hfId && countByQc[String(q.id)] && countByQc[String(q.id)] !== linked) problem('Tautan dua arah QC dan hitungan tidak cocok.');
-      var sid = linked.record.id, n = linked.record.total, wid = worker(q);
-      if (wid !== linked.record.maklonId) problem('Tukang pada QC dan hitungan tidak cocok.');
+      var sid = linked ? linked.record.id : '', wid = worker(q);
+      if (linked && wid !== linked.record.maklonId) problem('Tukang pada QC dan hitungan tidak cocok.');
       var ok = pcs(q.ok, 'QC OK'), off = pcs(q.offline, 'QC offline'), rej = pcs(q.reject, 'QC reject'), repair = pcs(q.perbaikan != null ? q.perbaikan : q.kotor, 'QC perbaikan');
-      if (ok + off + rej + repair !== n) problem('Jumlah seluruh kategori QC harus tepat hitungan asal.');
-      if (!coreTglOk(q.tanggal) || q.tanggal < linked.record.tanggal) problem('Tanggal QC mendahului atau tidak sesuai hitungan.');
+      if (linked && ok + off + rej + repair !== linked.record.total) problem('Jumlah seluruh kategori QC harus tepat hitungan asal.');
+      if (!coreTglOk(q.tanggal) || linked && q.tanggal < linked.record.tanggal) problem('Tanggal QC mendahului atau tidak sesuai hitungan.');
+      var workflowVersion = Number(q.workflowVersion) === 2 ? 2 : 1;
+      var rate = workflowVersion === 2 && linked ? linked.record.upah : sourceRate(q, wid, ok + repair > 0, linked && linked.source);
       var repairMoves = stock.filter(function (g) { return String(g.qcId || '') === String(q.id || '') && String(g.status || '').toLowerCase() === 'ok' &&
         (g.payrollStage === 'repair' || (g.payrollStage !== 'initial' && g.tanggal !== q.tanggal)); });
       var repaired = 0;
@@ -248,29 +350,47 @@ function convertBackup(backup) {
       });
       if (repaired > ok) problem('Hasil perbaikan melebihi QC OK.');
       var qid = gen('qc', key + '|qc|' + identity(q, i));
-      rows.QC.push({ id: qid, poId: po.id, userId: '', maklonId: wid, tanggal: q.tanggal, ukuran: uk(ok - repaired), total: ok - repaired,
+      pushSource('QC', { id: qid, poId: po.id, userId: '', maklonId: wid, tanggal: q.tanggal, ukuran: uk(ok - repaired), total: ok - repaired,
         offline: off, offlineUkuran: uk(off), perbaikan: repair + repaired, perbaikanUkuran: uk(repair + repaired), reject: rej, rejectUkuran: uk(rej),
-        catatan: q.keterangan || '', dibuat: iso(q.inputAt, q.tanggal), setorId: sid, repairQcId: '', asal: 'lama' });
+        catatan: q.keterangan || '', dibuat: iso(q.inputAt, q.tanggal), setorId: sid, repairQcId: '', asal: 'lama', workflowVersion: workflowVersion,
+        upah: rate, autoFromCount: false }, 'qc', q, i);
       repairMoves.forEach(function (g, j) {
         var qty = pcs(g.jumlah, 'hasil perbaikan'); if (!qty) return;
         uniqueAcrossCycles('gudang', g);
-        rows.QC.push({ id: gen('qc', key + '|repair|' + identity(q, i) + '|' + identity(g, j)), poId: po.id, userId: '', maklonId: wid,
+        pushSource('QC', { id: gen('qc', key + '|repair|' + identity(q, i) + '|' + identity(g, j)), poId: po.id, userId: '', maklonId: wid,
           tanggal: g.tanggal, ukuran: uk(qty), total: qty, offline: 0, offlineUkuran: {}, perbaikan: -qty, perbaikanUkuran: uk(-qty),
-          reject: 0, rejectUkuran: {}, catatan: 'Perbaikan selesai; sumber gudang ' + (g.id || ''), dibuat: iso(g.inputAt, g.tanggal), setorId: sid, repairQcId: qid, asal: 'lama' });
+          reject: 0, rejectUkuran: {}, catatan: 'Perbaikan selesai; sumber gudang ' + (g.id || ''), dibuat: iso(g.inputAt, g.tanggal), setorId: sid, repairQcId: qid, asal: 'lama',
+          workflowVersion: workflowVersion, upah: rate, autoFromCount: false }, 'qc', q, i);
+        var repairProvenance = coreParseJSON(rows.QC[rows.QC.length - 1].imporSumber, {});
+        repairProvenance.gudangId = String(g.id || ''); rows.QC[rows.QC.length - 1].imporSumber = JSON.stringify(repairProvenance);
+        info.lineage[info.lineage.length - 1].source = repairProvenance;
       });
-      consumedHf[sid] = true; importedQc[String(q.id)] = true;
+      if (sid) consumedHf[sid] = true; importedQc[String(q.id)] = qid;
     });
     counts.forEach(function (h) {
       if (h.qcId && !importedQc[String(h.qcId)] && !quality.some(function (q) { return String(q.id) === String(h.qcId) && q.autoFromCount; }))
         problem('Hitungan menunjuk QC yang hilang.');
     });
-    stock.forEach(function (g) {
-      if (pcs(g.jumlah, 'gudang') > 0 && (!g.qcId || !importedQc[String(g.qcId)])) problem('Gudang lama tanpa QC terhubung perlu direkonsiliasi.');
+    stock.forEach(function (g, i) {
+      var amount = pcs(g.jumlah, 'gudang'); if (!amount) return;
+      if (g.qcId != null && g.qcId !== '') {
+        if (!importedQc[String(g.qcId)]) problem('Gudang lama menunjuk QC yang hilang; perlu direkonsiliasi.');
+        return; // Linked warehouse rows are mirrors of the actual QC/repair evidence.
+      }
+      if (g.payrollCancelled) problem('Gudang lama dibatalkan untuk upah tetapi masih tersimpan.');
+      if (g.id == null || g.id === '') problem('Gudang lama perlu ID tetap.');
+      if (!coreTglOk(g.tanggal)) problem('Tanggal gudang lama tidak valid.');
+      uniqueAcrossCycles('gudang', g);
+      var status = String(g.status || '').trim().toLowerCase(), wid = worker(g);
+      if (status === 'kotor') status = 'perbaikan';
+      if (['ok', 'offline', 'reject', 'perbaikan'].indexOf(status) < 0) problem('Kategori gudang lama belum pasti.');
+      pushSource('GudangLama', { id: gen('gl', key + '|gudang|' + identity(g, i)), poId: po.id, maklonId: wid, tanggal: g.tanggal,
+        ukuran: uk(amount), total: amount, status: status, upah: sourceRate(g, wid, status === 'ok'), qcId: '', workflowVersion: 1 }, 'gudang', g, i);
     });
     active('bsInputs').forEach(function (e, i) {
       var n = pcs(e.qty, 'BigSeller'); if (!n) return;
-      rows.Gudang.push({ id: gen('gd', key + '|bigseller|' + identity(e, i)), poId: po.id, userId: '', tanggal: e.tanggal || '',
-        ukuran: uk(n), total: n, catatan: 'Input BigSeller dari data lama', dibuat: iso(e.at, e.tanggal), asal: 'lama' });
+      pushSource('Gudang', { id: gen('gd', key + '|bigseller|' + identity(e, i)), poId: po.id, userId: '', tanggal: e.tanggal || '',
+        ukuran: uk(n), total: n, catatan: 'Input BigSeller dari data lama', dibuat: iso(e.at, e.tanggal), asal: 'lama', workflowVersion: 1 }, 'bsInputs', e, i);
     });
     /* Archive/BigSeller flags are labels, never inspection or stock evidence. */
     po.total = coreSumSizes(po.ukuran);
@@ -280,24 +400,96 @@ function convertBackup(backup) {
     delete po._img;
     rows.PO.push(po);
   }
+  function retainReview(it, c, archive, aliases, error) {
+    info.requiresReview = true;
+    info.review.push({ skuId: String(it.id || ''), ukuran: up(it.size), siklus: cycleIdentity(c, archive), aliases: aliases || [],
+      cause: String(error && error.message || error), source: c });
+  }
+  function attemptCycle(it, candidate) {
+    var lengths = {}, beforeUsed = {}, beforeKeys = {}, beforeLineage = info.lineage.length, beforeNotes = info.catatan.length, beforeImages = imageList.length;
+    Object.keys(rows).forEach(function (table) { lengths[table] = rows[table].length; });
+    Object.keys(used).forEach(function (id) { beforeUsed[id] = used[id]; });
+    Object.keys(sourceKeys).forEach(function (id) { beforeKeys[id] = sourceKeys[id]; });
+    try { addCycle(it, candidate.c, candidate.tag, candidate.archive, candidate.aliases); }
+    catch (error) {
+      if (!options.preserveReview) throw error;
+      Object.keys(rows).forEach(function (table) { rows[table].length = lengths[table]; });
+      used = beforeUsed; sourceKeys = beforeKeys; info.lineage.length = beforeLineage; info.catatan.length = beforeNotes; imageList.length = beforeImages;
+      retainReview(it, candidate.c, candidate.archive, candidate.aliases, error);
+    }
+  }
   items.forEach(function (it) {
     if (!it || !it.namaBarang || stopped(it)) return;
-    if (it.poAktif || hasData(it)) addCycle(it, it, 'cur', false);
-    arr(it.arsip).forEach(function (c, i) { if (hasData(c)) addCycle(it, c, 'a' + i, true); });
+    var candidates = [], cycleIds = {}, evidence = {}, conflictingCycles = {};
+    if (it.poAktif || hasData(it)) candidates.push({ c: it, tag: 'cur', archive: false, aliases: [] });
+    arr(it.arsip).forEach(function (c, i) { if (hasData(c)) candidates.push({ c: c, tag: 'a' + i, archive: true, aliases: [] }); });
+    /* Full snapshots with exactly the same evidence are archive mirrors. Shared
+       subsets do not establish cycle ownership and stay subject to strict checks. */
+    candidates.sort(function (a, b) {
+      if (a.archive !== b.archive) return a.archive ? 1 : -1;
+      var x = cycleIdentity(a.c, a.archive), y = cycleIdentity(b.c, b.archive); return x < y ? -1 : x > y ? 1 : 0;
+    });
+    var selected = [];
+    candidates.forEach(function (candidate) {
+      var cid = cycleIdentity(candidate.c, candidate.archive), content = canonical(candidate.c);
+      if (cycleIds[cid] && cycleIds[cid] !== content) {
+        var error = new Error('Identitas siklus yang sama memuat riwayat berbeda.');
+        if (!options.preserveReview) throw error;
+        conflictingCycles[cid] = error; retainReview(it, candidate.c, candidate.archive, [], error); return;
+      }
+      cycleIds[cid] = content;
+      var body = {}; KEYS.concat(['bayarJahit']).forEach(function (field) { body[field] = arr(candidate.c[field]).map(canonical).sort(); });
+      var signature = canonical(body), previous = evidence[signature];
+      if (previous) { previous.aliases.push({ siklus: cid, arsip: candidate.archive, label: candidate.c.label || '' }); info.duplikat++; return; }
+      evidence[signature] = candidate; selected.push(candidate);
+    });
+    var entryOwners = {};
+    selected.forEach(function (candidate) {
+      KEYS.forEach(function (field) {
+        arr(candidate.c[field]).forEach(function (entry) {
+          if (entry.id == null || entry.id === '' || stopped(entry)) return;
+          var entryKey = field + '|' + entry.id, other = entryOwners[entryKey];
+          if (other && other !== candidate) {
+            var error = new Error('Catatan ' + field + ' ' + entry.id + ' muncul dalam beberapa siklus dengan bukti yang tidak identik; kepemilikan siklus perlu diperiksa.');
+            if (!options.preserveReview) throw error;
+            conflictingCycles[cycleIdentity(other.c, other.archive)] = error;
+            conflictingCycles[cycleIdentity(candidate.c, candidate.archive)] = error;
+          } else entryOwners[entryKey] = candidate;
+        });
+      });
+    });
+    selected.forEach(function (candidate) {
+      var error = conflictingCycles[cycleIdentity(candidate.c, candidate.archive)];
+      if (error) retainReview(it, candidate.c, candidate.archive, candidate.aliases, error);
+      else attemptCycle(it, candidate);
+    });
   });
 
   /* Completion follows the same evidence as normal work, including archived cycles. */
-  var importedFlow = coreWorkflow(rows.PO, rows.Potong, rows.SlipKirim, rows.SlipSetor, rows.QC, rows.Gudang);
+  var importedFlow = coreWorkflow(rows.PO, rows.Potong, rows.SlipKirim, rows.SlipSetor, rows.QC, rows.Gudang, { gudangLama: rows.GudangLama });
+  var invalidPo = {};
   rows.PO.forEach(function (po) {
     var flow = importedFlow[po.id];
     var problems = flow ? flow.issues.slice() : [];
     if (flow) Object.keys(flow.ukuran).forEach(function (size) { problems = problems.concat(flow.ukuran[size].issues || []); });
-    if (problems.length) throw new Error('Impor belum dijalankan: ' + po.series + ' / ' + po.nama + ' (' + po.imporSumber + '). ' + problems.join(' ') + ' Periksa hubungan potong, penugasan, hitungan, QC, dan BigSeller pada sumber dahulu.');
+    if (problems.length) {
+      var origin = coreMap(po.imporSumber);
+      var error = new Error('Impor belum dijalankan: ' + po.series + ' / ' + po.nama + ' / ' + (origin.ukuran || '') + ' / ' + (origin.arsip ? 'arsip' : 'aktif') + '. ' + Array.from(new Set(problems)).join(' ') + ' Periksa hubungan potong, penugasan, hitungan, QC, dan BigSeller pada sumber dahulu.');
+      if (!options.preserveReview) throw error;
+      invalidPo[po.id] = true; var original = cycleSources[po.id];
+      info.requiresReview = true; info.review.push({ skuId: original.skuId, ukuran: original.ukuran, siklus: original.siklus, aliases: original.aliases, cause: error.message, source: original.source });
+      return;
+    }
     if (flow && flow.complete) {
       po.status = 'selesai';
       po.selesaiPada = rows.QC.filter(function (q) { return q.poId === po.id; }).reduce(function (date, q) { return q.tanggal > date ? q.tanggal : date; }, '');
     }
   });
+  if (Object.keys(invalidPo).length) {
+    Object.keys(rows).forEach(function (table) { rows[table] = rows[table].filter(function (row) { return !invalidPo[table === 'PO' ? row.id : row.poId]; }); });
+    info.lineage = info.lineage.filter(function (record) { return !invalidPo[record.poId]; });
+    imageList = imageList.filter(function (record) { return !invalidPo[record.id]; });
+  }
 
   /* ---------- stok bahan: pembelian, koreksi, batas peringatan ---------- */
   var pengaturan = null;

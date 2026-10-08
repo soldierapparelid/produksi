@@ -6,6 +6,9 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 
 - `src/core.js`: skema, perhitungan, otorisasi, dan aksi data bersama.
 - `src/import-backup.js`: konverter backup aplikasi lama menjadi struktur PO.
+- `src/import-legacy-v1.js`: pengulangan konverter historis untuk membuktikan bahwa backup cocok dengan impor yang sudah tersimpan; tidak dipakai untuk impor baru.
+- `src/reconcile-legacy.js`: pratinjau pemulihan hubungan sumber dan jembatan bukti pembayaran lama, dengan sidik SHA-256.
+- `src/migration-actions.js`: aksi owner untuk pratinjau, penerapan, dan pemulihan cadangan jurnal.
 - `index.html`: aplikasi browser, termasuk salinan hasil build core dan konverter. UI tetap diedit di file ini, di luar blok `CORE` sampai sebelum `UI bagian 1`.
 - `apps-script/Core.gs`: hasil build core dan konverter yang sama untuk project Google Apps Script.
 - `apps-script/Server.gs`: adaptor Google Sheets dari project Apps Script Soldier Produksi yang dibaca pada 8 Oktober 2026; memuat endpoint, pemetaan kolom, lock, cache, dan PDF. Tidak memuat ID spreadsheet, deployment, atau kredensial.
@@ -33,7 +36,19 @@ npm test
 - Satu pemeriksaan menghabiskan seluruh hitungan pada ukuran slip yang dipilih: **OK + offline + perbaikan + reject** harus tepat jumlah sumber. Catatan QC selalu menunjuk slip hitung fisik asal; reject seluruhnya berarti nol hasil OK.
 - Sebelum QC, hitungan yang diterima menjadi dasar upah. Sesudah QC, hanya hasil OK yang layak diupah. Hasil perbaikan OK menambah hak upah pada tanggal penyelesaiannya dengan tarif sumber. Snapshot slip pembayaran tetap tersimpan; selisih lebih bayar ditandai untuk diperiksa, bukan dihapus atau dibayar ulang.
 - Gudang terbentuk sebagai proyeksi hasil QC dan hasil perbaikan, sehingga pengiriman ulang transaksi tidak menggandakan penerimaan. Pencatatan BigSeller adalah langkah pembukuan berikutnya dan dibatasi stok OK yang belum dicatat. PO dapat selesai ketika produksi/QC/perbaikan tuntas meskipun pencatatan BigSeller belum selesai.
-- Data lama yang hubungan hitungan/QC/ukuran/siklusnya ambigu ditolak untuk diperiksa; aplikasi tidak membuat bukti hitungan, QC, atau gudang yang tidak ada dalam backup.
+- Riwayat legacy dapat berisi QC manual tanpa tautan hitung fisik dan gudang manual. Keduanya dipertahankan sebagai bukti legacy, tanpa membuat hitungan fisik palsu. Input baru mengikuti kontrak versi 2. Hubungan batch lama hanya dipulihkan bila memenuhi aturan unik dua arah dari aplikasi sumber.
+- Catatan BigSeller lama yang melebihi bukti stok ditandai untuk pemeriksaan pembukuan; masalah pembukuan tersebut tidak memblokir hitung fisik atau QC yang sah. Input BigSeller baru tetap dibatasi barang OK yang belum dicatat.
+- Data lama yang jumlah atau hubungan sumbernya belum pasti ditahan untuk diperiksa. Pemeriksaan QC ulang atas hitungan baseline yang ambigu tidak dibuka; sumber baru yang berbeda tetap diproses menurut aturan versi 2.
+
+## Memulihkan impor v1 yang sudah dipakai
+
+Owner membuka **Lainnya → Pulihkan hubungan riwayat produksi** dan memilih backup JSON asli. Pratinjau membuktikan hasil pengulangan konverter v1 cocok dengan baris produksi saat ini; gambar, PIN, konfigurasi perangkat, dan modul yang tidak diperlukan tidak dikirim. Pratinjau tidak menulis data.
+
+Nomor PO aktif dipertahankan. Catatan potong tetap sama. Laporan jahit lama yang sudah ditandai lunas disimpan sebagai snapshot dalam `LegacySettlement`, sedangkan `SlipSetor` yang dipulihkan berasal dari bukti hitung fisik asli. `SlipUpah` tidak ditulis ulang; cetakan lama memakai sumber snapshot aslinya. Kredit lunas hanya berlaku pada daftar sumber baseline yang dibekukan. Pemetaan yang belum pasti menahan pembayaran sumber terkait tanpa menganggapnya sudah lunas; input baru dengan identitas lain tidak mewarisi kredit tersebut. Penerimaan kemudian atas laporan pending baseline tetap terikat pada pemeriksaan pembayaran lamanya.
+
+PO aktif yang belum dapat dipulihkan disimpan utuh dengan keterangan pemeriksaan. Arsip selesai dipertahankan sebagai riwayat baca saja. Pemulihan tidak mengarang jumlah, menciptakan pembayaran baru, atau menghapus ketidaksesuaian historis.
+
+Penerapan menghitung ulang rencana di server dan menolak pratinjau kedaluwarsa. Semua tabel divalidasi sebelum penulisan produksi pertama. `MigrasiJournal` menyimpan seluruh baris sebelum perubahan beserta sidiknya. Bila layanan terputus di tengah penerapan, penyimpanan transaksi ditahan sampai owner memilih **Pulihkan data sebelum proses**. Pemulihan jurnal dapat diulang jika layanan kembali terputus. Salinan spreadsheet sebelum rilis tetap diperlukan: jurnal bukan transaksi atomik Google Sheets dan tidak mencegah pengeditan manual langsung pada spreadsheet.
 
 ## Sambungan ke data pusat
 

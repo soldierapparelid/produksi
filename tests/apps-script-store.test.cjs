@@ -9,76 +9,7 @@ const root = path.resolve(__dirname, '..');
 const core = fs.readFileSync(path.join(root, 'src/core.js'), 'utf8');
 const adapter = fs.readFileSync(path.join(root, 'apps-script/Server.gs'), 'utf8');
 
-// Values are copied across reads as in Sheets. Physical columns may be reordered,
-// unknown columns coexist with schema columns, and blank ranges remain rectangular.
-class Sheet {
-  constructor(name, values = []) { this.name = name; this.values = values.map(row => row.slice()); this.maxRows = 1000; this.writes = 0; }
-  getName() { return this.name; }
-  getLastRow() { for (let i = this.values.length - 1; i >= 0; i--) if (this.values[i].some(v => v !== '' && v != null)) return i + 1; return 0; }
-  getLastColumn() { return this.values.reduce((n, row) => { for (let i = row.length - 1; i >= n; i--) if (row[i] !== '' && row[i] != null) return i + 1; return n; }, 0); }
-  getMaxRows() { return this.maxRows; }
-  setFrozenRows() { return this; }
-  insertRowsAfter(at, count) { assert.ok(at <= this.maxRows); this.maxRows += count; return this; }
-  deleteRow(row) { this.values.splice(row - 1, 1); this.maxRows--; this.writes++; }
-  getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
-  getRange(row, col, height, width) {
-    assert.ok(row >= 1 && col >= 1 && height >= 1 && width >= 1);
-    assert.ok(row + height - 1 <= this.maxRows, 'range exceeds allocated rows');
-    const sheet = this;
-    const range = {
-      getValues() { return Array.from({ length: height }, (_, r) => Array.from({ length: width }, (_, c) => sheet.values[row + r - 1]?.[col + c - 1] ?? '')); },
-      setValues(rows) {
-        assert.equal(rows.length, height);
-        rows.forEach(values => { assert.equal(values.length, width); values.forEach(value => assert.ok(typeof value !== 'string' || value.length <= 50000, 'Google Sheets cell limit')); });
-        rows.forEach((values, r) => {
-          const target = sheet.values[row + r - 1] || (sheet.values[row + r - 1] = []);
-          values.forEach((value, c) => { target[col + c - 1] = value; });
-        });
-        sheet.writes++; return range;
-      },
-      clearContent() { return range.setValues(Array.from({ length: height }, () => Array(width).fill(''))); },
-      setNumberFormat() { return range; },
-      setNumberFormats(formats) { assert.equal(formats.length, height); formats.forEach(r => assert.equal(r.length, width)); return range; },
-      setFontWeight() { return range; },
-      getSheet() { return sheet; }
-    };
-    return range;
-  }
-}
-
-function harness(initial = {}) {
-  const sheets = Object.fromEntries(Object.entries(initial).map(([name, values]) => [name, new Sheet(name, values)]));
-  const properties = {}, cached = {}, events = [];
-  let serial = 0, held = false;
-  const props = {
-    getProperties: () => ({ ...properties }), getProperty: key => properties[key] ?? null,
-    setProperty(key, value) { properties[key] = String(value); },
-    setProperties(values, removeOthers) { if (removeOthers) Object.keys(properties).forEach(k => delete properties[k]); Object.assign(properties, values); },
-    deleteProperty(key) { delete properties[key]; }
-  };
-  const book = {
-    getSheetByName: name => sheets[name] || null,
-    insertSheet(name) { return sheets[name] = new Sheet(name); },
-    getSpreadsheetTimeZone: () => 'Asia/Jakarta'
-  };
-  const cache = {
-    getAll(keys) { events.push(['cache.get', ...keys]); return Object.fromEntries(keys.filter(k => Object.hasOwn(cached, k)).map(k => [k, cached[k]])); },
-    putAll(values) { Object.assign(cached, values); }, put(key, value) { cached[key] = value; }, remove(key) { delete cached[key]; }
-  };
-  const context = vm.createContext({
-    Date, console,
-    PropertiesService: { getScriptProperties: () => props },
-    CacheService: { getScriptCache: () => cache },
-    SpreadsheetApp: { getActiveSpreadsheet: () => book, flush: () => events.push(['flush']) },
-    LockService: { getScriptLock: () => ({ waitLock() { assert.equal(held, false); held = true; events.push(['lock']); }, releaseLock() { held = false; events.push(['unlock']); } }) },
-    Utilities: { getUuid: () => (++serial).toString(16).padStart(16, '0').padEnd(32, '0'), formatDate: date => date.toISOString().slice(0, 10) }
-  });
-  vm.runInContext(core + '\n' + adapter, context);
-  function run(code) { const value = vm.runInContext(code, context); return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
-  function request(action, payload = {}) { return JSON.parse(run(`api(${JSON.stringify(JSON.stringify({ action, payload }))})`)); }
-  function cold() { run('PK_STORE_ = null; PK_PROPS_ = null;'); }
-  return { context, sheets, properties, cached, events, run, request, cold, isLocked: () => held };
-}
+const { harness } = require('./helpers/apps-script-harness.cjs');
 
 test('real store adds new schema columns without shifting reordered columns or user columns', () => {
   const h = harness({ SlipSetor: [['catatan', 'custom', 'id', 'total', 'ukuran'], ['lama', 'keep', 'count01', 5, '{"M":5}']] });
@@ -140,6 +71,102 @@ test('schema fingerprint partitions old caches and changes even when column coun
   assert.ok(h.sheets.QC.values[0].includes('repairSource'));
   assert.equal(h.properties.schema, h.run('pkSchema_()'));
   assert.equal(h.run('pkStore_().read("QC")[0].id'), 'qc0001');
+});
+
+test('checkpoint reloads physical Sheets despite stale execution and script caches', () => {
+  const h = harness();
+  h.run('pkStore_().lock(function(){pkStore_().append("Potong",{id:"cut001",total:2,ukuran:{M:2}});});');
+  const sheet = h.sheets.Potong, totalColumn = sheet.values[0].indexOf('total');
+  sheet.values[1][totalColumn] = 9;
+  assert.equal(h.run('pkStore_().read("Potong")[0].total'), 2, 'the existing execution still has its staged rows');
+  h.run('pkStore_().checkpoint(["Potong"]);');
+  assert.equal(h.run('pkStore_().read("Potong")[0].total'), 9);
+  h.cold();
+  assert.equal(h.run('pkStore_().read("Potong")[0].total'), 9, 'checkpoint invalidates old metadata even before a version publication');
+  h.run('pkStore_().checkpoint(["Potong"]);');
+  assert.equal(h.run('pkStore_().read("Potong")[0].total'), 9, 'checkpoint bypasses ScriptCache as well');
+});
+
+test('checkpoint keeps dirty table tracking and publishes the verified rows at commit', () => {
+  const h = harness();
+  h.run('pkStore_().lock(function(){pkStore_().append("Potong",{id:"cut001",total:2});pkStore_().checkpoint(["Potong"]);pkStore_().append("QC",{id:"qc0001",total:1});pkStore_().checkpoint(["QC"]);});');
+  assert.equal(h.properties.ver, '1');
+  assert.equal(h.properties.v_Potong, '1');
+  assert.equal(h.properties.v_QC, '1');
+  assert.equal(h.isLocked(), false);
+  assert.equal(h.events.filter(e => e[0] === 'flush').length, 3, 'two durable boundaries plus the ordinary transaction commit');
+  h.cold();
+  assert.equal(h.run('pkStore_().read("Potong")[0].total'), 2);
+  assert.equal(h.run('pkStore_().read("QC")[0].total'), 1);
+});
+
+test('checkpoint flush failure prevents dependent writes and releases the transaction lock', () => {
+  const h = harness();
+  h.run('pkStore_().lock(function(){pkStore_().append("Potong",{id:"cut001",total:2});});');
+  const before = JSON.stringify(h.sheets.Potong.values), version = h.properties.ver;
+  h.context.SpreadsheetApp.flush = () => { throw new Error('Flush gagal'); };
+  assert.throws(() => h.run('pkStore_().lock(function(){pkStore_().checkpoint(["Potong"]);pkStore_().replaceAll("Potong",[{id:"newcut",total:9}]);});'), /Flush gagal/);
+  assert.equal(JSON.stringify(h.sheets.Potong.values), before);
+  assert.equal(h.properties.ver, version);
+  assert.equal(h.isLocked(), false);
+});
+
+test('cold request after checkpoint sees durable migration data even without lock-finally version publication', () => {
+  const h = harness();
+  h.run('pkStore_().lock(function(){pkStore_().append("Potong",{id:"cut001",total:2});pkStore_().setSettings({legacyMigrationStatus:false});});');
+  const version = h.properties.ver, cuttingVersion = h.properties.v_Potong, settingsVersion = h.properties.v_Pengaturan;
+  // Stage the middle of a transaction, then discard its runtime as a hard timeout
+  // would, deliberately without executing the outer lock's finally block.
+  h.run('pkStore_().setSettings({legacyMigrationStatus:{batchId:"batch001"}});pkStore_().checkpoint(["Pengaturan"]);pkStore_().replaceAll("Potong",[{id:"newcut",total:9}]);pkStore_().checkpoint(["Potong"]);');
+  h.cold();
+  assert.equal(h.properties.ver, version);
+  assert.equal(h.properties.v_Potong, cuttingVersion);
+  assert.equal(h.properties.v_Pengaturan, settingsVersion);
+  assert.equal(h.run('pkStore_().getSettings().legacyMigrationStatus.batchId'), 'batch001');
+  assert.equal(h.run('pkStore_().read("Potong")[0].id'), 'newcut');
+  assert.equal(h.run('pkStore_().read("Potong")[0].total'), 9);
+  h.run('pkStore_().setSettings({legacyMigrationStatus:false});pkStore_().checkpoint(["Pengaturan"]);');
+  h.cold();
+  assert.equal(h.run('pkStore_().getSettings().legacyMigrationStatus'), false);
+  assert.equal(h.run('pkStore_().read("Potong")[0].id'), 'newcut', 'clearing the marker cannot expose stale production caches');
+});
+
+test('checkpoint stops on ScriptCache invalidation failure before dependent production writes', () => {
+  const h = harness();
+  h.run('pkStore_().lock(function(){pkStore_().append("Potong",{id:"cut001",total:2});});');
+  const before = JSON.stringify(h.sheets.Potong.values);
+  h.context.CacheService.getScriptCache().remove = () => { throw new Error('Cache remove gagal'); };
+  assert.throws(() => h.run('pkStore_().lock(function(){pkStore_().checkpoint(["Potong"]);pkStore_().replaceAll("Potong",[{id:"newcut",total:9}]);});'), /Cache remove gagal/);
+  assert.equal(JSON.stringify(h.sheets.Potong.values), before);
+  assert.equal(h.isLocked(), false);
+});
+
+test('migration layout preflight protects nonempty extra columns without changing ordinary replacement', () => {
+  for (const extraValue of ['historical note', 0, false]) {
+    const h = harness({ SlipSetor: [['id', 'custom', 'total'], ['oldcount', extraValue, 20]] });
+    const before = JSON.stringify(h.sheets.SlipSetor.values), writes = h.sheets.SlipSetor.writes;
+    assert.throws(() => h.run('pkStore_().validateMigrationLayout(["SlipSetor"]);'), /kolom tambahan/);
+    assert.equal(JSON.stringify(h.sheets.SlipSetor.values), before);
+    assert.equal(h.sheets.SlipSetor.writes, writes);
+    assert.equal(h.properties.ver, undefined);
+  }
+  const empty = harness({ SlipSetor: [['id', 'custom', 'total'], ['oldcount', '', 20]] });
+  assert.doesNotThrow(() => empty.run('pkStore_().validateMigrationLayout(["SlipSetor","QC"]);'));
+  assert.equal(empty.sheets.QC, undefined, 'layout checking must not create missing tables');
+});
+
+test('migration layout preflight rejects duplicate headings and data below a blank heading', () => {
+  for (const values of [
+    [['id', 'total', ' id '], ['oldcount', 20, 'oldcount']],
+    [['id', 'custom', 'custom'], ['oldcount', '', '']],
+    [['id', '__proto__', '__proto__'], ['oldcount', '', '']],
+    [['id', '', 'total'], ['oldcount', 'unlabelled note', 20]]
+  ]) {
+    const h = harness({ SlipSetor: values });
+    const before = JSON.stringify(h.sheets.SlipSetor.values);
+    assert.throws(() => h.run('pkStore_().validateMigrationLayout(["SlipSetor"]);'), /judul kolom ganda|kolom tambahan/);
+    assert.equal(JSON.stringify(h.sheets.SlipSetor.values), before);
+  }
 });
 
 test('real import API preflights every replacement table and settings before the first write', () => {

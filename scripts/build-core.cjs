@@ -64,14 +64,15 @@ function appsScriptHtml(html) {
 }
 
 function build() {
-  const core = source('src/core.js') + '\n\n' + source('src/import-backup.js') + '\n\n';
+  const sources = ['src/core.js', 'src/import-legacy-v1.js', 'src/import-backup.js', 'src/reconcile-legacy.js', 'src/migration-actions.js'];
+  const core = sources.map(source).join('\n\n') + '\n\n';
   // Parse saja, jangan menjalankan kode aplikasi saat build/check.
   new vm.Script(core, { filename: 'combined-core.js' });
   // Kontrak global Apps Script terdiri dari core dan adaptor asli, masing-masing satu salinan.
   new vm.Script(core + '\n' + source('apps-script/Server.gs'), { filename: 'apps-script-server.js' });
   if (/<\/script\b/i.test(core)) throw new Error('Core memuat penutup script literal yang tidak aman untuk HTML inline.');
 
-  const header = '// Dibuat oleh scripts/build-core.cjs dari src/core.js dan src/import-backup.js.\n' +
+  const header = '// Dibuat oleh scripts/build-core.cjs dari modul logika dalam src/.\n' +
     '// Jangan edit output ini; lihat README untuk memperbarui project Apps Script yang sudah ada.\n' +
     '// Berisi logika murni saja, bukan adaptor Google Sheets atau endpoint web app.\n\n';
   const browser = browserOutput(read('index.html'), core);

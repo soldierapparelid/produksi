@@ -28,6 +28,15 @@ test('QC queue admits a completed size while another size waits for physical cou
   assert.deepEqual(json(c, 'antreanQC().map(x=>({uk:x.uk,sisa:x.sisa,waiting:x.waiting}))'), [{ uk: { M: 40 }, sisa: 40, waiting: { L: 20 } }]);
 });
 
+test('historical QC ambiguity holds only its baseline count, while a new source stays selectable', () => {
+  const c=context();
+  vm.runInContext(`S.state.setor=[
+    {id:'baseline',poId:'p',status:'diterima',ukuran:{M:20},total:20,tanggal:'2026-10-01'},
+    {id:'fresh',poId:'p',status:'diterima',ukuran:{M:10},total:10,tanggal:'2026-10-08'}];
+    D.po.p={status:'aktif',workflow:{issues:[],blockedQcSources:{baseline:['M']},ukuran:{M:{readyQC:true}}}};`,c);
+  assert.deepEqual(json(c,'antreanQC().map(x=>({id:x.s.id,qty:x.sisa}))'),[{id:'fresh',qty:10}]);
+});
+
 test('dashboard distinguishes eligible L50 from counted M10 still waiting on its M40 target', () => {
   const c = context();
   vm.runInContext(`function pos(n){return Math.max(0,Number(n)||0);} function T(po){return po.agg.total;}
