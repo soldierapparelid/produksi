@@ -353,7 +353,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.3';
+var APP_VERSION = '1.3.1';
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
    Kolom "asal" berisi 'lama' untuk baris yang datang dari impor aplikasi lama; baris yang dibuat di aplikasi ini kosong. */
@@ -726,6 +726,13 @@ function createCore(store, env) {
   /* ---------- data yang dikirim ke perangkat, disaring menurut divisi ---------- */
   function buildState(me, opt) {
     var semua = !!(opt && opt.semua);
+    /* tabel yang akan dibaca diambil dari cache dalam satu kali ambil (kalau penyimpanannya mendukung) */
+    if (store.prefetch) {
+      var perlu = ['Pengaturan', 'Pegawai', 'Produk', 'PO', 'Potong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'SlipUpah'];
+      if (coreIsAdmin(me)) perlu = perlu.concat(['StokBahan', 'GajiHarian', 'Karyawan', 'Kasbon']);
+      else if (me.divisi === 'potong') perlu.push('StokBahan');
+      store.prefetch(perlu);
+    }
     var st = settings();
     var allUsers = users();
     var produk = store.read('Produk');
@@ -992,13 +999,15 @@ function createCore(store, env) {
     if (!findRow(sheet, id)) return false;
     dataUrl = String(dataUrl || '');
     var old = findRow('Gambar', id);
-    if (!dataUrl) { if (old) store.remove('Gambar', id); store.update(sheet, id, { gambar: '' }); return true; }
+    var ganti = {};
+    if (!dataUrl) { if (old) store.remove('Gambar', id); store.update(sheet, id, { gambar: '' }); ganti[id] = ''; if (store.imgPut) store.imgPut(ganti); return true; }
     if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/.test(dataUrl)) fail('File gambar tidak valid.');
     if (dataUrl.length > MAX_GAMBAR) fail('Gambar terlalu besar.');
     var ver = env.now().getTime().toString(36);
     if (old) store.update('Gambar', id, { data: dataUrl, diubah: nowIso() });
     else store.append('Gambar', { id: id, data: dataUrl, diubah: nowIso() });
     store.update(sheet, id, { gambar: ver });
+    ganti[id] = dataUrl; if (store.imgPut) store.imgPut(ganti);
     return true;
   }
   actions.saveGambar = function (p) {
@@ -1027,9 +1036,15 @@ function createCore(store, env) {
   };
   actions.getGambar = function (p) {
     var me = auth(p);
-    var ids = (p.ids instanceof Array ? p.ids : []).slice(0, 40).map(String); var want = {}; ids.forEach(function (i) { want[i] = 1; });
-    var out = {};
-    store.read('Gambar').forEach(function (g) { if (want[g.id]) out[g.id] = g.data; });
+    var ids = (p.ids instanceof Array ? p.ids : []).slice(0, 40).map(String).filter(function (i) { return idOk(i); });
+    var out = {}; var sisa = ids;
+    /* gambar yang pernah diambil disimpan satu per satu di cache server, jadi tab Gambar tidak dibaca berulang-ulang */
+    if (store.imgGet && ids.length) { var hit = store.imgGet(ids); sisa = ids.filter(function (i) { if (hit[i]) { out[i] = hit[i]; return false; } return true; }); }
+    if (sisa.length) {
+      var want = {}; sisa.forEach(function (i) { want[i] = 1; }); var baru = {};
+      store.read('Gambar').forEach(function (g) { if (want[g.id]) { out[g.id] = g.data; baru[g.id] = g.data; } });
+      if (store.imgPut) store.imgPut(baru);
+    }
     return { gambar: out };
   };
 
@@ -1089,7 +1104,12 @@ function createCore(store, env) {
     return pr && coreNum(pr[field]) > 0 ? coreNum(pr[field]) : fallback;
   }
   /* kirim ulang dari perangkat (sinyal putus lalu coba lagi) tidak boleh membuat baris dobel */
-  function dedupe(sheet, r) { var id = idOk(r && r.id); if (!id) return { id: env.id(), ada: null }; return { id: id, ada: findRow(sheet, id) }; }
+  function dedupe(sheet, r) {
+    /* pemeriksaan "sudah pernah masuk atau belum" selalu memakai isi sheet yang sebenarnya, bukan salinan di cache */
+    if (store.fresh) store.fresh(sheet);
+    var id = idOk(r && r.id); if (!id) return { id: env.id(), ada: null };
+    return { id: id, ada: findRow(sheet, id) };
+  }
 
   actions.createPotong = function (p) {
     var me = auth(p); var admin = coreIsAdmin(me);
@@ -2090,7 +2110,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.3';
+var UI_VERSION = '1.3.1';
 var Idb = (function () {
   var NAME = 'pk-produksi', db = null, tried = false, queue = [];
   function open(cb) {
@@ -5027,7 +5047,10 @@ function tebakLunas() {
   var belum = '', lunas = '';
   st.setor.forEach(function (s) { if (s.status !== 'diterima' || !lama(s, false)) return; if (!s.upahId) { if (!belum || s.tanggal < belum) belum = s.tanggal; } else if (s.upahId === LUNAS_LAMA && s.tanggal > lunas) lunas = s.tanggal; });
   st.potong.forEach(function (s) { if (!lama(s, true) || !(s.tarif > 0)) return; if (!s.upahId) { if (!belum || s.tanggal < belum) belum = s.tanggal; } else if (s.upahId === LUNAS_LAMA && s.tanggal > lunas) lunas = s.tanggal; });
-  return (belum && lunas && lunas < belum) ? belum : '';
+  if (!(belum && lunas && lunas < belum)) return '';
+  /* pembayaran berjalan per minggu: kalau hari Senin minggu itu masih sesudah catatan lunas terakhir, batasnya hari Senin itu */
+  var senin = (corePeriode(coreMingguId(belum)) || {}).start || '';
+  return (senin && lunas < senin) ? senin : belum;
 }
 function imporSheet() {
   var imp = S.imp; var h = '', foot = '';
