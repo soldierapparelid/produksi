@@ -2,7 +2,7 @@
    Simpanan cache dipakai bersama oleh semua aplikasi di alamat induk yang sama, jadi file ini hanya
    membuat dan menghapus cache miliknya sendiri (nama berawalan pk-produksi-app-). */
 var AWALAN = 'pk-produksi-app-';
-var CACHE = AWALAN + '202610080902';
+var CACHE = AWALAN + '202610080908';
 var FILES = ['./', './index.html', './manifest.webmanifest', './manifest-potong.webmanifest', './manifest-jahit.webmanifest', './manifest-qc.webmanifest', './logo-192.png', './logo-512.png'];
 function milikSendiri(k) { return k.indexOf(AWALAN) === 0 || /^soldier-produksi-\d{12}$/.test(k); }
 self.addEventListener('install', function (e) {

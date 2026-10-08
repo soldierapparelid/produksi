@@ -1789,8 +1789,9 @@ function tokenKey() { return 'pk_token' + (Api.div() ? '_' + Api.div() : ''); }
 function lastKey() { return 'pk_last' + (Api.div() ? '_' + Api.div() : ''); }
 function bacaToken() {
   var t = LS.get(tokenKey()) || '';
-  /* perangkat pegawai dari versi sebelumnya menyimpan sesinya di kunci tanpa nama divisi */
-  if (!t && Api.div()) t = LS.get('pk_token') || '';
+  /* perangkat pegawai dari versi sebelumnya menyimpan sesinya di kunci tanpa nama divisi.
+     Hanya berlaku di perangkat yang memang dikunci ke divisi ini; sesi owner tidak pernah dibawa ke jendela divisi. */
+  if (!t && Api.div() && LS.get('pk_div') === Api.div()) t = LS.get('pk_token') || '';
   return t;
 }
 var S = {
