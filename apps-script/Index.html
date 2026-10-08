@@ -1,15 +1,12 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
+<base target="_top">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Soldier Produksi</title>
 <meta name="theme-color" content="#14160f">
 <meta name="robots" content="noindex, nofollow">
-<link rel="manifest" id="pk-manifest" href="manifest.webmanifest">
-<script>(function(){try{var d='',h=String(location.hash||'').match(/[#&]d=([a-z]+)/),q=String(location.search||'').match(/[?&]d=([a-z]+)/);if(h)d=h[1];else if(q)d=q[1];else if(!/[#&]k=/.test(String(location.hash||'')))d=localStorage.getItem('pk_div')||'';if(d==='potong'||d==='jahit'||d==='qc'){document.getElementById('pk-manifest').setAttribute('href','manifest-'+d+'.webmanifest');}}catch(e){}})();</script>
-<link rel="icon" href="logo-192.png">
-<link rel="apple-touch-icon" href="logo-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -335,7 +332,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261008-workflow2';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261008-workflow2';</script>
 <script>
 (function () {
 'use strict';
@@ -6096,7 +6093,6 @@ LS.init(function () {
 
 })();
 </script>
-<script>if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }</script>
 </body>
 </html>
 
