@@ -11,7 +11,7 @@ function ui(){
   const c=vm.createContext({console});
   vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);
   vm.runInContext(`
-    var A={},C={},R={},VIEWS={},rendered='',calls=[],messages=[],closed=0;
+    var A={},C={},R={},VIEWS={},rendered='',calls=[],messages=[],closed=0,kpis=[];
     var actor={id:'worker',divisi:'potong'},S={state:{users:[],potong:[],rencanaPotong:[],bahan:[],settings:{}},f:{q:''},sub:{}},D={po:{},produk:{}};
     var po={id:'po',nama:'Kaos <uji>',status:'aktif',ukuran:{M:50},total:50,workflow:{issues:[]}};D.po.po=po;S.state.po=[po];
     var plan={id:'plan',poId:'po',status:'siap',bahanList:[{nama:'Katun <biru>',qty:5,satuan:'kg'},{nama:'Rib',qty:1,satuan:'yard'}],rol:2,revision:'rev1',dibuat:'2026-10-08',catatan:'Petunjuk <owner>'};S.state.rencanaPotong=[plan];
@@ -36,13 +36,16 @@ function ui(){
     function fNum(t,n,v){return '<label>'+t+'<input name="'+n+'" value="'+esc(v)+'"></label>';}
     function fSelect(t,n){return '<select name="'+n+'"></select>';}function fTanggal(t,n){return '<input name="'+n+'">';}
     function fCatatan(){return '<textarea name="catatan"></textarea>';}function footSave(a){return '<button data-a="'+a+'">Simpan</button>';}
-    function emptyBox(s){return s;}function sizesSplit(){return {main:['M'],extra:[]};}function sizeGrid(){return '<input data-size="M">';}
+    function emptyBox(s){return s;}function sizesSplit(){return {main:['M'],extra:[]};}function sizeGrid(sizes){return sizes.map(function(s){return '<input data-size="'+s+'">';}).join('');}
     function sumLine(){return '';}function tarifBawaan(){return 200;}function recalc(){}
     function cocok(q,x){return !q||x.some(function(y){return String(y||'').includes(q);});}function thumb(){return '';}
-    function poMeta(p){return p.id;}function sizeChips(){return '';}function todayYmd(){return '2026-10-08';}
-    function miniKpi(){return '';}function seg(){return '';}function searchBox(){return '';}
+    function bahanTeks(r){return coreBahanPotong(r).map(function(b){return b.nama+(b.qty?' '+b.qty+' kg':'');}).join(' + ');}function poMeta(p){return p.id;}function sizeChips(){return '';}function todayYmd(){return '2026-10-08';}
+    function miniKpi(rows){kpis=rows;return '';}function seg(){return '';}function searchBox(){return '';}
   `,c);
   vm.runInContext(part('/* ---------- bahan potong disiapkan owner ---------- */','/* ---------- kirim ke maklon ---------- */'),c);
+  vm.runInContext(part('function projectWorkflow(po)', 'function poSizes(po)'),c);
+  vm.runInContext(part('function poSizes(po)', 'function sizesSplit(po)'),c);
+  vm.runInContext(html.match(/function catatanDipangkas\(\) \{[^\n]+/)[0],c);
   vm.runInContext(part("VIEWS['p-kerja'] =", "VIEWS['p-riwayat'] ="),c);
   return c;
 }
@@ -89,6 +92,13 @@ test('plan editing availability adds its own reservation back and cancellation r
   assert.match(c.form.rows[0].nodes['[data-rencana-saldo]'].textContent,/20 kg/);
   const cancel=plain(evaluate(c,"rencanaPotongValues(form,'batal')"));assert.deepEqual(cancel.rencana.bahanList,plain(c.plan.bahanList));assert.equal(cancel.rencana.rol,2);assert.equal(cancel.rencana.status,'batal');
 });
+
+test('owner can release a blocked unused reservation without exposing cutting or material edit to workers',async()=>{
+ const c=ui();evaluate(c,"plan.legacyBlocked='Ukuran XL sudah dipotong.';plan.legacyUkuran=['XL']");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongReview"|data-a="potongOpen"/);evaluate(c,'A.rencanaPotongReview(el)');assert.match(c.messages.at(-1),/Hanya owner/);
+ evaluate(c,"actor.divisi='owner'");const panel=evaluate(c,'rencanaPotongPanel(po)');assert.match(panel,/data-a="rencanaPotongReview"/);assert.doesNotMatch(panel,/data-a="potongOpen"/);evaluate(c,'A.rencanaPotongReview(el)');assert.match(c.rendered,/data-a="rencanaPotongCancel"/);assert.match(c.rendered,/name="revision" value="rev1"/);assert.doesNotMatch(c.rendered,/data-a="potongSave"|data-a="rencanaPotongSave"|data-size=|name="qty"/);
+ evaluate(c,"form.values={id:'plan',poId:'po',revision:'rev1'};function confirmBox(o,cb){cancelTask=cb(el);}var cancelTask;A.rencanaPotongCancel()");assert.equal(c.calls[0].action,'saveRencanaPotong');assert.equal(c.calls[0].payload.rencana.status,'batal');assert.equal(c.calls[0].payload.expectedRevision,'rev1');assert.deepEqual(plain(c.calls[0].payload.rencana.bahanList),plain(c.plan.bahanList));c.calls[0].resolve({});await c.cancelTask;assert.equal(c.closed,1);
+ evaluate(c,"plan.status='terpakai';rendered='';A.rencanaPotongReview(el)");assert.equal(c.rendered,'');assert.match(c.messages.at(-1),/telah dipakai/);assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongReview"/);
+});
 test('uncertain plan save requires read-only status check before a new form',async()=>{
   const c=ui();evaluate(c,`actor.divisi='owner';form.values={id:'plan',poId:'po',revision:'rev1',rol:'2'};form.rows=[{values:{nama:'Rib',qty:'1'}}];`);
   const p=evaluate(c,'A.rencanaPotongSave(el)');c.calls[0].reject(Object.assign(new Error('Jawaban belum diterima'),{uncertain:true}));await p;
@@ -100,4 +110,42 @@ test('worker uncertain count stops resubmission and retains a status-check actio
   const c=ui();const p=evaluate(c,'A.potongSave(el)');c.calls[0].reject(Object.assign(new Error('uncertain'),{uncertain:true}));await p;
   assert.equal(c.form._potongBusy,false);assert.equal(c.form._potongUncertain,true);assert.match(c.form.children[0].innerHTML,/data-a="rencanaPotongCheck"/);
   evaluate(c,'A.potongSave(el)');assert.equal(c.calls.length,1);
+});
+
+
+test('done work includes old and prepared own cuts once each without exposing another worker',()=>{
+  const c=ui();evaluate(c,`S.state.rencanaPotong=[{...plan,status:'terpakai',potongId:'prepared'},{...plan,id:'alias',status:'terpakai',potongId:'prepared'}];S.state.potong=[{id:'old',poId:'po',userId:'worker',tanggal:'2026-10-07',total:15,ukuran:{M:15},bahan:'Katun lama',kg:2},{id:'prepared',poId:'po',userId:'worker',tanggal:'2026-10-08',total:20,ukuran:{M:20},rencanaId:'plan'},{id:'private-other',poId:'po',userId:'other',tanggal:'2026-10-08',total:900,catatan:'PRIVATE'}];S.sub.pkerja='sudah';`);
+  const out=evaluate(c,"VIEWS['p-kerja']()");assert.equal((out.match(/data-potong="old"/g)||[]).length,1);assert.equal((out.match(/data-potong="prepared"/g)||[]).length,1);assert.match(out,/15 pcs dipotong/);assert.match(out,/Katun lama 2 kg/);assert.doesNotMatch(out,/PRIVATE|private-other|900|data-a="potongOpen"/);
+  assert.equal(c.kpis[2][1],'2');assert.equal(c.kpis[3][1],'20');
+});
+test('active uncut and partial PO remain waiting without fabricated material or unsafe input, including held PO',()=>{
+  const c=ui();evaluate(c,`S.state.rencanaPotong=[];po.agg={total:{potong:20}};D.po.held={id:'held',nama:'Held',status:'aktif',total:0,workflow:{issues:['review']}};D.po.empty={id:'empty',nama:'Empty',status:'aktif',total:0};D.po.full={id:'full',nama:'Full',status:'aktif',total:30,agg:{total:{potong:30}}};D.po.closed={id:'closed',nama:'Closed',status:'selesai',total:99};S.state.po=[po,D.po.held,D.po.empty,D.po.full,D.po.closed];S.state.rencanaPotong=[{...plan,id:'blocked',poId:'held'}];S.state.potong=[{id:'partial',poId:'po',userId:'worker',tanggal:'2026-10-08',total:20}];`);
+  const out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Menunggu bahan dari owner/);assert.match(out,/Sudah dipotong untuk PO: 20 dari 50 pcs/);assert.match(out,/Perlu diperiksa owner/);assert.match(out,/Empty/);assert.doesNotMatch(out,/Full|Closed|data-a="potongOpen"|Katun &lt;biru>|data-rencana="blocked"/);assert.equal(c.kpis[0][1],'0');assert.equal(c.kpis[1][1],'3');assert.equal(c.kpis[2][1],'1');
+  evaluate(c,"S.sub.pkerja='sudah'");assert.match(evaluate(c,'S.listFn()'),/data-potong="partial"/);
+});
+test('ready plan replaces its waiting placeholder and alone permits recording a result',()=>{
+  const c=ui();evaluate(c,"po.agg={total:{potong:10}};D.po.wait={id:'wait',nama:'Menunggu',status:'aktif',total:60};S.state.po.push(D.po.wait)");const out=evaluate(c,"VIEWS['p-kerja']()");assert.equal((out.match(/data-id="po">Detail PO/g)||[]).length,1);assert.equal((out.match(/data-a="potongOpen"/g)||[]).length,1);assert.match(out,/data-rencana="plan"/);assert.equal(c.kpis[0][1],'1');assert.equal(c.kpis[1][1],'1');
+});
+test('search and existing list callback use the current tab and query for legacy history and pending PO',()=>{
+  const c=ui();evaluate(c,`S.state.potong=[{id:'old',poId:'po',userId:'worker',tanggal:'2026-10-03',total:5,bahan:'Legacy Rib'},{id:'other',poId:'po',userId:'other',bahan:'Secret'}];VIEWS['p-kerja']();S.sub.pkerja='sudah';S.f.q='Legacy Rib';`);assert.match(evaluate(c,'S.listFn()'),/data-potong="old"/);evaluate(c,"S.f.q='Secret'");assert.doesNotMatch(evaluate(c,'S.listFn()'),/data-potong=/);evaluate(c,"S.f.q='2026-10-03'");assert.match(evaluate(c,'S.listFn()'),/data-potong="old"/);evaluate(c,"S.sub.pkerja='perlu';S.f.q='Katun <biru>'");assert.match(evaluate(c,'S.listFn()'),/data-rencana="plan"/);assert.doesNotMatch(evaluate(c,'S.listFn()'),/data-potong=/);
+});
+test('trimmed history always offers explicit old-data loading, including when current done list is empty',()=>{
+  const c=ui();evaluate(c,"S.state.trimmed=true;S.sub.pkerja='sudah'");assert.match(evaluate(c,"VIEWS['p-kerja']()"),/data-a="loadAll"/);evaluate(c,"S.state.potong=[{id:'old',poId:'po',userId:'worker',total:2}]");assert.match(evaluate(c,"VIEWS['p-kerja']()"),/data-a="loadAll"/);evaluate(c,"S.state.trimmed=false");assert.doesNotMatch(evaluate(c,"VIEWS['p-kerja']()"),/data-a="loadAll"/);
+});
+
+
+test('verified pending sizes keep a mixed imported PO visible even when aggregate target is already met',()=>{
+ const c=ui();evaluate(c,`S.state.rencanaPotong=[];po.total=10;po.ukuran={M:10};po.agg={total:{potong:10}};po.cutting={verified:true,ukuran:['M','XL','XXL'],pendingUkuran:['XL','XXL'],needsReview:false};`);
+ let out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Belum dipotong:<\/b> XL · XXL/);assert.match(out,/Menunggu bahan dari owner/);assert.doesNotMatch(out,/data-a="potongOpen"/);assert.equal(c.kpis[1][1],'1');
+ evaluate(c,"po.cutting.pendingUkuran=['XXL'];po.agg.total.potong=17");out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Belum dipotong:<\/b> XXL/);assert.doesNotMatch(out,/Belum dipotong:<\/b> XL ·/);
+ evaluate(c,"po.cutting.pendingUkuran=[];po.agg.total.potong=22");assert.equal(evaluate(c,"VIEWS['p-kerja']();kpis[1][1]"),'0');
+});
+test('size picker includes verified source sizes without changing target quantities and ignores unverified additions',()=>{
+ const c=ui();evaluate(c,"po.cutting={verified:true,ukuran:['M','XL','XXL'],pendingUkuran:['XL','XXL']}");assert.deepEqual(plain(evaluate(c,'poSizes(po)')),['M','XL','XXL']);assert.deepEqual(plain(c.po.ukuran),{M:50});evaluate(c,"po.cutting={verified:false,ukuran:['INJECT']}");assert.deepEqual(plain(evaluate(c,'poSizes(po)')),['M']);
+});
+
+test('legacy single-size preparation shows only its allowed size and held source plans stay visible to owner',()=>{
+ const c=ui();evaluate(c,"plan.legacyUkuran=['XL'];openPotong('po','plan')");assert.match(c.rendered,/data-size="XL"/);assert.doesNotMatch(c.rendered,/data-size="M"/);evaluate(c,"A.potongSave(el)");assert.equal(c.calls.length,0);assert.match(c.messages.join(' '),/ukuran pada jatah/);
+ evaluate(c,"plan.legacyBlocked='Ukuran sudah dipotong; periksa owner';openPotong('po','plan')");assert.doesNotMatch(c.rendered,/data-a="potongSave"/);assert.match(c.rendered,/periksa owner/);
+ evaluate(c,"actor.divisi='owner';po.cutting={reviewPlans:[{ukuran:['XL','XXL'],reason:'Jatah lama mencakup beberapa ukuran dan perlu diperiksa owner sebelum dipakai.'}]}");const panel=evaluate(c,'rencanaPotongPanel(po)');assert.match(panel,/Jatah bahan lama · perlu diperiksa/);assert.match(panel,/Ukuran: XL · XXL/);assert.doesNotMatch(panel,/data-a="potongOpen"/);
 });

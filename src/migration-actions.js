@@ -3,6 +3,7 @@
 function coreInstallMigrationActions(actions, ctx) {
   var store = ctx.store;
   var tables = ['PO', 'Potong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'GudangLama', 'LegacySettlement'];
+  var recoveryTables = tables.concat(['RencanaPotong']);
   var inputs = tables.concat(['SlipUpah', 'Produk']);
   function fail(message) { ctx.fail(message); }
   function owner(p) { var me = ctx.auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh memulihkan riwayat produksi.'); return me; }
@@ -45,10 +46,18 @@ function coreInstallMigrationActions(actions, ctx) {
        of trusting the planner snapshot or the recovery journal's older rows. */
     checkpoint(names);
     var beforeCuts = store.read('Potong'), plans = SCHEMA.RencanaPotong ? store.read('RencanaPotong') : [];
+    var afterPlans = Object.prototype.hasOwnProperty.call(replacements, 'RencanaPotong') ? replacements.RencanaPotong : plans;
     var afterCuts = Object.prototype.hasOwnProperty.call(replacements, 'Potong') ? replacements.Potong : beforeCuts;
     var afterPO = Object.prototype.hasOwnProperty.call(replacements, 'PO') ? replacements.PO : store.read('PO');
-    if (typeof coreCutValidateReplacement === 'function') return coreCutValidateReplacement(beforeCuts, afterCuts, plans, afterPO, store.read('PO'));
-    if (plans.length || beforeCuts.concat(afterCuts).some(function (row) { return !!row.rencanaId; })) fail('Paket pelindung persiapan potong belum lengkap. Perbarui server sebelum memulihkan riwayat.');
+    if (afterPlans !== plans) {
+      var used = {}; beforeCuts.forEach(function (row) { if (row.rencanaId) used[row.rencanaId] = true; });
+      Object.keys(used).forEach(function (id) {
+        var before = plans.filter(function (row) { return row.id === id; }), after = afterPlans.filter(function (row) { return row.id === id; });
+        if (before.length !== 1 || after.length !== 1 || !sameRows('RencanaPotong', before, after)) fail('Persiapan potong yang sudah dipakai harus dipertahankan tanpa perubahan.');
+      });
+    }
+    if (typeof coreCutValidateReplacement === 'function') return coreCutValidateReplacement(beforeCuts, afterCuts, afterPlans, afterPO, store.read('PO'));
+    if (plans.length || afterPlans.length || beforeCuts.concat(afterCuts).some(function (row) { return !!row.rencanaId; })) fail('Paket pelindung persiapan potong belum lengkap. Perbarui server sebelum memulihkan riwayat.');
     return true;
   }
   function readJournal(batchId, expectedManifestHash) {
@@ -60,7 +69,7 @@ function coreInstallMigrationActions(actions, ctx) {
     if (!expectedManifestHash || coreLegacyHash(manifest) !== expectedManifestHash) fail('Daftar cadangan pemulihan tidak cocok dengan proses yang tercatat.');
     var before = {};
     manifest.tables.forEach(function (item) {
-      if (tables.indexOf(item.name) < 0 || before[item.name]) fail('Tabel cadangan pemulihan tidak sah.');
+      if (recoveryTables.indexOf(item.name) < 0 || !SCHEMA[item.name] || before[item.name]) fail('Tabel cadangan pemulihan tidak sah.');
       var entries = all.filter(function (r) { return r.sheet === item.name; });
       if (entries.length !== item.count) fail('Jumlah baris cadangan pemulihan tidak lengkap.');
       before[item.name] = entries.map(function (r) {

@@ -128,3 +128,83 @@ test('older helper-less packages permit legacy-only migration but fail closed fo
   assert.throws(() => recovery.call('recoverLegacyMigration'), /Paket pelindung/);
   assert.deepEqual(recovery.writes(), []);
 });
+
+function preparationRecovery(a, includeCuts = false) {
+  a.run(`
+    var beforeTables={RencanaPotong:[]};
+    ${includeCuts ? "beforeTables.Potong=[];" : ''}
+    var manifest={tables:[]},journal=[];
+    Object.keys(beforeTables).forEach(function(name){
+      manifest.tables.push({name:name,count:0,hash:coreLegacyHash([])});
+    });
+    journal.push({id:'guardbatch01_manifest',batchId:'guardbatch01',sheet:'_manifest',rowId:'',before:JSON.stringify(manifest),status:'prepared',beforeHash:'before',planHash:'plan'});
+    db.MigrasiJournal=journal;
+    config.legacyMigrationStatus={batchId:'guardbatch01',beforeHash:'before',planHash:'plan',journalHash:coreLegacyHash(manifest)};
+    db.RencanaPotong=[clone(prepared)];events=[];true
+  `);
+}
+
+test('preparation-only interrupted migration can restore an empty plan table without changing business or paid rows', () => {
+  const a=fixture();preparationRecovery(a);
+  const before=a.run('({po:db.PO,cuts:db.Potong,receipt:db.SlipUpah,setor:db.SlipSetor})');
+  assert.equal(a.call('recoverLegacyMigration').data.dipulihkan,true);
+  assert.deepEqual(a.run('db.RencanaPotong'),[]);
+  assert.deepEqual(a.run('({po:db.PO,cuts:db.Potong,receipt:db.SlipUpah,setor:db.SlipSetor})'),before);
+  assert.equal(a.run('config.legacyMigrationStatus'),false);
+  assert.equal(a.run('db.MigrasiJournal[0].status'),'recovered');
+  assert.equal(a.call('recoverLegacyMigration').data.dipulihkan,false);
+});
+
+test('preparation recovery fails before any write when a new cut references a plan being rolled back', () => {
+  for(const includeCuts of [false,true]){
+    const a=fixture();preparationRecovery(a,includeCuts);
+    a.run('freshGuard={Potong:[clone(plannedCut)],RencanaPotong:[clone(prepared)]};events=[];true');
+    const marker=a.run('config.legacyMigrationStatus'),journal=a.run('db.MigrasiJournal');
+    assert.throws(()=>a.call('recoverLegacyMigration'),/sudah dipakai harus dipertahankan/);
+    assert.deepEqual(a.writes(),[]);
+    assert.deepEqual(a.run('config.legacyMigrationStatus'),marker);
+    assert.deepEqual(a.run('db.MigrasiJournal'),journal);
+    assert.equal(a.run('db.Potong[0].rencanaId'),'plan0001');
+    assert.equal(a.run('db.RencanaPotong.length'),1);
+  }
+});
+
+test('replacement plans are validated against restored POs and old legacy apply cannot inject plan rows', () => {
+  const a=fixture();preparationRecovery(a);
+  a.run(`
+    var oldPlan=Object.assign(clone(prepared),{id:'olderplan1',poId:'missingpo1'}),normalized={};
+    SCHEMA.RencanaPotong.forEach(function(k){var v=oldPlan[k];normalized[k]=TYPES[k]==='num'?coreNum(v):v==null?'':String(v);});
+    var manifest={tables:[{name:'RencanaPotong',count:1,hash:coreLegacyHash([normalized])}]};
+    db.MigrasiJournal[0].before=JSON.stringify(manifest);config.legacyMigrationStatus.journalHash=coreLegacyHash(manifest);
+    db.MigrasiJournal.push({id:'guardbatch01_1',batchId:'guardbatch01',sheet:'RencanaPotong',rowId:oldPlan.id,before:JSON.stringify(oldPlan)});true
+  `);
+  assert.throws(()=>a.call('recoverLegacyMigration'),/PO yang harus dipertahankan/);
+  assert.deepEqual(a.writes(),[]);
+  const legacy=fixture();legacy.run('target.RencanaPotong=[clone(prepared)];true');
+  assert.throws(()=>legacy.call(),/Tabel pemulihan tidak sah/);
+  assert.deepEqual(legacy.writes(),[]);
+});
+
+test('helper-less recovery cannot silently remove a prepared plan', () => {
+  const a=fixture(false);preparationRecovery(a);
+  assert.throws(()=>a.call('recoverLegacyMigration'),/Paket pelindung persiapan potong belum lengkap/);
+  assert.deepEqual(a.writes(),[]);
+});
+
+test('used preparation snapshots must survive recovery unchanged, including material quantities', () => {
+  for(const changed of [false,true]){
+    const a=fixture();preparationRecovery(a);a.run('db.Potong=[clone(plannedCut)];true');
+    a.run(`
+      var oldPlan=clone(prepared),normalized={};
+      ${changed ? "oldPlan.bahanList='[{\"nama\":\"Katun\",\"qty\":1,\"satuan\":\"kg\"}]';" : ''}
+      SCHEMA.RencanaPotong.forEach(function(k){var v=oldPlan[k];normalized[k]=TYPES[k]==='num'?coreNum(v):v==null?'':String(v);});
+      var manifest={tables:[{name:'RencanaPotong',count:1,hash:coreLegacyHash([normalized])}]};
+      db.MigrasiJournal[0].before=JSON.stringify(manifest);config.legacyMigrationStatus.journalHash=coreLegacyHash(manifest);
+      db.MigrasiJournal.push({id:'guardbatch01_1',batchId:'guardbatch01',sheet:'RencanaPotong',rowId:oldPlan.id,before:JSON.stringify(oldPlan)});true
+    `);
+    const before=a.run('({cuts:db.Potong,pay:db.SlipUpah})');
+    if(changed){assert.throws(()=>a.call('recoverLegacyMigration'),/sudah dipakai harus dipertahankan/);assert.deepEqual(a.writes(),[]);}
+    else assert.equal(a.call('recoverLegacyMigration').data.dipulihkan,true);
+    assert.deepEqual(a.run('({cuts:db.Potong,pay:db.SlipUpah})'),before);
+  }
+});

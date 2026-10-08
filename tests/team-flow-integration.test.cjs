@@ -15,8 +15,7 @@ test('one invoice funds an owner-prepared cut, two sewing workers, physical coun
   function good(action,p={},token=owner){let r=call(action,p,token);assert.equal(r.ok,true,r.error);return r.data?.data??r.data;}
   const invoice={id:'invoice_team_01',invoice:'TEST-001',tanggal:'2026-10-05',supplier:'Supplier Fixture',items:[{bahan:'Dryfit Hitam',qty:100,rol:4,harga:70000,satuan:'kg'},{bahan:'Rib Hitam',qty:20,rol:2,harga:50000,satuan:'kg'}]};
   const receipt=good('saveInvoiceBahan',{invoice});assert.equal(receipt.total,8000000);good('saveInvoiceBahan',{invoice});
-  good('savePO',{po:{newId:'po_team_01',nama:'Team fixture',ukuran:{M:10,L:10}}});
-  const prep=good('saveRencanaPotong',{rencana:{id:'plan_team_01',poId:'po_team_01',bahanList:[{nama:' dryfit  hitam ',qty:10,satuan:'kg'},{nama:'Rib Hitam',qty:2,satuan:'kg'}],rol:1}});
+  const prep=good('savePOWithRencana',{po:{newId:'po_team_01',nama:'Team fixture',ukuran:{},ukuranAktif:['M','L']},rencana:{id:'plan_team_01',bahanList:[{nama:' dryfit  hitam ',qty:10,satuan:'kg'},{nama:'Rib Hitam',qty:2,satuan:'kg'}],rol:1}}).rencana;
   assert.equal(prep.status,'siap');
   const cut={id:'cut_team_01',rencanaId:prep.id,expectedRencanaRevision:prep.revision,poId:'po_team_01',ukuran:{M:10,L:10},tanggal:'2026-10-05'};
   const produced=good('createPotong',{potong:cut},cutter);assert.equal(produced.rol,1);assert.equal(produced.total,20);

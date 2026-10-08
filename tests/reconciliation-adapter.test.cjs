@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {harness}=require('./helpers/apps-script-harness.cjs');
 const root=path.resolve(__dirname,'..');
-const migrationCode=['import-backup.js','import-legacy-v1.js','reconcile-legacy.js','migration-actions.js'].map(f=>fs.readFileSync(path.join(root,'src',f),'utf8')).join('\n');
+const migrationCode=['import-backup.js','import-legacy-v1.js','reconcile-legacy.js','migration-actions.js','cutting-plans.js'].map(f=>fs.readFileSync(path.join(root,'src',f),'utf8')).join('\n');
 function sku(id,size,name='Kaos Contoh',active=true) {
   return {id,namaBarang:name,series:'TEST',size,poAktif:active,
     potong:[{id:'cut_'+id,tanggal:'2026-10-01',jumlah:10,tukangId:'cutter01',tarif:100}],
@@ -75,6 +75,7 @@ test('actual Sheets adapter reconciles, recovers an interrupted apply, and survi
   assert.equal(h.run(`pkStore_().read('MigrasiJournal').filter(function(r){return r.sheet==='_manifest';})[0].status`),'complete');
   assert.equal(good('applyLegacyMigration',{backup}).alreadyApplied,true,'repeat apply from a fresh request is idempotent');
   assert.equal(good('recoverLegacyMigration',{batchId:retry.batchId}).dipulihkan,false);
-  good('savePO',{po:{newId:'ordinary_after',nama:'Pekerjaan Baru',ukuran:{M:1}}});
+  good('saveStok',{stok:{baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
+  good('savePOWithRencana',{po:{newId:'ordinary_after',nama:'Pekerjaan Baru',ukuran:{},ukuranAktif:['M']},rencana:{id:'fixture-plan',bahanList:[{nama:'Fixture cloth',qty:1,satuan:'kg'}],rol:1}});
   assert.ok(good('getState').po.some(p=>p.id==='ordinary_after'),'ordinary production writes reopen after the durable marker is cleared');
 });
