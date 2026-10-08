@@ -12,7 +12,9 @@
 <link rel="apple-touch-icon" href="logo-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
 <style>
 /* Tata letak: cangkang aplikasi. HP = bilah atas + isi + navigasi bawah. Layar lebar = navigasi samping + isi berkolom. */
 :root {
@@ -331,7 +333,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true;</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '202610081114';</script>
 <script>
 (function () {
 'use strict';
@@ -353,7 +355,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.3.1';
+var APP_VERSION = '1.3.2';
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
    Kolom "asal" berisi 'lama' untuk baris yang datang dari impor aplikasi lama; baris yang dibuat di aplikasi ini kosong. */
@@ -650,7 +652,7 @@ function coreSlipText(type, rec, ctx) {
     L.push('*Dibayar: ' + coreRupiah(rec.dibayar) + '*');
     if (rec.catatan) L.push('Catatan: ' + rec.catatan);
   }
-  L.push('— ' + (st.namaUsaha || ''));
+  L.push('— ' + (st.kopSlip || st.namaUsaha || '') + (st.kopSub ? ' · ' + st.kopSub : ''));
   return L.join('\n');
 }
 
@@ -730,7 +732,8 @@ function createCore(store, env) {
     if (store.prefetch) {
       var perlu = ['Pengaturan', 'Pegawai', 'Produk', 'PO', 'Potong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'SlipUpah'];
       if (coreIsAdmin(me)) perlu = perlu.concat(['StokBahan', 'GajiHarian', 'Karyawan', 'Kasbon']);
-      else if (me.divisi === 'potong') perlu.push('StokBahan');
+      else if (me.divisi === 'potong') perlu.push('StokBahan', 'Kasbon');
+      else if (me.divisi === 'jahit') perlu.push('Kasbon');
       store.prefetch(perlu);
     }
     var st = settings();
@@ -809,6 +812,15 @@ function createCore(store, env) {
     });
     out.potong = []; out.kirim = []; out.setor = []; out.qc = []; out.gudang = []; out.upah = [];
 
+    /* slip upah mingguan di aplikasi maklon jahit dan tukang potong memuat potongan kasbon:
+       yang dikirim hanya kasbon milik orang itu sendiri beserta cicilannya */
+    if (me.divisi === 'jahit' || me.divisi === 'potong') {
+      var kbRows = store.read('Kasbon'); var kbSaya = {};
+      kbRows.forEach(function (r) { if (r.tipe === 'kasbon' && r.jenis === 'maklon' && r.orangId === me.id) kbSaya[r.id] = 1; });
+      out.kasbon = kbRows.filter(function (r) { return kbSaya[r.id] || (r.tipe === 'cicilan' && kbSaya[r.kasbonId]); })
+        .map(function (r) { var o = copy(r); o.dibuatOleh = ''; return o; });
+    }
+
     if (me.divisi === 'jahit') {
       var mine = function (r) { return r.maklonId === me.id; };
       /* maklon baru melihat harga di slip setor yang sudah terbit, bukan di slip penugasan */
@@ -822,8 +834,10 @@ function createCore(store, env) {
         return q;
       });
     } else if (me.divisi === 'potong') {
-      out.po = po.filter(function (p) { return p.status === 'aktif'; });
       out.potong = potong.filter(function (r) { return r.userId === me.id; });
+      /* PO aktif untuk dikerjakan, ditambah PO dari catatan potongnya sendiri supaya riwayat dan slip tetap menampilkan nama barangnya */
+      var poSaya = {}; out.potong.forEach(function (r) { poSaya[r.poId] = 1; });
+      out.po = po.filter(function (p) { return p.status === 'aktif' || poSaya[p.id]; });
       out.upah = upah.filter(function (u) { return u.pegawaiId === me.id; });
       /* tukang potong memilih bahan dari daftar stok: hanya nama, satuan, dan sisa; tanpa harga */
       out.bahan = (stokRingkas || []).filter(function (b) { return !b.sembunyi; }).map(function (b) { return { nama: b.nama, satuan: b.satuan, saldo: b.saldo }; });
@@ -865,8 +879,11 @@ function createCore(store, env) {
     return res;
   };
 
+  /* "tidak ada yang berubah" hanya dijawab kalau nomor versi data sama DAN data di perangkat dibuat oleh versi server ini
+     (av dikirim perangkat versi baru; perangkat lama tidak mengirimnya). Dengan begitu perangkat yang membuka dari
+     salinan data terakhirnya tetap mendapat data baru setelah server diperbarui. */
   actions.sync = function (p) {
-    if (p && p.ver !== undefined && String(p.ver) === String(store.version())) return { same: true, ver: store.version() };
+    if (p && p.ver !== undefined && String(p.ver) === String(store.version()) && (p.av === undefined || String(p.av) === APP_VERSION)) return { same: true, ver: store.version() };
     return buildState(auth(p), p);
   };
 
@@ -1662,7 +1679,8 @@ function createCore(store, env) {
       'table.rinci th,table.rinci td{border:1px solid #444;padding:5px}table.rinci th{background:#eee;text-align:left}' +
       '.ttd{margin-top:36px;width:100%}.ttd td{width:33%;text-align:center;padding-top:48px}.ttd span{display:block;border-top:1px solid #111;padding-top:4px}' +
       '.total{font-size:14px;font-weight:bold;text-align:right;margin-top:10px}.cat{margin-top:10px;color:#333}';
-    var kop = '<div class="kop"><h1>' + esc(st.namaUsaha) + '</h1><small>' + esc(st.alamat || '') + '</small></div>';
+    /* kepala slip sama dengan slip mingguan: nama di kop dan baris kecil di bawahnya (bawaan SOLDIER APPAREL / SOLDIERAPPAREL.ID) */
+    var kop = '<div class="kop"><h1>' + esc(st.kopSlip || st.namaUsaha) + '</h1><small>' + esc(st.kopSub || st.alamat || '') + '</small></div>';
     var h = '';
     if (type === 'kirim' || type === 'setor') {
       var po = ctx.po || {}; var maklon = ctx.maklon || {};
@@ -2110,7 +2128,10 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.3.1';
+var UI_VERSION = '1.3.2';
+/* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
+function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
+tanda('pk-mulai');
 var Idb = (function () {
   var NAME = 'pk-produksi', db = null, tried = false, queue = [];
   function open(cb) {
@@ -2128,16 +2149,31 @@ var Idb = (function () {
   }
   function tulis(store, fn) { open(function (d) { if (!d) return; try { fn(d.transaction(store, 'readwrite').objectStore(store)); } catch (e) {} }); }
   return {
-    /* semua isi satu laci sebagai { kunci: nilai }; selalu memanggil balik, juga kalau IndexedDB tidak tersedia */
-    all: function (store, cb) {
+    /* semua isi satu laci sebagai { kunci: nilai }; selalu memanggil balik, juga kalau IndexedDB tidak tersedia.
+       awalan (boleh kosong): hanya kunci yang diawali teks itu, supaya isi yang besar tidak ikut terbaca */
+    all: function (store, cb, awalan) {
       open(function (d) {
         var out = {}, selesai = false; var fin = function () { if (!selesai) { selesai = true; cb(out); } };
         if (!d) return fin();
         try {
-          var tx = d.transaction(store, 'readonly'); var rq = tx.objectStore(store).openCursor();
+          var rentang = null;
+          try { if (awalan && window.IDBKeyRange) rentang = window.IDBKeyRange.bound(awalan, awalan + '￿'); } catch (e) { rentang = null; }
+          var tx = d.transaction(store, 'readonly'); var rq = tx.objectStore(store).openCursor(rentang);
           rq.onsuccess = function () { var c = rq.result; if (c) { out[c.key] = c.value; c.continue(); } else fin(); };
           rq.onerror = fin; tx.onabort = fin; tx.onerror = fin;
         } catch (e) { fin(); }
+      });
+    },
+    /* satu isi saja; memanggil balik dengan undefined kalau tidak ada atau IndexedDB tidak tersedia */
+    get: function (store, k, cb) {
+      open(function (d) {
+        var selesai = false; var fin = function (v) { if (!selesai) { selesai = true; cb(v); } };
+        if (!d) return fin(undefined);
+        try {
+          var tx = d.transaction(store, 'readonly'); var rq = tx.objectStore(store).get(k);
+          rq.onsuccess = function () { fin(rq.result); };
+          rq.onerror = function () { fin(undefined); }; tx.onabort = function () { fin(undefined); };
+        } catch (e) { fin(undefined); }
       });
     },
     put: function (store, k, v) { tulis(store, function (s) { s.put(v, k); }); },
@@ -2148,6 +2184,7 @@ var Idb = (function () {
 var LS = (function () {
   var mem = {};
   var KECIL = /^pk_(api|div|token|last)/;       /* data kecil yang juga disalin ke IndexedDB */
+  var IDB_SAJA = /^pk_boot/;                    /* hanya di IndexedDB aplikasi ini: tidak memakai jatah localStorage yang dipakai bersama */
   function punya(k) { return Object.prototype.hasOwnProperty.call(mem, k); }
   function mentah(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
   /* versi lama menyimpan gambar di localStorage; hapus supaya ruangnya kembali (hanya kunci pk_img_ milik aplikasi ini) */
@@ -2160,18 +2197,21 @@ var LS = (function () {
     get: function (k) { return punya(k) ? mem[k] : mentah(k); },
     set: function (k, v) {
       v = String(v); var kecil = KECIL.test(k);
+      if (IDB_SAJA.test(k)) { mem[k] = v; Idb.put('kv', k, v); return true; }
       if (kecil) { mem[k] = v; Idb.put('kv', k, v); }
       try { window.localStorage.setItem(k, v); return true; } catch (e) { return kecil; }
     },
     del: function (k) {
+      if (IDB_SAJA.test(k)) { mem[k] = null; Idb.del('kv', k); return; }
       if (KECIL.test(k)) { mem[k] = null; Idb.del('kv', k); }
       try { window.localStorage.removeItem(k); } catch (e) {}
     },
-    /* dipanggil sekali sebelum aplikasi mulai: ambil salinan dari IndexedDB, dan salin data lama dari localStorage ke sana */
+    /* dipanggil sekali sebelum aplikasi mulai: ambil salinan dari IndexedDB, dan salin data lama dari localStorage ke sana.
+       Hanya kunci berawalan pk_ yang dibaca; salinan data terakhir (besar) dibaca terpisah, lihat bacaSnap. */
     init: function (cb) {
       Idb.all('kv', function (map) {
         var k;
-        for (k in map) if (KECIL.test(k) && !punya(k) && typeof map[k] === 'string') mem[k] = map[k];
+        for (k in map) if ((KECIL.test(k) || IDB_SAJA.test(k)) && !punya(k) && typeof map[k] === 'string') mem[k] = map[k];
         try {
           for (var j = 0; j < window.localStorage.length; j++) {
             k = window.localStorage.key(j);
@@ -2179,7 +2219,7 @@ var LS = (function () {
           }
         } catch (e) {}
         cb();
-      });
+      }, 'pk_');
     }
   };
 })();
@@ -2269,6 +2309,7 @@ var Api = (function () {
   var remoteUrl = '';
   var local = null, localCore = null, clock = 0;
   var lockDiv = '';
+  var sumberBaru = false;
 
   /* Aplikasi per divisi. Divisi sebuah jendela ditentukan begini:
      - link undangan (#k=...&d=jahit) menyiapkan perangkat: divisinya dicatat sebagai bawaan perangkat (pk_div).
@@ -2299,7 +2340,11 @@ var Api = (function () {
     /* link undangan: .../#k=<kode deployment>. Kodenya disimpan di perangkat lalu dihapus dari alamat.
        Divisinya dipindah ke ?d=... supaya jendela ini tetap di divisi yang sama saat dimuat ulang atau dipasang. */
     var m = String(location.hash || '').match(/[#&]k=([A-Za-z0-9_-]{20,})/);
-    if (m) { LS.set('pk_api', m[1]); try { history.replaceState(null, '', location.pathname + (lockDiv ? '?d=' + lockDiv : '')); } catch (e) {} }
+    if (m) {
+      /* link ke data pusat yang berbeda: daftar nama dan data terakhir yang tersimpan di perangkat tidak berlaku lagi */
+      var lama = LS.get('pk_api'); if (lama && lama !== m[1]) sumberBaru = true;
+      LS.set('pk_api', m[1]); try { history.replaceState(null, '', location.pathname + (lockDiv ? '?d=' + lockDiv : '')); } catch (e) {}
+    }
     var k = LS.get('pk_api');
     remoteUrl = k ? 'https://script.google.com/macros/s/' + k + '/exec' : '';
   }
@@ -2354,6 +2399,8 @@ var Api = (function () {
     /* link undangan dibuka saat aplikasi sudah terbuka: alamatnya hanya berubah di bagian #, halaman tidak dimuat ulang */
     rehash: function () { if (gas || !/[#&]k=[A-Za-z0-9_-]{20,}/.test(String(location.hash || ''))) return false; readDiv(); readInvite(); return true; },
     div: function () { return lockDiv; },
+    /* benar satu kali setelah perangkat disambungkan ke data pusat yang lain */
+    sumberBaru: function () { var b = sumberBaru; sumberBaru = false; return b; },
     inviteLink: function (div) { var k = LS.get('pk_api'); return k && !gas ? location.origin + location.pathname + '#k=' + k + (DIV_APP[div] ? '&d=' + div : '') : ''; }
   };
 })();
@@ -2373,7 +2420,7 @@ function bacaToken() {
 var S = {
   boot: null, token: '', state: null,
   tab: '', sub: {}, f: { q: '', poStatus: 'aktif', poTahap: '', poJenis: '', slipMaklon: '' },
-  busy: 0, off: false, lastSync: 0, wantAll: false, pending: null,
+  busy: 0, off: false, lastSync: 0, seq: 0, wantAll: false, pending: null,
   gate: { user: null, pin: '', err: '', setup: null },
   img: {}, imgWait: {}
 };
@@ -2391,9 +2438,53 @@ function index() {
   st.po.forEach(function (p) { D.po[p.id] = p; });
   st.produk.forEach(function (p) { D.produk[p.id] = p; });
 }
-function applyState(st) {
+/* ---------- buka seketika: salinan data terakhir di perangkat ----------
+   Setiap data dari server juga disimpan di IndexedDB aplikasi ini. Saat aplikasi dibuka lagi, layar langsung
+   digambar dari salinan itu, lalu server ditanya di belakang layar "ada yang berubah?". Aturannya:
+   - salinan hanya dipakai kalau sesi masuknya sama persis (orang lain yang masuk tidak melihat salinan orang sebelumnya);
+   - salinan dihapus saat keluar, saat sesi berakhir, dan saat perangkat disambungkan ke data pusat lain;
+   - salinan dari versi tampilan yang berbeda tidak dipakai;
+   - salinan yang lebih tua dari SNAP_SEGAR tetap ditampilkan dulu, tetapi datanya diambil ulang seluruhnya. */
+var SNAP_SEGAR = 12 * 3600000;
+var snapTimer = null;
+function snapKey() { return 'pks_' + (Api.div() || 'pusat'); }
+function bootKey() { return 'pk_boot' + (Api.div() ? '_' + Api.div() : ''); }
+function simpanSnap() {
+  if (Api.mode() !== 'remote') return;
+  clearTimeout(snapTimer);
+  snapTimer = setTimeout(function () {
+    var st = S.state; if (!st || !S.token || st.semua) return;
+    var teks; try { teks = JSON.stringify(st); } catch (e) { return; }
+    Idb.put('kv', snapKey(), { t: S.token, at: S.lastSync || Date.now(), ui: UI_VERSION, s: teks });
+  }, 700);
+}
+function hapusSnap() { clearTimeout(snapTimer); Idb.del('kv', snapKey()); }
+function bacaSnap(cb) {
+  if (Api.mode() !== 'remote' || !S.token) return cb(null);
+  Idb.get('kv', snapKey(), function (v) {
+    var st = null;
+    try { if (v && v.t === S.token && v.ui === UI_VERSION && typeof v.s === 'string') st = JSON.parse(v.s); } catch (e) { st = null; }
+    if (!st || !st.me || !st.settings || !(st.po instanceof Array) || !(st.users instanceof Array) || (Api.div() && st.me.divisi !== Api.div())) return cb(null);
+    cb({ at: Number(v.at) || 0, state: st });
+  });
+}
+/* daftar nama di layar masuk juga disimpan (tanpa data lain), supaya layar masuk tidak menunggu server */
+function simpanBoot(res) {
+  if (Api.mode() !== 'remote' || !res || res.needSetup || !(res.users instanceof Array)) return;
+  try { LS.set(bootKey(), JSON.stringify({ needSetup: false, namaUsaha: res.namaUsaha, appVersion: res.appVersion, divisi: res.divisi, users: res.users })); } catch (e) {}
+}
+function bacaBoot() {
+  if (Api.mode() !== 'remote') return null;
+  var b = coreParseJSON(LS.get(bootKey()) || '', null);
+  return (b && b.users instanceof Array) ? b : null;
+}
+
+/* dariSimpanan = waktu (ms) data itu terakhir diambil dari server, diisi kalau st berasal dari salinan di perangkat */
+function applyState(st, dariSimpanan) {
   if (!st || !st.me) return;
-  S.state = st; S.lastSync = Date.now(); S.off = false;
+  S.state = st; S.seq++;
+  if (dariSimpanan) S.lastSync = dariSimpanan;
+  else { S.lastSync = Date.now(); S.off = false; simpanSnap(); }
   index();
   /* owner atau admin masuk di jendela yang tidak dikunci: perangkat ini perangkat owner */
   if (!Api.div() && Api.mode() === 'remote' && coreIsAdmin(st.me) && LS.get('pk_div') !== 'pusat') LS.set('pk_div', 'pusat');
@@ -2417,22 +2508,28 @@ function req(action, payload) {
   });
 }
 function signOutLocal() {
-  S.token = ''; S.state = null; LS.del(tokenKey()); S.gate = { user: null, pin: '', err: '', setup: null }; closeAll();
+  S.token = ''; S.state = null; LS.del(tokenKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null }; closeAll();
   boot();
 }
 
-/* sinkron ringan: server hanya mengirim data kalau ada yang berubah */
+/* sinkron ringan: server hanya mengirim data kalau ada yang berubah.
+   force = jalan walau aplikasi sedang di belakang atau sibuk; ringan = tetap kirim nomor versi (tanpa ringan, force mengambil ulang semua data) */
 var syncTimer = null; var syncing = false;
-function sync(force) {
+function sync(force, ringan) {
   if (!S.token || !S.state || syncing) return Promise.resolve();
   if (!force && (document.hidden || S.busy > 0)) return Promise.resolve();
   syncing = true;
-  var payload = { token: S.token, ver: force ? undefined : S.state.ver };
+  var payload = { token: S.token, ver: (force && !ringan) ? undefined : S.state.ver, av: S.state.appVersion || '' };
   if (S.wantAll) payload.semua = true;
+  var urut = S.seq;
   S.busy++; paintSync();
   return Api.call('sync', payload).then(function (res) {
-    S.busy--; syncing = false; S.off = false; S.lastSync = Date.now();
-    if (res && !res.same && res.me) { applyState(res); refresh(); }
+    S.busy--; syncing = false; S.off = false;
+    tanda('pk-server');
+    /* jawaban yang berangkat sebelum sebuah penyimpanan selesai bisa lebih tua dari data di layar: dilewati,
+       sinkron berikutnya yang menyamakan */
+    if (res && !res.same && res.me) { if (urut === S.seq) { applyState(res); refresh(); } }
+    else S.lastSync = Date.now();
     paintSync();
   }, function (err) {
     S.busy--; syncing = false; if (err.net) S.off = true; paintSync();
@@ -2544,7 +2641,11 @@ function copyText(text, okMsg) {
 function paintSync() {
   var el = $('#sync'); if (!el) return;
   el.className = 'sync' + (S.off ? ' off' : (S.busy > 0 ? ' busy' : ''));
-  var t = S.off ? 'Tidak tersambung' : (S.busy > 0 ? 'Menyimpan…' : (Api.mode() === 'demo' ? 'Mode coba' : 'Tersambung' + (S.lastSync ? ' · ' + jam(new Date(S.lastSync).toISOString()) : '')));
+  /* waktu data terakhir diambil dari server; kalau bukan hari ini, tanggalnya ikut ditulis */
+  var kapan = '';
+  if (S.lastSync) { var d = new Date(S.lastSync); kapan = (coreYmd(d) === todayYmd() ? '' : tgl(coreYmd(d)) + ' ') + jam(d.toISOString()); }
+  var t = S.off ? 'Tidak tersambung' + (kapan ? ' · data ' + kapan : '')
+    : (S.busy > 0 ? (syncing && S.busy === 1 ? 'Memperbarui…' : 'Menyimpan…') : (Api.mode() === 'demo' ? 'Mode coba' : 'Tersambung' + (kapan ? ' · ' + kapan : '')));
   var lab = $('#sync-t'); if (lab) lab.textContent = t;
 }
 
@@ -2679,7 +2780,8 @@ function render() {
   var bagian = appLabel(isAdmin() ? '' : u.divisi);
   try { document.title = S.state.settings.namaUsaha + ' ' + bagian; } catch (e) {}
   root.innerHTML = '<div class="app">' + demoBar() +
-    (S.canInstall ? '<div class="demo-bar" style="background:var(--accent-soft);color:var(--accent)"><span>Aplikasi ini bisa dipasang di perangkat Anda.</span><button class="btn sm pri" data-a="install">Pasang</button></div>' : '') +
+    (S.versiBaru ? '<div class="demo-bar" style="background:var(--accent-soft);color:var(--accent)"><span>Versi baru aplikasi sudah siap.</span><button class="btn sm pri" data-a="muatVersi">Muat ulang</button></div>' : '') +
+    (S.canInstall ?'<div class="demo-bar" style="background:var(--accent-soft);color:var(--accent)"><span>Aplikasi ini bisa dipasang di perangkat Anda.</span><button class="btn sm pri" data-a="install">Pasang</button></div>' : '') +
     '<header class="top"><div class="top-in">' + logoImg() + '<span class="brand grow cut">' + esc(S.state.settings.namaUsaha) + ' <i>' + esc(bagian) + '</i></span>' +
     '<button class="sync" id="sync" data-a="syncNow" title="Muat ulang data"><span class="dot"></span><span id="sync-t"></span></button>' +
     '<button class="who" data-a="tab" data-id="' + (isAdmin() ? 'lain' : 'akun') + '"><span class="ava">' + esc(inisial(u.nama)) + '</span><span class="cut">' + esc(u.nama) + '</span></button></div></header>' +
@@ -2727,6 +2829,14 @@ C.demoAs = function (el) {
 };
 
 /* ---------- layar masuk ---------- */
+/* Aplikasi divisi (Potong, Jahit, QC) dibuka dengan layar depan yang hanya berisi judul divisinya.
+   Daftar nama baru muncul setelah tombol Masuk ditekan. Layar depan tidak butuh data server, jadi langsung tampil. */
+function gateDepan() {
+  var g = S.gate;
+  return !!Api.div() && !S.token && !g.buka && !g.needLink && !(S.boot && S.boot.needSetup);
+}
+A.gateBuka = function () { S.gate.buka = true; render(); window.scrollTo(0, 0); };
+A.gateTutup = function () { S.gate.buka = false; S.gate.user = null; S.gate.pin = ''; S.gate.err = ''; pilihTerakhir(); render(); };
 function gateHtml() {
   var g = S.gate; var b = S.boot;
   var nama = (b && b.namaUsaha) || 'Soldier';
@@ -2734,8 +2844,13 @@ function gateHtml() {
   var head = '<div class="row">' + logoImg('l') + '<div class="grow"><div class="logo">' + esc(nama) + ' <i>' + esc(appLabel(kunci)) + '</i></div><div class="tag">' +
     esc(kunci ? DIV_APP[kunci].tag : 'Potong, maklon jahit, dan QC dalam satu data.') + '</div></div></div>';
   try { document.title = nama + ' ' + appLabel(kunci); } catch (e) {}
-  /* layar memuat: logo di tengah */
-  if (g.loading && !g.needLink) return '<div class="splash">' + logoImg('xl napas') + '<div class="logo">' + esc(nama) + ' <i>' + esc(appLabel(kunci)) + '</i></div><div class="tag">Memuat…</div></div>';
+  if (gateDepan()) {
+    return '<div class="gate"><div class="gate-in">' + head + '<div class="card col gap-l"><div class="col gap-s"><div class="label">Divisi</div><h1 style="margin:0">' + esc(DIV_APP[kunci].nama) + '</h1>' +
+      '<p class="muted small" style="margin:0">Tekan Masuk, pilih nama Anda, lalu masukkan PIN.</p></div>' +
+      '<button class="btn pri" data-a="gateBuka">Masuk' + ic('chev') + '</button></div>' + installBtn() + '</div></div>';
+  }
+  /* layar memuat: logo di tengah (hanya saat sesi yang tersimpan sedang diperiksa, atau di aplikasi owner yang belum pernah dibuka) */
+  if (g.loading && !g.needLink && (S.token || !kunci)) return '<div class="splash">' + logoImg('xl napas') + '<div class="logo">' + esc(nama) + ' <i>' + esc(appLabel(kunci)) + '</i></div><div class="tag">Memuat…</div></div>';
   var body;
   if (g.needLink) {
     /* versi yang dipasang di alamat web sendiri: tanpa link dari owner, aplikasi tidak tahu data pusatnya di mana */
@@ -2762,7 +2877,8 @@ function gateHtml() {
         rows += '<button class="item" data-a="gateUser" data-id="' + esc(u.id) + '"><span class="ava l">' + esc(inisial(u.nama)) + '</span><span class="grow"><span class="t">' + esc(u.nama) + '</span><br><span class="d">' + esc(DIVISI[d].label) + '</span></span>' + ic('chev') + '</button>';
       });
     });
-    body = '<div class="card flush"><div class="sec-h"><h3>Pilih nama Anda</h3></div><div class="list">' +
+    body = (g.luring ? '<div class="note bad row"><span class="grow">' + esc(g.luring) + '</span><button class="btn sm" data-a="reboot">Coba lagi</button></div>' : '') +
+      '<div class="card flush"><div class="sec-h"><h3>Pilih nama Anda</h3>' + (kunci ? '<button class="btn ghost sm" data-a="gateTutup">Kembali</button>' : '') + '</div><div class="list">' +
       (rows || emptyBox(kunci ? 'Akun ' + DIV_APP[kunci].nama + ' belum dibuat. Owner membuatnya dari aplikasi owner (Soldier Produksi): Lainnya › Pegawai › Tambah, pilih divisi ' + DIV_APP[kunci].nama + ', isi nama dan PIN. Setelah itu tekan Muat ulang di sini.' : 'Belum ada pegawai.', '<button class="btn sm" data-a="reboot">Muat ulang</button>')) + '</div></div>' + connectLink();
   } else {
     var dots = ''; for (var i = 0; i < Math.max(4, g.pin.length); i++) dots += '<i' + (i < g.pin.length ? ' class="f"' : '') + '></i>';
@@ -2828,7 +2944,7 @@ A.connect = function () {
 };
 A.connectGo = function () {
   if (!Api.connect($('#conn-url').value)) return toast('Link tidak dikenali. Salin lagi link dari owner.', true);
-  closeAll(); S.token = ''; LS.del(tokenKey()); S.state = null; S.boot = null; S.gate.needLink = false; boot();
+  closeAll(); S.token = ''; LS.del(tokenKey()); LS.del(bootKey()); hapusSnap(); S.state = null; S.boot = null; S.gate.needLink = false; boot();
 };
 /* tombol pasang: browser memberi tahu kalau aplikasi ini bisa dipasang di layar utama */
 var installEvt = null;
@@ -2839,7 +2955,7 @@ A.install = function () {
   installEvt.prompt();
   installEvt.userChoice.then(function () { installEvt = null; S.canInstall = false; render(); }, quiet);
 };
-A.disconnect = function () { Api.disconnect(); S.token = ''; LS.del(tokenKey()); S.state = null; S.boot = null; boot(); };
+A.disconnect = function () { Api.disconnect(); S.token = ''; LS.del(tokenKey()); LS.del(bootKey()); hapusSnap(); S.state = null; S.boot = null; boot(); };
 
 /* ---------- form: baca nilai & hitung ulang ---------- */
 function formVals(root) {
@@ -2989,6 +3105,11 @@ function slipCtx(type, rec) {
   return ctx;
 }
 function openSlip(type, id) { openSheet(function () { return slipSheet(type, id); }, { live: true }); }
+/* kepala slip di layar: sama dengan slip cetak (SOLDIER APPAREL / SOLDIERAPPAREL.ID, bisa diubah di Pengaturan) */
+function kopHtml() {
+  var kop = slipKop();
+  return '<span class="row gap-s">' + logoImg() + '<span><b>' + esc(kop.nama) + '</b>' + (kop.sub ? '<br><span class="xs muted">' + esc(kop.sub) + '</span>' : '') + '</span></span>';
+}
 A.slip = function (el) { openSlip(el.getAttribute('data-t'), el.getAttribute('data-id')); };
 var STATUS_SETOR = { diajukan: ['Menunggu dihitung QC', 'warn'], diterima: ['Diterima', 'ok'], ditolak: ['Ditolak', 'bad'] };
 function slipSheet(type, id) {
@@ -3002,7 +3123,7 @@ function slipSheet(type, id) {
       var rate = rec.jenis === 'jahit' ? s.upah : s.tarif;
       return '<tr><td>' + esc(poNama(s.poId)) + '<br><span class="xs muted">' + esc(s.noSlip || 'Potong') + ' · ' + tgl(s.tanggal) + '</span></td><td>' + nf(s.total) + '</td><td>' + nf(rate) + '</td><td>' + nf(s.total * rate) + '</td></tr>';
     }).join('');
-    h = '<div class="slip"><div class="kop"><span class="row gap-s">' + logoImg() + '<b>' + esc(st.namaUsaha) + '</b></span><span class="small b">' + esc(rec.noSlip) + '</span></div>' +
+    h = '<div class="slip"><div class="kop">' + kopHtml() + '<span class="small b">' + esc(rec.noSlip) + '</span></div>' +
       '<dl class="kv"><dt>Tanggal</dt><dd>' + tgl(rec.tanggal) + '</dd><dt>Nama</dt><dd class="b">' + esc(ctx.pegawai.nama || '—') + '</dd></dl>' +
       (rows ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Barang</th><th>Pcs</th><th>Upah</th><th>Jumlah</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<p class="small muted">Rincian item sudah diarsipkan.</p>') +
       '<dl class="kv"><dt>Total</dt><dd>' + nf(rec.totalQty) + ' pcs · ' + rp(rec.totalUpah) + '</dd>' + (rec.potongan ? '<dt>Potongan</dt><dd>' + rp(rec.potongan) + '</dd>' : '') +
@@ -3014,7 +3135,7 @@ function slipSheet(type, id) {
     title = type === 'kirim' ? 'Slip penugasan jahit' : (belumSlip ? 'Laporan setor' : 'Slip setor jahit');
     var po = ctx.po; var ss = STATUS_SETOR[rec.status] || [rec.status, ''];
     h = (belumSlip && rec.status === 'diajukan' ? '<div class="note">Belum menjadi slip. Slip dan harganya terbit setelah QC menghitung barang ini.</div>' : '') +
-      '<div class="slip"><div class="kop"><span class="row gap-s">' + logoImg() + '<b>' + esc(st.namaUsaha) + '</b></span><span class="small b">' + esc(rec.noSlip || 'Belum ada slip') + '</span></div>' +
+      '<div class="slip"><div class="kop">' + kopHtml() + '<span class="small b">' + esc(rec.noSlip || 'Belum ada slip') + '</span></div>' +
       '<dl class="kv"><dt>Tanggal</dt><dd>' + tgl(rec.tanggal) + '</dd><dt>Maklon</dt><dd class="b">' + esc(ctx.maklon.nama || '—') + '</dd>' +
       '<dt>Barang</dt><dd><span class="b">' + esc(po.nama || '—') + '</span><br><span class="xs muted">' + poMeta(po) + '</span></dd>' +
       (type === 'kirim' && rec.target ? '<dt>Target selesai</dt><dd>' + tgl(rec.target) + '</dd>' : '') +
@@ -3112,7 +3233,7 @@ A.logout = function () {
   confirmBox({ title: 'Keluar dari aplikasi?', text: 'Anda perlu memasukkan PIN lagi untuk masuk.', ok: 'Keluar' }, function () {
     var tk = S.token;
     Api.call('logout', { token: tk }).catch(quiet);
-    S.token = ''; S.state = null; LS.del(tokenKey()); LS.del(lastKey()); S.gate = { user: null, pin: '', err: '', setup: null };
+    S.token = ''; S.state = null; LS.del(tokenKey()); LS.del(lastKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null };
     setTimeout(function () { closeAll(); boot(); }, 120);
     return Promise.resolve();
   });
@@ -4347,22 +4468,22 @@ function slipUpahMingguan(u, start, end) {
   var seksi = cicilan.length ? [{ title: 'Rincian potongan kasbon', columns: [{ label: 'Tanggal' }, { label: 'Keterangan' }, { label: 'Jumlah', align: 'right' }],
     rows: cicilan.map(function (x) { return [tglSlip(x.c.tanggal), x.c.keterangan || x.kb.keterangan || 'Cicilan kasbon', rp(x.c.jumlah)]; }) }] : [];
   var periode = tglSlip(start) + ' — ' + tglSlip(end); var ref = start.replace(/-/g, '') + '-' + end.replace(/-/g, '') + ' / ' + String(u.id).slice(0, 8);
-  var items, totalPcs = 0, totalUpah = 0, belum = 0;
+  var items, totalPcs = 0, totalUpah = 0, belum = 0, tanpaHarga = 0;
   if (u.divisi === 'jahit') {
     items = st.setor.filter(function (s) { return s.maklonId === u.id && s.status === 'diterima' && dalam(s.tanggal); });
     items.sort(function (a, b) { return (String(a.tanggal) + String(a.noSlip)) < (String(b.tanggal) + String(b.noSlip)) ? -1 : 1; });
-    items.forEach(function (s) { totalPcs += s.total; totalUpah += s.total * s.upah; if (!s.upahId) belum++; });
+    items.forEach(function (s) { totalPcs += s.total; totalUpah += s.total * s.upah; if (!s.upahId) belum++; if (!(s.upah > 0)) tanpaHarga++; });
     return { model: { layout: 'weekly-a4', title: 'Slip Upah Jahit', reference: 'JHT / ' + ref, recipient: u.nama, recipientLabel: 'Nama penjahit', period: periode,
       columns: [{ label: 'Tanggal', width: 18 }, { label: 'Barang / Ukuran', width: 34 }, { label: 'Pcs', align: 'right', width: 10 }, { label: 'Tarif', align: 'right', width: 18 }, { label: 'Upah', align: 'right', width: 20 }],
       rows: items.map(function (s) { var sz = coreSizeText(s.ukuran, uk); return [tglSlip(s.tanggal), poNama(s.poId) + (sz ? ' / ' + sz : ''), nf(s.total), rp(s.upah), rp(s.total * s.upah)]; }),
       summary: [{ label: 'Total pekerjaan', value: nf(totalPcs) + ' pcs' }, { label: 'Upah kotor', value: rp(totalUpah) }, { label: 'Potongan kasbon', value: rp(potongan) }, { label: 'Upah bersih', value: rp(totalUpah - potongan), emphasis: true }],
       sections: seksi, signatures: [{ label: 'Disiapkan oleh', name: 'Admin ' + slipKop().nama }, { label: 'Penerima', name: u.nama }] },
-      n: items.length, belum: belum, bersih: totalUpah - potongan };
+      n: items.length, belum: belum, tanpaHarga: tanpaHarga, bersih: totalUpah - potongan };
   }
   items = st.potong.filter(function (r) { return r.userId === u.id && dalam(r.tanggal); });
   items.sort(function (a, b) { return (String(a.tanggal) + String(a.dibuat)) < (String(b.tanggal) + String(b.dibuat)) ? -1 : 1; });
   var bahanSemua = [];
-  items.forEach(function (r) { totalPcs += r.total; totalUpah += r.total * r.tarif; if (!r.upahId) belum++; coreBahanPotong(r).forEach(function (b) { if (b.qty > 0) { var info = bahanInfo(b.nama); bahanSemua.push({ satuan: info ? info.satuan : 'kg', qty: b.qty }); } }); });
+  items.forEach(function (r) { totalPcs += r.total; totalUpah += r.total * r.tarif; if (!r.upahId) belum++; if (!(r.tarif > 0)) tanpaHarga++; coreBahanPotong(r).forEach(function (b) { if (b.qty > 0) { var info = bahanInfo(b.nama); bahanSemua.push({ satuan: info ? info.satuan : 'kg', qty: b.qty }); } }); });
   var summary = [{ label: 'Jumlah potongan', value: nf(totalPcs) + ' pcs' }];
   if (bahanSemua.length) summary.push({ label: 'Bahan terpakai', value: jumlahPerSatuan(bahanSemua) });
   if (potongan > 0) { summary.push({ label: 'Upah kotor', value: rp(totalUpah) }); summary.push({ label: 'Potongan kasbon', value: rp(potongan) }); }
@@ -4373,7 +4494,7 @@ function slipUpahMingguan(u, start, end) {
       var sz = coreSizeText(r.ukuran, uk); var bahan = coreBahanPotong(r).filter(function (b) { return b.qty > 0; }).map(function (b) { var info = bahanInfo(b.nama); return b.nama + ' · ' + nfQty(b.qty) + ' ' + satuanPendek(info ? info.satuan : 'kg'); }).join(' + ');
       return [tglSlip(r.tanggal), poNama(r.poId) + (sz ? ' · ' + sz : '') + (bahan ? '\n' + bahan : ''), nf(r.total) + ' pcs', rp(r.tarif), rp(r.total * r.tarif)];
     }), summary: summary, sections: seksi, signatures: [{ label: 'Disiapkan oleh', name: 'Owner' }, { label: 'Penerima', name: u.nama }] },
-    n: items.length, belum: belum, bersih: totalUpah - potongan };
+    n: items.length, belum: belum, tanpaHarga: tanpaHarga, bersih: totalUpah - potongan };
 }
 function upahMingguView() {
   slipPasangCss();
@@ -4425,25 +4546,31 @@ function poHead(po) {
 }
 
 /* ---------------- TUKANG POTONG ---------------- */
+/* PO yang masih perlu dipotong: belum dipotong sama sekali, atau targetnya belum tercapai.
+   PO yang sudah dipotong pindah ke bagian "Sudah dipotong" supaya daftar kerja tetap pendek. */
+function perluPotong(po) { var t = T(po); return !t.potong || (po.total > 0 && t.potong < po.total); }
 VIEWS['p-kerja'] = function () {
-  var st = S.state;
+  var st = S.state; var sub = S.sub.pkerja === 'sudah' ? 'sudah' : 'perlu';
+  var aktif = st.po.filter(function (p) { return p.status === 'aktif'; });
+  var nPerlu = aktif.filter(perluPotong).length;
   S.listFn = function () {
-    var rows = st.po.filter(function (p) { return p.status === 'aktif' && cocok(S.f.q, [p.nama, p.noPO, p.series, p.pelanggan]); });
+    /* saat mencari, semua PO aktif ikut dicari supaya PO yang sudah dipotong tetap bisa ditemukan untuk potong tambahan */
+    var cari = String(S.f.q || '').trim();
+    var rows = aktif.filter(function (p) { return cari ? cocok(cari, [p.nama, p.noPO, p.series, p.pelanggan]) : (perluPotong(p) === (sub === 'perlu')); });
     rows.sort(function (a, b) { var x = T(a).potong ? 1 : 0, y = T(b).potong ? 1 : 0; return (x - y) || (String(b.dibuat) < String(a.dibuat) ? -1 : 1); });
-    if (!rows.length) return '<div class="card">' + emptyBox(st.po.length ? 'Tidak ada PO yang cocok.' : 'Belum ada PO dari owner.') + '</div>';
+    if (!rows.length) return '<div class="card">' + emptyBox(cari ? 'Tidak ada PO yang cocok.' : (sub === 'sudah' ? 'Belum ada PO yang selesai dipotong.' : (aktif.length ? 'Semua PO sudah dipotong. PO baru dari owner muncul di sini.' : 'Belum ada PO dari owner.'))) + '</div>';
     return '<div class="grid g-cards">' + rows.slice(0, 80).map(function (po) {
-      var t = T(po);
+      var t = T(po); var perlu = perluPotong(po);
       return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + poMeta(po) + '</div>' +
         (po.total ? '<div class="chips">' + sizeChips(po.ukuran) + '</div>' : '') + (po.bahan ? '<div class="xs muted">Bahan: ' + esc(po.bahan) + '</div>' : '') + (po.catatan ? '<div class="xs muted">' + esc(po.catatan) + '</div>' : '') + '</div></div>' +
         '<div class="row"><span class="grow small">' + (t.potong ? 'Sudah dipotong <b class="num">' + nf(t.potong) + '</b>' + (po.total ? ' dari ' + nf(po.total) : '') + ' pcs' : (po.total ? 'Target <b class="num">' + nf(po.total) + '</b> pcs, belum dipotong' : '<span class="chip warn">Belum dipotong</span>')) + '</span>' +
-        '<button class="btn pri sm" data-a="potongOpen" data-id="' + esc(po.id) + '">' + ic('cut', 's') + 'Catat potong</button></div></div>';
-    }).join('') + '</div>';
+        '<button class="btn sm' + (perlu ? ' pri' : '') + '" data-a="potongOpen" data-id="' + esc(po.id) + '">' + ic('cut', 's') + (perlu ? 'Catat potong' : 'Potong tambahan') + '</button></div></div>';
+    }).join('') + '</div>' + (rows.length > 80 ? '<p class="xs muted">Menampilkan 80 dari ' + rows.length + '. Pakai kotak cari untuk yang lain.</p>' : '');
   };
-  var belum = st.po.filter(function (p) { return p.status === 'aktif' && !T(p).potong; }).length;
   var hari = 0; st.potong.forEach(function (r) { if (r.tanggal === todayYmd()) hari += r.total; });
-  return '<div class="head"><div class="grow"><h1>Potong</h1><div class="sub">Pilih PO, lalu isi jumlah hasil potong per ukuran.</div></div></div>' +
-    miniKpi([['Belum dipotong', nf(belum), 'PO menunggu', belum > 0], ['Hari ini', nf(hari), 'pcs dipotong']]) +
-    '<div class="tools">' + searchBox('q', 'Cari barang atau nomor PO') + '</div><div id="list">' + S.listFn() + '</div>';
+  return '<div class="head"><div class="grow"><h1>Potong</h1><div class="sub">Hanya PO yang masih perlu dipotong. Pilih PO, lalu isi jumlah hasil potong per ukuran.</div></div></div>' +
+    miniKpi([['Perlu dipotong', nf(nPerlu), 'PO menunggu', nPerlu > 0], ['Hari ini', nf(hari), 'pcs dipotong']]) +
+    '<div class="tools">' + seg('pkerja', [['perlu', 'Perlu dipotong'], ['sudah', 'Sudah dipotong']], sub) + searchBox('q', 'Cari barang atau nomor PO') + '</div><div id="list">' + S.listFn() + '</div>';
 };
 VIEWS['p-riwayat'] = function () {
   var st = S.state;
@@ -4455,29 +4582,78 @@ VIEWS['p-riwayat'] = function () {
         '<span class="n">' + nf(r.total) + '</span>' + (r.upahId ? '<span class="chip ok">Dibayar</span>' : '<button class="icon-btn" aria-label="Hapus" data-a="del" data-s="Potong" data-id="' + esc(r.id) + '">' + ic('trash', 's') + '</button>') + '</div>';
     }).join('') : emptyBox('Belum ada catatan potong.')) + '</div></div>';
 };
-function upahSaya(judul) {
-  var st = S.state; var items = unpaidOf(me()).sort(function (a, b) { return String(a.tanggal) < String(b.tanggal) ? 1 : -1; });
-  var slips = st.upah.slice().sort(function (a, b) { return String(a.tanggal) + String(a.dibuat) < String(b.tanggal) + String(b.dibuat) ? 1 : -1; });
-  return '<div class="card flush"><div class="sec-h"><h3>' + judul + '</h3><span class="b num">' + rp(sumUpah(items)) + '</span></div><div class="list">' + (items.length ? items.slice(0, 80).map(function (i) {
-    return '<div class="item"><span class="grow"><span class="t">' + esc(poNama(i.poId)) + '</span><br><span class="d">' + esc(i.ref) + ' · ' + tgl(i.tanggal) + ' · ' + nf(i.total) + ' pcs × ' + rp(i.rate) + '</span></span><span class="b num">' + rp(i.total * i.rate) + '</span></div>';
-  }).join('') : emptyBox('Tidak ada upah yang belum dibayar.')) + '</div></div>' +
-    '<div class="card flush"><div class="sec-h"><h3>Slip upah</h3></div><div class="list">' + (slips.length ? slips.slice(0, 60).map(upahRow).join('') : emptyBox('Belum ada slip upah.')) + '</div></div>';
+/* Upah di aplikasi tukang: slip per minggu (tampilan dan cetakannya sama dengan slip yang dicetak owner),
+   daftar yang belum dibayar, dan catatan pembayaran dari owner. */
+function upahSaya() {
+  var st = S.state; var sub = S.sub.upahku || 'minggu';
+  var h = '<div class="tools">' + seg('upahku', [['minggu', 'Slip mingguan'], ['belum', 'Belum dibayar'], ['bayar', 'Pembayaran']], sub) + '</div>';
+  if (sub === 'belum') {
+    var items = unpaidOf(me()).sort(function (a, b) { return String(a.tanggal) < String(b.tanggal) ? 1 : -1; });
+    return h + '<div class="card flush"><div class="sec-h"><h3>Belum dibayar</h3><span class="b num">' + rp(sumUpah(items)) + '</span></div><div class="list">' + (items.length ? items.slice(0, 80).map(function (i) {
+      return '<div class="item"><span class="grow"><span class="t">' + esc(poNama(i.poId)) + '</span><br><span class="d">' + esc(i.ref) + ' · ' + tgl(i.tanggal) + ' · ' + nf(i.total) + ' pcs × ' + rp(i.rate) + '</span></span><span class="b num">' + rp(i.total * i.rate) + '</span></div>';
+    }).join('') : emptyBox('Tidak ada upah yang belum dibayar.')) + '</div></div>';
+  }
+  if (sub === 'bayar') {
+    var slips = st.upah.slice().sort(function (a, b) { return String(a.tanggal) + String(a.dibuat) < String(b.tanggal) + String(b.dibuat) ? 1 : -1; });
+    return h + '<div class="card flush"><div class="sec-h"><h3>Pembayaran dari owner</h3></div><div class="list">' + (slips.length ? slips.slice(0, 60).map(upahRow).join('') : emptyBox('Belum ada catatan pembayaran.')) + '</div></div>';
+  }
+  return h + slipMingguSaya();
+}
+function slipMingguSaya() {
+  slipPasangCss();
+  var st = S.state; var u = me(); var f = S.f; var ada = {};
+  if (u.divisi === 'jahit') st.setor.forEach(function (s) { if (s.maklonId === u.id && s.status === 'diterima') ada[coreMingguId(s.tanggal)] = 1; });
+  else st.potong.forEach(function (r) { if (r.userId === u.id) ada[coreMingguId(r.tanggal)] = 1; });
+  var kini = coreMingguId(todayYmd());
+  if (!corePeriode(f.umPeriode)) {
+    /* minggu ini kalau sudah ada pekerjaannya; kalau belum, minggu terakhir yang ada pekerjaannya */
+    var urut = Object.keys(ada).filter(function (id) { return corePeriode(id); }).sort(function (a, b) { return corePeriode(a).start < corePeriode(b).start ? 1 : -1; });
+    f.umPeriode = ada[kini] ? kini : (urut[0] || kini);
+  }
+  var per = corePeriode(f.umPeriode);
+  var opsi = daftarPeriode(Object.keys(ada)); if (!opsi.some(function (o) { return o[0] === f.umPeriode; })) opsi.unshift([f.umPeriode, labelPeriode(f.umPeriode)]);
+  var hasil = slipUpahMingguan(u, per.start, per.end);
+  var h = '<div class="tools"><select data-c="umPeriode" style="flex:1 1 220px" aria-label="Pilih minggu">' + opsi.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === f.umPeriode ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>' +
+    '<button class="btn" data-a="umRentang">Rentang lain</button><button class="btn pri" data-a="slipDokCetak"' + (hasil.n ? '' : ' disabled') + '>' + ic('down') + 'Cetak A4</button></div>';
+  if (!hasil.n) { S.slipDok = []; return h + '<div class="card">' + emptyBox('Tidak ada pekerjaan Anda pada ' + tglSlip(per.start) + ' — ' + tglSlip(per.end) + '. Pilih minggu lain di atas (yang bertanda ✓ ada isinya).') + '</div>'; }
+  S.slipDok = [hasil.model];
+  h += '<div class="card row wrap"><span class="grow"><span class="label">' + esc(tglSlip(per.start) + ' — ' + tglSlip(per.end)) + ' · ' + hasil.n + ' catatan</span><br><span class="total-big">' + rp(hasil.bersih) + '</span><br><span class="small muted">' +
+    (hasil.belum ? hasil.belum + ' catatan belum ditandai dibayar oleh owner.' : 'Semua catatan minggu ini sudah ditandai dibayar.') + (hasil.tanpaHarga ? ' ' + hasil.tanpaHarga + ' catatan belum diberi harga oleh owner, jadi upahnya masih Rp 0.' : '') + '</span></span></div>';
+  try { h += '<div class="slip-pratinjau">' + slipLembar([hasil.model]) + '</div>'; } catch (e) { h += '<div class="note bad">' + esc(e.message) + '</div>'; }
+  return h + (st.trimmed ? '<p class="xs muted">Pekerjaan pada PO yang sudah lama selesai dan sudah dibayar tidak dimuat di perangkat ini.</p>' : '');
 }
 VIEWS['p-upah'] = function () {
-  return '<div class="head"><div class="grow"><h1>Upah potong</h1><div class="sub">Dihitung dari jumlah pcs yang Anda catat.</div></div></div>' + upahSaya('Belum dibayar');
+  return '<div class="head"><div class="grow"><h1>Upah potong</h1><div class="sub">Dihitung dari jumlah pcs yang Anda catat. Slip dibuat per minggu, Senin sampai Minggu.</div></div></div>' + upahSaya();
 };
 
 /* ---------------- MAKLON JAHIT ---------------- */
 VIEWS['j-kerja'] = function () {
-  var st = S.state;
+  var st = S.state; var sub = S.sub.jkerja === 'selesai' ? 'selesai' : 'jalan';
   var rows = st.po.map(function (po) { return { po: po, x: (po.agg && po.agg.saya) || { kirim: 0, terima: 0, reject: 0, diajukan: 0, sisa: 0, target: '' } }; });
-  var jalan = rows.filter(function (r) { return r.x.sisa > 0 || r.x.diajukan > 0; });
+  /* sedang dikerjakan = PO masih aktif dan masih ada bahan di tangan atau setoran yang belum dihitung QC.
+     Sisanya (sudah disetor semua, atau PO-nya sudah ditutup owner) pindah ke bagian Selesai. */
+  var sedang = function (r) { return r.po.status === 'aktif' && (r.x.sisa > 0 || r.x.diajukan > 0); };
+  var jalan = rows.filter(sedang);
   jalan.sort(function (a, b) { return String(a.x.target || '9') < String(b.x.target || '9') ? -1 : 1; });
   var sisa = 0, cek = 0; jalan.forEach(function (r) { sisa += pos(r.x.sisa); cek += pos(r.x.diajukan); });
   var upah = sumUpah(unpaidOf(me()));
   var cell = function (n, l, c) { return '<div class="stg ' + c + (n ? '' : ' z') + '"><span class="n">' + nf(n) + '</span><span class="l">' + l + '</span></div>'; };
-  return '<div class="head"><div class="grow"><h1>Kerjaan saya</h1><div class="sub">Bahan yang sedang Anda pegang dan setorannya.</div></div></div>' +
+  var kepala = '<div class="head"><div class="grow"><h1>Kerjaan saya</h1><div class="sub">Hanya bahan yang sedang Anda pegang. Yang sudah selesai ada di bagian Selesai.</div></div></div>' +
     miniKpi([['Sisa', nf(sisa), 'pcs belum disetor'], ['Menunggu QC', nf(cek), 'pcs belum dihitung', cek > 0], ['Upah', rp(upah), 'belum dibayar', false, true]]) +
+    '<div class="tools">' + seg('jkerja', [['jalan', 'Sedang dikerjakan'], ['selesai', 'Selesai']], sub) + '</div>';
+  if (sub === 'selesai') {
+    var akhir = {};
+    var catat = function (r) { if (r.maklonId === me().id && String(r.tanggal || '') > (akhir[r.poId] || '')) akhir[r.poId] = String(r.tanggal || ''); };
+    st.kirim.forEach(catat); st.setor.forEach(catat);
+    var beres = rows.filter(function (r) { return !sedang(r) && (r.x.kirim > 0 || r.x.terima > 0); });
+    beres.sort(function (a, b) { return (akhir[a.po.id] || '') < (akhir[b.po.id] || '') ? 1 : -1; });
+    return kepala + '<div class="card flush"><div class="list">' + (beres.length ? beres.slice(0, 150).map(function (r) {
+      var po = r.po, x = r.x;
+      return '<div class="item">' + thumb(po) + '<span class="grow"><span class="t">' + esc(po.nama) + '</span><br><span class="d">' + poMeta(po) + '</span><br><span class="d">Diterima ' + nf(x.kirim) + ' · disetor ' + nf(x.terima) + (x.reject ? ' · reject ' + nf(x.reject) : '') +
+        (akhir[po.id] ? ' · terakhir ' + tgl(akhir[po.id]) : '') + '</span></span>' + (x.sisa > 0 ? '<span class="chip">PO ditutup</span>' : '<span class="chip ok">Selesai</span>') + '</div>';
+    }).join('') : emptyBox('Belum ada kerjaan yang selesai.')) + '</div></div>';
+  }
+  return kepala +
     (jalan.length ? '<div class="grid g-cards">' + jalan.map(function (r) {
       var po = r.po, x = r.x;
       return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + poMeta(po) + '</div>' +
@@ -4511,8 +4687,8 @@ VIEWS['j-slip'] = function () {
 VIEWS['j-upah'] = function () {
   var st = S.state; var tunggu = 0;
   st.setor.forEach(function (s) { if (s.status === 'diajukan') tunggu += s.total; });
-  return '<div class="head"><div class="grow"><h1>Upah jahit</h1><div class="sub">Upah dihitung dari slip setor, setelah QC menghitung barangnya.</div></div></div>' +
-    (tunggu ? '<div class="note">' + nf(tunggu) + ' pcs masih menunggu dihitung QC, jadi belum masuk hitungan upah.</div>' : '') + upahSaya('Belum dibayar');
+  return '<div class="head"><div class="grow"><h1>Upah jahit</h1><div class="sub">Upah dihitung dari slip setor, setelah QC menghitung barangnya. Slip dibuat per minggu, Senin sampai Minggu.</div></div></div>' +
+    (tunggu ? '<div class="note">' + nf(tunggu) + ' pcs masih menunggu dihitung QC, jadi belum masuk hitungan upah.</div>' : '') + upahSaya();
 };
 
 /* ---------------- QC ---------------- */
@@ -5195,7 +5371,8 @@ document.addEventListener('focusout', function () {
   if (S.pending) setTimeout(function () { if (S.pending && !inputAktif()) render(); }, 80);
 });
 document.addEventListener('keydown', function (ev) {
-  if (!S.state && S.gate.user && !sheets.length) {
+  if (!S.state && !sheets.length && ev.key === 'Enter' && gateDepan()) { A.gateBuka(); return; }
+  if (!S.state && S.gate.user && !sheets.length && !gateDepan()) {
     if (/^\d$/.test(ev.key)) pinKey(ev.key); else if (ev.key === 'Backspace') pinKey('back'); else if (ev.key === 'Enter') A.pinGo();
     return;
   }
@@ -5204,28 +5381,72 @@ document.addEventListener('keydown', function (ev) {
 
 window.addEventListener('hashchange', function () {
   if (!Api.rehash()) return;
+  if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); }
   S.token = bacaToken(); S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; closeAll(); boot();
 });
 
-function boot() {
+/* nama yang terakhir masuk di perangkat ini langsung dipilih, supaya tinggal memasukkan PIN */
+function pilihTerakhir() {
+  var b = S.boot; if (!b || b.needSetup || S.gate.user) return;
+  var last = LS.get(lastKey());
+  if (last) S.gate.user = b.users.filter(function (u) { return u.id === last; })[0] || null;
+}
+
+/* Membuka aplikasi. Urutannya dibuat supaya layar tidak menunggu server:
+   1. ada salinan data terakhir untuk sesi ini -> langsung tampil, server ditanya di belakang layar;
+   2. belum masuk tetapi daftar nama pernah diambil -> layar masuk langsung tampil, daftar disegarkan di belakang layar;
+   3. selain itu -> layar memuat seperti biasa. */
+var bootKe = 0;
+function boot(snap) {
   if (Api.mode() === 'demo' && window.PK_HOSTED) { S.gate.loading = false; S.gate.bootErr = ''; S.gate.needLink = true; S.boot = null; render(); return; }
-  S.gate.needLink = false;
-  S.gate.loading = true; S.gate.bootErr = ''; render();
+  S.gate.needLink = false; S.gate.bootErr = ''; S.gate.luring = '';
+  var ke = ++bootKe;
+  if (snap && S.token) {
+    S.gate.loading = false;
+    applyState(snap.state, snap.at || 1);
+    render(); tanda('pk-tampil'); startSync();
+    sync(true, Date.now() - snap.at < SNAP_SEGAR);
+    return;
+  }
+  var tersimpan = S.token ? null : bacaBoot();
+  var dilukis = !!tersimpan;                      /* layar masuk sudah digambar dari simpanan perangkat */
+  if (tersimpan) { S.boot = tersimpan; S.gate.loading = false; pilihTerakhir(); }
+  else S.gate.loading = true;
+  render(); if (!S.gate.loading || gateDepan()) tanda('pk-tampil');
+  var kirim = S.token;
   var payload = { token: S.token }; if (S.wantAll) payload.semua = true;
   if (Api.div()) payload.divisi = Api.div();
   Api.call('bootstrap', payload).then(function (res) {
-    S.gate.loading = false; S.boot = res;
+    if (ke !== bootKe) return;                    /* sudah ada pemuatan yang lebih baru */
+    tanda('pk-server');
+    simpanBoot(res);
+    /* orangnya sudah masuk selagi daftar nama disegarkan: sesinya tidak disentuh */
+    if (S.state || S.token !== kirim) { S.boot = res; return; }
+    var sedangPin = !!S.gate.user;
+    S.gate.loading = false; S.gate.luring = ''; S.boot = res;
     /* jendela yang dikunci ke satu divisi tidak dipakai masuk oleh divisi lain; sesi jendela lain tidak disentuh */
     if (res.state && Api.div() && res.state.me.divisi !== Api.div()) { res.state = null; S.token = ''; LS.del(tokenKey()); LS.del(lastKey()); }
     if (Api.mode() === 'demo' && res.needSetup && !LS.get('pk_demo_seeded')) { seedDemo(); return; }
     if (res.state) { S.token = res.token; if (LS.get(tokenKey()) !== S.token) LS.set(tokenKey(), S.token); applyState(res.state); startSync(); }
     else {
-      if (S.token) { S.token = ''; LS.del(tokenKey()); }
-      var last = LS.get(lastKey());
-      if (last && !res.needSetup) S.gate.user = res.users.filter(function (u) { return u.id === last; })[0] || null;
+      if (S.token) { S.token = ''; LS.del(tokenKey()); hapusSnap(); }
+      if (res.needSetup) { S.gate.user = null; S.gate.pin = ''; }
+      else if (sedangPin) {
+        /* nama yang sedang dipilih masih ada: layar PIN tidak digambar ulang supaya ketikan tidak terganggu */
+        var id = S.gate.user.id; var masih = res.users.filter(function (u) { return u.id === id; })[0] || null;
+        if (masih && dilukis) { S.gate.user = masih; return; }
+        S.gate.user = masih; if (!masih) S.gate.pin = '';
+      }
+      else if (!dilukis) pilihTerakhir();
     }
-    render();
-  }, function (e) { S.gate.loading = false; S.gate.bootErr = (e && e.message) || 'Gagal memuat.'; render(); });
+    render(); tanda('pk-tampil');
+  }, function (e) {
+    if (ke !== bootKe || S.state) return;
+    S.gate.loading = false;
+    /* daftar nama dari simpanan tetap ditampilkan; cukup diberi tahu bahwa server belum terhubung */
+    if (dilukis) S.gate.luring = (e && e.message) || 'Server tidak bisa dihubungi.'; else S.gate.bootErr = (e && e.message) || 'Gagal memuat.';
+    if (!S.gate.sending) render();
+  });
 }
 
 /* Data contoh supaya mode coba langsung menunjukkan alurnya. Semua nama di sini karangan. */
@@ -5310,12 +5531,36 @@ function seedDemo() {
   boot();
 }
 
+/* Versi baru aplikasi diambil di belakang layar oleh sw.js. Begitu siap: di layar masuk langsung dipakai,
+   di dalam aplikasi muncul baris kecil "Versi baru siap" supaya isian yang sedang diketik tidak hilang. */
+function versiBaruSiap() {
+  if (S.versiBaru) return; S.versiBaru = true;
+  if (!S.state && !S.gate.pin && !S.gate.sending && !sheets.length) {
+    var baru = true;
+    try { baru = !window.sessionStorage.getItem('pk_muat'); window.sessionStorage.setItem('pk_muat', '1'); } catch (e) {}
+    if (baru) { location.reload(); return; }
+  }
+  if (S.state && !inputAktif() && !sheets.length) render();
+}
+A.muatVersi = function () { location.reload(); };
+if (window.PK_HOSTED && 'serviceWorker' in navigator) {
+  try {
+    navigator.serviceWorker.addEventListener('message', function (ev) {
+      var d = ev.data; if (!d || d.pk !== 'versi-baru') return;
+      /* kabar yang membawa nomor rakitan hanya berlaku kalau halaman ini memang rakitan yang lain */
+      if (d.rakitan && d.rakitan === window.PK_BUILD) return;
+      versiBaruSiap();
+    });
+  } catch (e) {}
+}
+
 /* mulai: baca dulu simpanan perangkat (IndexedDB), baru tentukan divisi, sambungan, dan sesi */
 LS.init(function () {
   Api.init();
+  if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); }
   S.token = bacaToken();
   muatGambarTersimpan();
-  boot();
+  bacaSnap(function (snap) { boot(snap); });
 });
 
 })();
