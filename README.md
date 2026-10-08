@@ -10,6 +10,7 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - `src/reconcile-legacy.js`: pratinjau pemulihan hubungan sumber dan jembatan bukti pembayaran lama, dengan sidik SHA-256.
 - `src/migration-actions.js`: aksi owner untuk pratinjau, penerapan, dan pemulihan cadangan jurnal.
 - `src/history-corrections.js`: koreksi jumlah fisik riwayat oleh owner dengan jejak perubahan; sumber pembayaran tetap utuh.
+- `src/auto-completion.js`: penutupan otomatis PO setelah tujuh hari sejak produksi terverifikasi tuntas.
 - `index.html`: aplikasi browser, termasuk salinan hasil build core dan konverter. UI tetap diedit di file ini, di luar blok `CORE` sampai sebelum `UI bagian 1`.
 - `apps-script/Core.gs`: hasil build core dan konverter yang sama untuk project Google Apps Script.
 - `apps-script/Server.gs`: adaptor Google Sheets dari project Apps Script Soldier Produksi yang dibaca pada 8 Oktober 2026; memuat endpoint, pemetaan kolom, lock, cache, dan PDF. Tidak memuat ID spreadsheet, deployment, atau kredensial.
@@ -58,6 +59,16 @@ Pada PO aktif yang masih ditandai perlu pemeriksaan, owner dapat memilih **Korek
 Koreksi mengubah jumlah fisik yang ditampilkan dan diperiksa pada alur produksi. Baris potong/penugasan asli, slip pembayaran, tarif, dan perhitungan upah historis tidak ditulis ulang. Koreksi tidak membuat upah tambahan dan tidak menandai pemeriksaan PO selesai; hubungan hitung fisik atau QC yang masih hilang tetap memerlukan bukti sumber. Jumlah yang belum diketahui dibiarkan seperti semula sampai owner mengisinya.
 
 ## Sambungan ke data pusat
+
+### PO tuntas otomatis selesai setelah tujuh hari
+
+PO aktif yang seluruh produksi, QC, dan perbaikannya sudah tuntas mendapat waktu `tuntasPada` dari server. Setelah **7 × 24 jam**, PO pindah ke **Selesai** saat aplikasi mengambil atau menyinkronkan data. Riwayat potong, jahit, QC, gudang, dan pembayaran tetap tersimpan. Pemeriksaan dilakukan kembali dengan data terbaru di dalam lock sebelum status diubah; PO yang tertahan atau sedang dalam pemulihan riwayat tidak ditutup otomatis.
+
+PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali dikenali oleh versi ini. Membuka kembali PO mengulang masa tujuh hari; pekerjaan yang belum tuntas atau masalah sumber membatalkan hitungan sebelumnya. Owner tetap dapat menutup PO secara manual seperti sebelumnya. Kartu dan detail PO memperlihatkan status dengan warna serta tulisan, termasuk tanggal nonaktif otomatis dalam WIB.
+
+### Pemuatan aplikasi
+
+Proses masuk tidak lagi membaca ulang pengaturan dan cache tabel yang sama berkali-kali. Perhitungan workflow dipakai bersama oleh ringkasan PO. Salinan sesi lokal juga dipakai saat membuka ulang aplikasi Apps Script, dengan pemeriksaan sesi/versi/divisi dan sinkronisasi ke server. Pembacaan penyimpanan lokal mempunyai batas waktu agar aplikasi tetap membuka layar masuk bila penyimpanan perangkat macet. PIN tetap diperiksa di server sebelum sesi baru dapat membuka data.
 
 Browser dapat memakai `google.script.run.api(...)` saat disajikan oleh Apps Script, atau mengirim aksi ke web app Google Apps Script berakhiran `/exec`. Data pusat dirancang disimpan di Google Sheets oleh adaptor server yang sudah ada. Mode coba memakai penyimpanan perangkat.
 

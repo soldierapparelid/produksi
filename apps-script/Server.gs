@@ -14,7 +14,8 @@ function pkStore_() {
   if (PK_STORE_) return PK_STORE_;
   var props = PropertiesService.getScriptProperties();
   var ss = null; var tz = null;
-  var cache = {}; var depth = 0; var dirty = false; var ver = null; var kotor = {};
+  var cache = {}; var cacheMiss = {}; var depth = 0; var dirty = false; var ver = null; var kotor = {};
+  var settingsReadInLock = false; var settingsNeedsFlush = false;
   var sc = null; var scMati = false;
   function versiTab(name) { return String(pkProps_()['v_' + name] || '0'); }
   function kunciCache(name, v) { return 'pk3|' + pkSchema_() + '|' + String(pkProps_().ve || '0') + '|' + name + '|' + v; }
@@ -25,11 +26,14 @@ function pkStore_() {
   }
   function dariCache(names) {
     var c = lemari(); if (!c) return;
-    names = names.filter(function (n) { return SCHEMA[n] && !cache[n] && n !== 'Gambar'; });
+    names = names.filter(function (n) { return SCHEMA[n] && !cache[n] && !cacheMiss[n] && n !== 'Gambar'; });
     if (!names.length) return;
     try {
       var kunci = {}; names.forEach(function (n) { kunci[n] = kunciCache(n, versiTab(n)); });
       var meta = c.getAll(names.map(function (n) { return kunci[n]; })) || {};
+      /* A miss in this batch falls back to Sheets. Do not repeat the same
+         metadata RPC for each subsequent load in this execution/lock. */
+      names.forEach(function (n) { cacheMiss[n] = true; });
       var bagian = []; var jumlah = {};
       names.forEach(function (n) { var m = Number(meta[kunci[n]]); if (m >= 1 && m <= 40) { jumlah[n] = m; for (var i = 0; i < m; i++) bagian.push(kunci[n] + '|' + i); } });
       if (!bagian.length) return;
@@ -143,7 +147,11 @@ function pkStore_() {
     range.setNumberFormats(data.map(function () { return fmt; }));
     range.setValues(data.map(function (o) { return toArray(t, o, null); }));
     data.forEach(function (o, i) { t.rows.push(o); t.rowNo[o[k]] = start + i; });
-    t.last += data.length; dirty = true; kotor[name] = 1;
+    t.last += data.length; changed(name);
+  }
+  function changed(name) {
+    dirty = true; kotor[name] = 1;
+    if (name === 'Pengaturan') { settingsReadInLock = false; settingsNeedsFlush = true; }
   }
   function version() {
     if (ver === null) ver = Number(pkProps_().ver || 0);
@@ -163,6 +171,7 @@ function pkStore_() {
       names = names || [];
       names.forEach(function (name) { if (!SCHEMA[name]) throw new Error('Tabel tidak dikenal: ' + name); });
       SpreadsheetApp.flush();
+      settingsNeedsFlush = false;
       /* A hard execution timeout may skip lock.finally and its version update.
          Remove the durable tables' old cache metadata now so a cold request
          cannot mistake the pre-migration snapshot for the flushed Sheets. */
@@ -171,7 +180,7 @@ function pkStore_() {
         if (!persistent) throw new Error('Cache belum dapat disegarkan. Coba pemulihan kembali sebelum melanjutkan.');
         names.forEach(function (name) { persistent.remove(kunciCache(name, versiTab(name))); });
       }
-      names.forEach(function (name) { delete cache[name]; load(name, true); });
+      names.forEach(function (name) { if (name === 'Pengaturan') settingsReadInLock = false; delete cache[name]; load(name, true); });
     },
     /* A migration journal contains schema fields only. Refuse layouts whose
        extra data could otherwise disappear when source IDs are replaced. */
@@ -208,7 +217,7 @@ function pkStore_() {
       range.setNumberFormats(fmtRow(t.head));
       range.setValues([toArray(t, next, base)]);
       for (var field in next) obj[field] = next[field];
-      dirty = true; kotor[name] = 1;
+      changed(name);
     },
     remove: function (name, id) {
       var t = load(name, true); var k = keyOf(name); var r = t.rowNo[id]; if (!r) return;
@@ -216,7 +225,7 @@ function pkStore_() {
       t.rows = t.rows.filter(function (x) { return x[k] !== id; });
       delete t.rowNo[id];
       for (var key in t.rowNo) if (t.rowNo[key] > r) t.rowNo[key]--;
-      t.last--; t.max--; dirty = true; kotor[name] = 1;
+      t.last--; t.max--; changed(name);
     },
     replaceAll: function (name, list) {
       var t = load(name, true); var k = keyOf(name);
@@ -237,11 +246,24 @@ function pkStore_() {
       }
       t.rows = data; t.rowNo = {}; data.forEach(function (o, i) { t.rowNo[o[k]] = i + 2; });
       t.last = data.length + 1; t.max = t.sh.getMaxRows(); t.ringan = false; cache[name] = t;
-      dirty = true; kotor[name] = 1;
+      changed(name);
     },
     getSettings: function () {
       var out = {}; load('Pengaturan').rows.forEach(function (r) { out[r.key] = coreParseJSON(r.value, r.value); });
       return out;
+    },
+    /* A read-only pending-migration check must bypass ScriptCache, but need not
+       flush writes or invalidate that cache. Within one script lock its physical
+       read is reusable until a settings mutation. Unlocked requests always read
+       Sheets again. Durable migration checkpoints retain their separate contract. */
+    getMigrationStatusFresh: function () {
+      if (!(depth > 0 && settingsReadInLock)) {
+        if (settingsNeedsFlush) { SpreadsheetApp.flush(); settingsNeedsFlush = false; }
+        delete cache.Pengaturan;
+        load('Pengaturan', true);
+        settingsReadInLock = depth > 0;
+      }
+      return PK_STORE_.getSettings().legacyMigrationStatus;
     },
     setSettings: function (obj) {
       PK_STORE_.validateRows('Pengaturan', Object.keys(obj).map(function (k) { return { key: k, value: JSON.stringify(obj[k]) }; }));
@@ -256,7 +278,7 @@ function pkStore_() {
       if (depth > 0) return fn();
       var lk = LockService.getScriptLock();
       try { lk.waitLock(25000); } catch (e) { throw new Error('Server sedang sibuk. Coba lagi beberapa detik lagi.'); }
-      depth = 1; cache = {}; dirty = false; kotor = {};
+      depth = 1; cache = {}; cacheMiss = {}; dirty = false; kotor = {}; settingsReadInLock = false; settingsNeedsFlush = false;
       PK_PROPS_ = null; var pv = pkProps_();
       ver = Number(pv.ver || 0);
       try { return fn(); }
@@ -279,12 +301,12 @@ function pkStore_() {
           }
           if (galatSimpan) throw galatSimpan;
         }
-        finally { depth = 0; dirty = false; lk.releaseLock(); }
+        finally { depth = 0; dirty = false; settingsReadInLock = false; settingsNeedsFlush = false; lk.releaseLock(); }
       }
     },
     version: version,
     fresh: function (name) { load(name, true); },
-    ensureAll: function () { Object.keys(SCHEMA).forEach(ensure); cache = {}; },
+    ensureAll: function () { Object.keys(SCHEMA).forEach(ensure); cache = {}; cacheMiss = {}; settingsReadInLock = false; },
     imgGet: function (ids) {
       var c = lemari(); var out = {}; if (!c || !ids.length) return out;
       try { var awal = 'pkg|' + String(pkProps_().ve || '0') + '|'; var got = c.getAll(ids.map(function (i) { return awal + i; })) || {}; ids.forEach(function (i) { var v = got[awal + i]; if (typeof v === 'string') out[i] = v; }); } catch (e) {}
