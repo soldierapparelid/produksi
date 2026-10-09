@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.10';
+var APP_VERSION = '1.5.11';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -103,7 +103,8 @@ var DEFAULT_SETTINGS = {
   stokMerah: 1,           /* saldo bahan di bawah angka ini: kritis */
   stokMulai: '',          /* pemakaian potong sebelum tanggal ini tidak mengurangi stok (stok pernah dihitung ulang dari nol) */
   bahanSembunyi: [],      /* nama bahan yang tidak ditampilkan lagi di daftar stok */
-  poSembunyi: []          /* id PO selesai/batal yang dihapus dari daftar (hanya disembunyikan) */
+  poSembunyi: [],         /* id PO selesai/batal yang diarsipkan (keluar dari daftar, tampil di tab Arsip) */
+  poBuang: []             /* id PO selesai/batal yang dihapus dari aplikasi; barisnya tetap karena punya catatan produksi */
 };
 
 /* ---------- util ---------- */
@@ -747,6 +748,7 @@ function createCore(store, env) {
     out.stokMulai = coreTglOk(out.stokMulai);
     if (!(out.bahanSembunyi instanceof Array)) out.bahanSembunyi = [];
     if (!(out.poSembunyi instanceof Array)) out.poSembunyi = [];
+    if (!(out.poBuang instanceof Array)) out.poBuang = [];
     return out;
   }
 
@@ -2172,6 +2174,30 @@ function createCore(store, env) {
     st.poSembunyi = list; store.setSettings(st);
     return { ok: true, jumlah: list.length };
   };
+  /* Hapus PO selesai/batal. PO yang belum punya catatan produksi benar-benar dihapus. PO yang sudah punya catatan
+     potong, jahit, QC, atau upah tidak dibuang barisnya (upah dan stok yang sudah tercatat bergantung padanya):
+     id-nya masuk pengaturan poBuang sehingga tidak tampil lagi di mana pun, termasuk di Arsip. buang:false membatalkan. */
+  actions.buangPO = function (p) {
+    var me = auth(p); mustAdmin(me);
+    if (store.fresh) store.fresh('PO');
+    var ids = (p.ids instanceof Array ? p.ids : [p.id]).map(function (x) { return String(x || ''); }).filter(Boolean);
+    if (!ids.length || ids.length > 1000) fail('Pilih PO yang akan dihapus.');
+    var st = settings(), list = st.poBuang.slice(), dihapus = 0, disimpan = 0, hilang = {};
+    if (p.buang === false) list = list.filter(function (x) { return ids.indexOf(x) < 0; });
+    else {
+      /* periksa semuanya dulu, supaya satu PO aktif tidak meninggalkan sebagian terhapus */
+      var rows = ids.map(function (id) { var rec = findRow('PO', id); if (rec && rec.status === 'aktif') fail('PO ' + (rec.noPO || rec.nama) + ' masih aktif. Tandai selesai atau batal dahulu, baru dihapus.'); return rec; });
+      ids.forEach(function (id, i) {
+        if (!rows[i]) { hilang[id] = 1; return; }
+        if (!poDipakai(id)) { if (findRow('Gambar', id)) store.remove('Gambar', id); store.remove('PO', id); hilang[id] = 1; dihapus++; return; }
+        disimpan++; if (list.indexOf(id) < 0) list.push(id);
+      });
+    }
+    list = list.filter(function (x) { return !hilang[x]; });
+    if (JSON.stringify(list).length > 45000) fail('Daftar PO yang dihapus sudah terlalu panjang.');
+    st.poBuang = list; st.poSembunyi = st.poSembunyi.filter(function (x) { return !hilang[x]; }); store.setSettings(st);
+    return { ok: true, dihapus: dihapus, disimpan: disimpan, jumlah: list.length };
+  };
   /* Cadangan untuk owner: isi tiap tabel apa adanya, tanpa PIN dan token. Diminta per tabel (dan dipotong per
      bagian) supaya tiap jawaban kecil; perangkat owner yang merangkainya menjadi satu berkas. Hanya membaca. */
   var CADANGAN_RAHASIA = { Pegawai: ['pin', 'token', 'gagal', 'kunci'] };
@@ -2589,7 +2615,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
