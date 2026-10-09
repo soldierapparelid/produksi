@@ -109,6 +109,13 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.8:
+
+- **Catat potong mengikuti stok rol:** tombol "Catat potong" pada PO yang bahannya sudah disiapkan langsung membuka persiapan itu (rol dan kilo tidak diketik ulang). Tanpa persiapan, owner memilih rol dari Stok bahan di formulir yang sama: kilo tiap rol terisi dari sisa rol, boleh dikurangi bila hanya dipakai sebagian, dan sisa kiloan / saldo lama bisa ditambahkan. `createPotong` menerima `potong.rencana` dari owner dan menulis persiapan bersama hasil potongnya (id tetap, kiriman ulang tidak menggandakan); "Ketik sendiri" tetap ada untuk bahan di luar stok.
+- **Hapus PO selesai/batal:** PO yang sudah punya catatan produksi tidak dibuang; id-nya masuk pengaturan `poSembunyi` sehingga hilang dari daftar, bisa dikembalikan lewat "Yang dihapus". Catatan potong, jahit, QC, dan upah tidak berubah. PO tanpa catatan tetap dihapus sepenuhnya; PO aktif yang sudah berjalan ditolak.
+- **Daftar PO:** tombol "Semua barang" di jajaran Aktif / Selesai / Batal memuat seluruh PO dan barang yang belum di-PO. Daftar dikelompokkan per seri, barang di daftar produk yang belum punya PO aktif ikut tampil dengan tombol "Buat PO", dan tiap tahap punya warna sendiri (belum dipotong, sudah dipotong, di penjahit, dihitung, QC, selesai, perlu diperiksa, batal).
+- **Pembelian produk:** owner bisa menghapus order dari data lama atau yang masih "Perlu diperiksa" dari daftar (`cancelCommerceRecord` dengan `arsip`). Pembayaran dan penerimaan lamanya tidak dikoreksi atau dihitung ulang; order bisa dikembalikan dengan `restoreCommerceRecord` dari saringan "Dibatalkan".
+
 Mulai 1.5.7:
 
 - **Order pembelian bisa dikoreksi dan dihapus dari daftar.** Order yang dibuat di aplikasi ini boleh diedit walau sudah ada pembayaran atau penerimaan, dengan penjagaan di server: produk tidak boleh diganti, varian yang sudah diterima tidak boleh dihapus atau dikurangi di bawah jumlah yang diterima, total tidak boleh di bawah yang sudah dibayar, dan tanggal order tidak boleh sesudah transaksi pertama. Identitas produk dan supplier yang dibekukan saat order terbit dipertahankan. **Hapus** (owner) adalah pembatalan: dengan `voidAll: true` server mengoreksi semua pembayaran dan penerimaan yang masih berlaku dengan alasan yang sama (termasuk DP awal), lalu membatalkan order dalam satu kunci. Tidak ada baris yang dihapus dari Sheets; order yang dibatalkan hanya tampil lewat saringan status "Dibatalkan". Order dari data lama atau yang masih perlu diperiksa tetap tidak bisa diedit, dan hanya bisa dihapus selama belum ada pembayaran dan penerimaan. Nota penjualan tidak berubah.
