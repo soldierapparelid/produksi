@@ -204,7 +204,25 @@ test('imported and held orders stay fixed, while the owner can remove a native o
  /* sending the same removal again changes nothing; the order cannot be edited or paid any more */
  f.good('cancelCommerceRecord',{...request,voidAll:true});assert.equal(f.raw('CommerceEvent').length,events+3);
  f.bad('saveCommerceOrder',{record:{...gone.record,catatan:'x'},expectedRevision:gone.record.revision},/dibatalkan/);f.bad('appendCommercePayment',{id:'pay03',module:'pembelian',parentId:'order01',expectedRevision:gone.record.revision,tanggal:'2026-10-09',jumlah:1000,metode:'cash'},/dibatalkan/);
-});test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
+});
+test('the owner removes an imported or held order from the list with its old ledger untouched, and can bring it back',()=>{
+ const f=fixture(),b=backup(),p=f.good('previewCommerceImport',{backup:b});f.good('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash});
+ const legacy=f.state().orders.find(o=>o.id==='legacyOrder'),events=f.raw('CommerceEvent').length,request={module:'pembelian',id:'legacyOrder',expectedRevision:legacy.revision,catatan:'dobel dari aplikasi lama',arsip:true};
+ f.bad('cancelCommerceRecord',request,/owner/,'fixture-admin-token-001');f.bad('cancelCommerceRecord',{...request,expectedRevision:'stale'},/berubah/);
+ const gone=f.good('cancelCommerceRecord',request).record;assert.equal(gone.status,'batal');assert.equal(gone.cancelKeepsEvents,true);assert.equal(gone.totalPaid,legacy.totalPaid);assert.equal(gone.totalReceived,legacy.totalReceived);
+ assert.equal(f.raw('CommerceEvent').length,events,'no correction is written against the old ledger');assert.deepEqual(gone.payments,legacy.payments);
+ f.good('cancelCommerceRecord',request);assert.equal(f.raw('CommerceEvent').length,events);
+ f.bad('restoreCommerceRecord',{module:'pembelian',id:'legacyOrder',expectedRevision:gone.revision},/owner/,'fixture-admin-token-001');f.bad('restoreCommerceRecord',{module:'pembelian',id:'legacyOrder',expectedRevision:'stale'},/berubah/);f.bad('restoreCommerceRecord',{module:'nota',id:'legacyOrder',expectedRevision:gone.revision},/Modul/);
+ const back=f.good('restoreCommerceRecord',{module:'pembelian',id:'legacyOrder',expectedRevision:gone.revision}).record;
+ assert.equal(back.cancelled,undefined);assert.equal(back.cancelKeepsEvents,undefined);assert.equal(back.status,legacy.status);assert.equal(back.totalPaid,legacy.totalPaid);assert.equal(back.balance,legacy.balance);assert.equal(back.totalReceived,legacy.totalReceived);
+ assert.equal(back.restoredFrom.reason,'dobel dari aplikasi lama');assert.equal(f.raw('CommerceEvent').length,events);assert.equal(f.good('restoreCommerceRecord',{module:'pembelian',id:'legacyOrder',expectedRevision:back.revision}).record.status,legacy.status);
+ /* the shortcut is for old or held orders only: a native order with payments still needs voidAll, and comes back without them */
+ f.masters();let o=f.good('saveCommerceOrder',{record:f.order({initialPayment:{jumlah:20000,tanggal:'2026-10-08',metode:'transfer'}})}).record;
+ f.bad('cancelCommerceRecord',{module:'pembelian',id:'order01',expectedRevision:o.revision,catatan:'salah',arsip:true},/terlebih dahulu/);
+ o=f.good('cancelCommerceRecord',{module:'pembelian',id:'order01',expectedRevision:o.revision,catatan:'salah',voidAll:true}).record;assert.equal(o.cancelKeepsEvents,undefined);
+ o=f.good('restoreCommerceRecord',{module:'pembelian',id:'order01',expectedRevision:o.revision}).record;assert.equal(o.status,'pending');assert.equal(o.totalPaid,0);assert.equal(o.balance,50000);
+});
+test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
  const f=fixture();f.masters();let a=f.good('saveCommerceOrder',{record:f.order({catatan:'Print fixture'})}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02'})}).record;
  f.h.run(`var originalCommerceEnv=pkEnv_,lastCommercePdf='';pkEnv_=function(){var e=originalCommerceEnv();e.makePdf=function(html){lastCommercePdf=html;return 'fixture-pdf';};return e;};void 0;`);
  const proof={[a.id]:a.revision,[b.id]:b.revision};const pdf=f.good('makeCommercePdf',{module:'pembelian',ids:[a.id,b.id],expectedRevisions:proof});assert.equal(pdf.base64,'fixture-pdf');assert.equal(f.h.run('(lastCommercePdf.match(/<article>/g)||[]).length'),2);assert.equal(f.h.run('lastCommercePdf.includes("Print fixture")'),true);
