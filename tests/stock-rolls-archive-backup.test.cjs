@@ -119,6 +119,25 @@ test('archiving a finished PO keeps every row and only moves it out of the lists
   assert.deepEqual(f.good('arsipPO', { id, arsip: false }), { ok: true, jumlah: 0 }); assert.deepEqual(f.good('getState').settings.poSembunyi, []);
 });
 
+test('deleting a finished PO: an empty one is erased, one with production rows only leaves the app and can come back', () => {
+  const f = fixture(), used = 'buang-po-0001', empty = 'buang-po-0002';
+  f.good('savePOWithRencana', { po: { newId: used, nama: 'Fixture Buang', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M'] }, rencana: { id: 'buang-plan-0001', bahanList: [{ nama: 'Scuba Hitam', qty: 10 }], rol: 1, catatan: '' } });
+  f.h.run("pkStore_().lock(function(){pkStore_().append('PO',{id:'buang-po-0002',noPO:'PO-KOSONG',jenis:'stok',nama:'Fixture Kosong',ukuran:'{}',total:0,status:'batal',dibuat:'2026-10-01T00:00:00.000Z'});});");
+  f.bad('buangPO', { id: used }, /masih aktif/); f.bad('buangPO', { ids: [empty, used] }, /masih aktif/); assert.ok(f.raw('PO').some(r => r.id === empty), 'nothing is erased when one PO of the request is still active');
+  f.bad('buangPO', {}, /Pilih PO/); f.bad('buangPO', { id: empty }, /admin/i, f.cutter);
+  f.good('saveRencanaPotong', { rencana: { id: 'buang-plan-0001', status: 'batal' }, expectedRevision: f.good('getState').rencanaPotong.find(r => r.id === 'buang-plan-0001').revision });
+  f.good('setStatusPO', { id: used, status: 'batal' }); f.good('arsipPO', { ids: [used, empty] });
+  const po = f.raw('PO').length, plans = f.raw('RencanaPotong').length;
+  assert.deepEqual(f.good('buangPO', { ids: [used, empty, 'missing-po-0001'] }), { ok: true, dihapus: 1, disimpan: 1, jumlah: 1 });
+  assert.equal(f.raw('PO').length, po - 1); assert.ok(!f.raw('PO').some(r => r.id === empty)); assert.ok(f.raw('PO').some(r => r.id === used), 'the PO with production rows keeps its row');
+  assert.equal(f.raw('RencanaPotong').length, plans);
+  let s = f.good('getState').settings; assert.deepEqual(s.poBuang, [used]); assert.deepEqual(s.poSembunyi, [used], 'the erased PO also leaves the archive list');
+  assert.deepEqual(f.good('buangPO', { id: used }, f.admin), { ok: true, dihapus: 0, disimpan: 1, jumlah: 1 });
+  assert.deepEqual(f.good('buangPO', { id: used, buang: false }), { ok: true, dihapus: 0, disimpan: 0, jumlah: 0 });
+  s = f.good('getState').settings; assert.deepEqual(s.poBuang, []); assert.deepEqual(s.poSembunyi, [used], 'it is back in the archive');
+  assert.deepEqual(f.good('saveSettings', { settings: { poBuang: ['x'] } }).poBuang, [], 'the list is not edited through the settings form');
+});
+
 test('the backup hands the owner every table as it is, without PINs or session tokens', () => {
   const f = fixture(), first = f.good('getCadangan');
   assert.equal(first.appVersion, f.good('bootstrap').appVersion); assert.ok(first.tabel.includes('PO') && first.tabel.includes('Pegawai') && first.tabel.includes('StokBahan') && first.tabel.includes('CommerceRecord'));

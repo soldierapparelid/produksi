@@ -109,6 +109,12 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.11:
+
+- **Ukuran aktif terlihat:** kartu PO dan rincian PO menampilkan "Ukuran aktif" (ukuran yang dicentang saat PO dibuat; PO lama memakai ukuran yang punya target), dan baris ukuran itu diberi tanda "aktif" di tabel per ukuran.
+- **Penugasan jahit tanpa slip:** setelah menyimpan penugasan, slip tidak lagi dibuka; slip untuk penjahit terbit setelah setorannya dihitung. Kalau masih ada pcs yang belum ditugaskan, formulir dibuka lagi untuk sisa itu supaya bisa langsung memilih penjahit berikutnya (satu ukuran untuk satu penjahit). Slip penugasan tetap tercatat dan bisa dibuka dari Maklon > Slip penugasan.
+- **Hapus PO:** di tab Arsip ada tombol Hapus (`buangPO`). PO yang belum punya catatan produksi dihapus barisnya. PO yang sudah punya catatan potong, jahit, QC, atau upah tidak dibuang barisnya, karena upah dan stok yang sudah tercatat bergantung padanya; id-nya masuk pengaturan `poBuang` dan PO itu tidak tampil lagi di tab mana pun. Bisa dikembalikan lewat "Lihat" di bawah tab Arsip.
+
 Mulai 1.5.10, rol hasil "Rinci rol" yang salah ketik bisa dibetulkan langsung: di kartu Stok bahan, owner mengetuk rolnya lalu mengubah berat (`ubahRinciRol`) atau menghapusnya. Ini hanya untuk rol rincian yang belum dipakai, dicadangkan, atau dikoreksi; selisihnya kembali ke, atau diambil dari, stok yang belum dirinci, sehingga total stok tetap. Rol dari invoice pembelian dan rol yang sudah dipakai tidak berubah lewat jalur ini.
 
 Mulai 1.5.9:
