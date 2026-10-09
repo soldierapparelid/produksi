@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.12';
+var APP_VERSION = '1.5.13';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -584,7 +584,8 @@ function corePayroll(potong, setor, qc, slipUpah, extras) {
     var affected = [], allowed = {}, valid = !!(b.id && b.sourceId && !settlementSeen[b.sourceId] && provenance.baseline === true && provenance.field === 'jahit' && provenance.skuId && provenance.siklus && provenance.entryId && snapshot.id === b.sourceId && snapshot.poId === b.poId && snapshot.maklonId === b.maklonId && b.paymentRef && snapshot.upahId === b.paymentRef);
     settlementSeen[b.sourceId] = true;
     basis.forEach(function (entry) {
-      var key = pool(entry.sourceId, entry.size), list = bySource[key] || [];
+      /* Sisa laporan lama yang dihitung bertahap (imporSumber.sisaDari) tetap mengikuti ikatan sumber asalnya. */
+      var key = pool(entry.sourceId, entry.size), list = (bySource[key] || []).concat(rows.filter(function (r) { return r.imporSumber && r.imporSumber.sisaDari === entry.sourceId && r.size === entry.size && r.sourceId !== entry.sourceId; }));
       if (allowed[key]) valid = false; allowed[key] = entry;
       list.forEach(function (r) { var p = r.imporSumber || {}; affected.push(r); if (r.jenis !== 'jahit' || r.poId !== b.poId || r.pegawaiId !== b.maklonId || r.size !== b.size || p.baseline !== true || String(p.skuId) !== String(provenance.skuId) || String(p.siklus) !== String(provenance.siklus) || r.rate !== coreNum(entry.rate) || r.rate !== coreNum(snapshot.upah)) valid = false; });
     });
@@ -840,7 +841,9 @@ function createCore(store, env) {
   }
   function sourceInLegacySettlement(id) {
     if (!id) return false;
-    return store.read('LegacySettlement').some(function (b) { return coreParseJSON(b.baselineSources, []).some(function (s) { return s.sourceId === id; }); });
+    /* sisa laporan lama yang dihitung bertahap mewarisi ikatan pembayaran sumber asalnya */
+    var row = String(id).indexOf(':') < 0 ? findRow('SlipSetor', String(id)) : null, akar = row ? String(coreMap(row.imporSumber).sisaDari || '') : '';
+    return store.read('LegacySettlement').some(function (b) { return coreParseJSON(b.baselineSources, []).some(function (s) { return s.sourceId === id || (akar && s.sourceId === akar); }); });
   }
   function correctedSource(sheet, id) { return store.read('KoreksiRiwayat').some(function (r) { return r.sheet === sheet && r.rowId === id; }); }
   function sourcePaid(id) { return sourceInLegacySettlement(id) || payroll().some(function (r) { return r.sourceId === id && (r.paidQty > 0 || r.overpaidQty > 0 || r.legacyPaid || r.legacySettlementHold || r.legacySettlementId); }); }
@@ -2015,9 +2018,29 @@ function createCore(store, env) {
       var uk = strictSizes(p.ukuran !== undefined ? p.ukuran : rec.ukuran, activePo, true);
       var rejInput = { rejectUkuran: p.rejectUkuran !== undefined ? p.rejectUkuran : rec.rejectUkuran, reject: p.reject !== undefined ? p.reject : rec.reject };
       var bad = categoryInput(rejInput, 'rejectUkuran', 'reject', activePo, uk);
-      if (frozenPending) {
-        var originalQty = sumMaps([coreMap(rec.ukuran), coreMap(rec.rejectUkuran)]), proposedQty = sumMaps([uk, bad]);
-        Object.keys(sumMaps([originalQty, proposedQty])).forEach(function (size) { if (coreNum(originalQty[size]) !== coreNum(proposedQty[size])) fail('Jumlah laporan lama yang terikat pembayaran harus dipertahankan per ukuran. Rinci hasil baik dan reject atau cocokkan riwayat dahulu.'); });
+      /* Tanggal hitung boleh diisi QC; kalau kosong, tanggal laporan dipertahankan seperti sebelumnya. */
+      if (p.tanggal !== undefined && p.tanggal !== '') {
+        var tanggalHitung = tglOk(p.tanggal);
+        if (!tanggalHitung || coreTambahHari(tanggalHitung, 0) !== tanggalHitung) fail('Tanggal hitung tidak valid.');
+        if (tanggalHitung > coreTambahHari(today(), 1)) fail('Tanggal hitung tidak boleh melewati hari ini.');
+        patch.tanggal = tanggalHitung;
+      }
+      /* Laporan jahit lama yang belum dihitung boleh dihitung bertahap: yang sudah dihitung diterima sekarang,
+         sisanya tetap menunggu sebagai baris tersendiri dengan asal dan ikatan pembayaran yang sama.
+         Jumlah laporan per ukuran tetap utuh: diterima + reject + sisa yang menunggu = laporan semula. */
+      var sumberLama = coreMap(rec.imporSumber), sisaLama = null;
+      var anakId = idOk(rec.id + 's'), anak = anakId ? findRow('SlipSetor', anakId) : null;
+      /* Baris sisa hanya lahir saat laporan asalnya diterima. Kalau laporan asal masih menunggu tetapi baris sisanya
+         sudah ada, itu bekas penyimpanan yang terputus: dibuang dulu, lalu ditulis ulang di bawah bila masih ada sisa. */
+      if (anak && anak.status === 'diajukan' && !anak.diprosesOleh && coreMap(anak.imporSumber).sisaDari === (sumberLama.sisaDari || rec.id)) { store.remove('SlipSetor', anakId); anak = null; }
+      if (frozenPending || (rec.asal === 'lama' && sumberLama.baseline === true && sumberLama.field === 'jahit')) {
+        var originalQty = sumMaps([coreMap(rec.ukuran), coreMap(rec.rejectUkuran)]), proposedQty = sumMaps([uk, bad]), sisa = {};
+        Object.keys(sumMaps([originalQty, proposedQty])).forEach(function (size) {
+          var selisih = coreNum(originalQty[size]) - coreNum(proposedQty[size]);
+          if (selisih < 0 && frozenPending) fail('Jumlah laporan lama yang terikat pembayaran harus dipertahankan per ukuran: hitungan ' + size + ' melebihi laporannya (' + coreNum(originalQty[size]) + ' pcs). Catat kelebihannya sebagai setoran baru.');
+          if (selisih > 0) sisa[size] = selisih;
+        });
+        if (Object.keys(sisa).length) { if (!anakId || anak) fail('Sisa laporan lama ini tidak dapat dipisahkan. Hubungi owner.'); sisaLama = sisa; }
       }
       patch.ukuran = JSON.stringify(uk); patch.total = coreSumSizes(uk); patch.reject = coreSumSizes(bad); patch.rejectUkuran = JSON.stringify(bad);
       ensureSetorCapacity(activePo, rec.maklonId, uk, bad, rec.id);
@@ -2030,6 +2053,16 @@ function createCore(store, env) {
       if (admin && p.upah !== undefined && p.upah !== '') patch.upah = Math.max(0, coreNum(p.upah));
       else if (!(rec.upah > 0)) patch.upah = upahJahitTerakhir(poRec, rec.maklonId, settings());
       if (!rec.noSlip) patch.noSlip = nextNo('SS', store.read('SlipSetor'), 'noSlip', today());
+      /* Sisa ditulis lebih dulu, baru laporan asalnya diterima. Kalau penyimpanan terputus di antaranya, laporan
+         asal masih menunggu dan kiriman ulang membuang baris sisa itu dulu (lihat di atas): tidak ada pcs yang hilang. */
+      if (sisaLama) {
+        var sumberSisa = {}; Object.keys(sumberLama).forEach(function (k) { sumberSisa[k] = sumberLama[k]; }); sumberSisa.sisaDari = sumberLama.sisaDari || rec.id;
+        var barisSisa = {}; SCHEMA.SlipSetor.forEach(function (c) { barisSisa[c] = rec[c] === undefined || rec[c] === null ? '' : rec[c]; });
+        barisSisa.id = anakId; barisSisa.noSlip = ''; barisSisa.ukuran = JSON.stringify(sisaLama); barisSisa.total = coreSumSizes(sisaLama); barisSisa.reject = 0; barisSisa.rejectUkuran = JSON.stringify({});
+        barisSisa.status = 'diajukan'; barisSisa.diprosesOleh = ''; barisSisa.diprosesPada = ''; barisSisa.upahId = ''; barisSisa.imporSumber = JSON.stringify(sumberSisa);
+        if (store.validateRows) store.validateRows('SlipSetor', [barisSisa]);
+        store.append('SlipSetor', barisSisa);
+      }
     }
     store.update('SlipSetor', rec.id, patch);
     return findRow('SlipSetor', rec.id);
