@@ -173,7 +173,7 @@ test('automatic legacy QC is not inspection; real QC preserves its proven same-H
   assert.equal(a.pay()[0].overpaidQty, 2);
 });
 
-test('frozen pending sources cannot be deleted, rejected, reduced, or dropped by re-import before earning', () => {
+test('frozen pending sources cannot be deleted, rejected, exceeded, or dropped by re-import before earning', () => {
   const pending = count({ id: 'pending1', status: 'diajukan', upah: 0, asal: 'lama', imporSumber: provenance('jahit', 'pending-worker') });
   const b = bridge({ resolution: 'hold', baselineSources: [{ sourceId: 'pending1', size: 'M', qty: 10, rate: 2000, pending: true }], allocations: [] });
   const a = app({ SlipSetor: [pending], LegacySettlement: [b] });
@@ -181,11 +181,73 @@ test('frozen pending sources cannot be deleted, rejected, reduced, or dropped by
   const before = a.run('JSON.stringify(db.SlipSetor)');
   assert.throws(() => a.call('deleteRecord', { sheet: 'SlipSetor', id: 'pending1' }), /slip upah/);
   assert.throws(() => a.call('prosesSetor', { id: 'pending1', keputusan: 'tolak' }), /terikat pembayaran/);
-  assert.throws(() => a.call('prosesSetor', { id: 'pending1', ukuran: { M: 6 }, upah: 2000 }), /dipertahankan per ukuran/);
+  assert.throws(() => a.call('prosesSetor', { id: 'pending1', ukuran: { M: 11 }, upah: 2000 }), /dipertahankan per ukuran/);
+  assert.throws(() => a.call('prosesSetor', { id: 'pending1', ukuran: { M: 6, L: 1 }, upah: 2000 }), /dipertahankan per ukuran|tidak terdaftar/);
   assert.throws(() => a.call('gantiImpor', { data: { SlipSetor: [] } }), /terkait pembayaran/);
   assert.equal(a.run('JSON.stringify(db.SlipSetor)'), before);
   a.call('prosesSetor', { id: 'pending1', ukuran: { M: 8 }, rejectUkuran: { M: 2 }, reject: 2, upah: 2000 });
+  assert.equal(a.run('db.SlipSetor.length'), 1);
   assert.equal(a.pay()[0].available, 0);
+});
+
+test('a frozen pending report can be counted in stages: the counted part is accepted, the rest keeps waiting with the same payment tie', () => {
+  const pending = count({ id: 'pending1', status: 'diajukan', upah: 0, asal: 'lama', tanggal: '2026-10-07', catatan: 'Sisa laporan jahit belum dihitung', imporSumber: provenance('jahit', 'pending-worker') });
+  const b = bridge({ resolution: 'hold', baselineSources: [{ sourceId: 'pending1', size: 'M', qty: 10, rate: 2000, pending: true }], allocations: [] });
+  const a = app({ SlipSetor: [pending], LegacySettlement: [b] });
+  const first = a.call('prosesSetor', { id: 'pending1', ukuran: { M: 4 }, upah: 2000, tanggal: '2026-10-08' }).data;
+  assert.equal(first.status, 'diterima'); assert.equal(first.total, 4); assert.equal(first.tanggal, '2026-10-08'); assert.ok(first.noSlip);
+  const rest = a.run('db.SlipSetor.filter(function(r){return r.id==="pending1s";})[0]');
+  assert.equal(rest.status, 'diajukan'); assert.equal(rest.total, 6); assert.deepEqual(JSON.parse(rest.ukuran), { M: 6 });
+  assert.equal(rest.tanggal, '2026-10-07'); assert.equal(rest.noSlip, ''); assert.equal(rest.upah, 0); assert.equal(rest.asal, 'lama');
+  assert.equal(JSON.parse(rest.imporSumber).sisaDari, 'pending1'); assert.equal(JSON.parse(rest.imporSumber).field, 'jahit');
+  /* jumlah laporan tetap utuh dan PO belum dianggap selesai dihitung */
+  assert.equal(a.flow().ukuran.M.diterima, 4); assert.equal(a.flow().ukuran.M.diajukan, 6);
+  /* bagian yang sudah dihitung tetap ditahan seperti sebelumnya, dan sisanya masih terikat */
+  assert.equal(a.pay().length, 1); assert.equal(a.pay()[0].available, 0); assert.equal(a.pay()[0].legacySettlementHold, true);
+  assert.throws(() => a.call('prosesSetor', { id: 'pending1s', keputusan: 'tolak' }), /terikat pembayaran/);
+  assert.throws(() => a.call('deleteRecord', { sheet: 'SlipSetor', id: 'pending1s' }), /slip upah/);
+  assert.throws(() => a.call('prosesSetor', { id: 'pending1s', ukuran: { M: 7 }, upah: 2000 }), /dipertahankan per ukuran/);
+  /* hitungan kedua: sebagian lagi, lalu sisanya; baris sisa selalu satu */
+  a.call('prosesSetor', { id: 'pending1s', ukuran: { M: 1 }, rejectUkuran: { M: 2 }, reject: 2, upah: 2000 });
+  const last = a.run('db.SlipSetor.filter(function(r){return r.id==="pending1ss";})[0]');
+  assert.equal(last.total, 3); assert.equal(JSON.parse(last.imporSumber).sisaDari, 'pending1');
+  a.call('prosesSetor', { id: 'pending1ss', ukuran: { M: 3 }, upah: 2000 });
+  assert.equal(a.run('db.SlipSetor.length'), 3);
+  assert.equal(a.run('db.SlipSetor.filter(function(r){return r.status==="diajukan";}).length'), 0);
+  assert.equal(a.flow().ukuran.M.diterima, 8); assert.equal(a.flow().ukuran.M.rejectJahit, 2); assert.equal(a.flow().ukuran.M.diajukan, 0);
+  const pay = a.pay();
+  assert.equal(pay.length, 3); assert.equal(pay.reduce((n, r) => n + r.total, 0), 8);
+  assert.ok(pay.every(r => r.available === 0 && r.legacySettlementHold === true));
+  assert.throws(() => a.call('createUpah', { upah: { pegawaiId: 'worker1', itemIds: pay.map(r => r.id) } }), /ditinjau/);
+});
+
+test('an interrupted staged count is repaired by the retry, and a later full count removes the stale remainder', () => {
+  const pending = count({ id: 'pending1', status: 'diajukan', upah: 0, asal: 'lama', imporSumber: provenance('jahit', 'pending-worker') });
+  const b = bridge({ resolution: 'hold', baselineSources: [{ sourceId: 'pending1', size: 'M', qty: 10, rate: 2000, pending: true }], allocations: [] });
+  const stale = count({ id: 'pending1s', status: 'diajukan', upah: 0, asal: 'lama', ukuran: { M: 6 }, total: 6, imporSumber: { ...provenance('jahit', 'pending-worker'), sisaDari: 'pending1' } });
+  const a = app({ SlipSetor: [pending, stale], LegacySettlement: [b] });
+  a.call('prosesSetor', { id: 'pending1', ukuran: { M: 7 }, upah: 2000 });
+  assert.equal(a.run('db.SlipSetor.length'), 2);
+  assert.equal(a.run('db.SlipSetor.filter(function(r){return r.id==="pending1s";})[0].total'), 3);
+  const c = app({ SlipSetor: [pending, stale], LegacySettlement: [b] });
+  c.call('prosesSetor', { id: 'pending1', ukuran: { M: 10 }, upah: 2000 });
+  assert.equal(c.run('db.SlipSetor.length'), 1);
+  assert.equal(c.flow().ukuran.M.diterima, 10);
+});
+
+test('count date is optional, must be a real date, and cannot lie in the future; native reports keep their old behaviour', () => {
+  const report = count({ id: 'native01', status: 'diajukan', upah: 0, workflowVersion: 2, imporSumber: '', tanggal: '2026-10-06' });
+  const a = app({ SlipSetor: [report] });
+  assert.throws(() => a.call('prosesSetor', { id: 'native01', ukuran: { M: 10 }, upah: 2000, tanggal: '2026-02-31' }), /Tanggal hitung tidak valid/);
+  assert.throws(() => a.call('prosesSetor', { id: 'native01', ukuran: { M: 10 }, upah: 2000, tanggal: '2026-10-12' }), /melewati hari ini/);
+  const kept = app({ SlipSetor: [report] });
+  assert.equal(kept.call('prosesSetor', { id: 'native01', ukuran: { M: 10 }, upah: 2000 }).data.tanggal, '2026-10-06');
+  /* laporan baru yang dihitung lebih sedikit tidak meninggalkan baris sisa: maklon melapor lagi seperti biasa */
+  const fewer = app({ SlipSetor: [report] });
+  const got = fewer.call('prosesSetor', { id: 'native01', ukuran: { M: 6 }, upah: 2000, tanggal: '2026-10-08' }).data;
+  assert.equal(got.total, 6); assert.equal(got.tanggal, '2026-10-08');
+  assert.equal(fewer.run('db.SlipSetor.length'), 1);
+  assert.equal(fewer.pay()[0].available, 6);
 });
 
 test('zero-OK legacy QC retains immutable baseline even with no earned row', () => {
