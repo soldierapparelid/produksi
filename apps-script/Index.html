@@ -342,7 +342,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261009-pin-seketika-156';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261009-edit-order-157';</script>
 <script>
 (function () {
 'use strict';
@@ -364,7 +364,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.6';
+var APP_VERSION = '1.5.7';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -4262,13 +4262,16 @@ function coreWeeklySlipModel(state, worker, start, end) {
   var materials = {}, materialByName = {};
   (st.stokRingkas || st.bahan || []).forEach(function (b) { materialByName[coreNormBahan(b.nama)] = b; });
   var rows = ordered.map(function (g) {
-    var sizeText = coreSizeText(g.ukuran, settings.ukuran), details = g.title + (sizeText ? '\n' + sizeText : '');
+    var sizeText = coreSizeText(g.ukuran, settings.ukuran), details = g.title + (sizeText ? '\nUkuran: ' + sizeText : '');
     if (sewing) details += '\n' + (g.repair ? 'Perbaikan · ' : '') + (g.ref || 'Hitungan/QC');
     else {
       var raw = cutMap[g.sourceId], correction = raw && raw.historyCorrection;
       if (raw) {
-        var materialText = coreBahanPotong(raw).filter(function (b) { return b.qty > 0; }).map(function (b) { var unit = (materialByName[coreNormBahan(b.nama)] || {}).satuan || 'kg'; materials[unit] = coreNum(materials[unit]) + b.qty; return b.nama + ' · ' + coreSlipNumber(b.qty) + ' ' + unit; }).join(' + ');
-        if (materialText) details += '\n' + materialText;
+        /* The same material taken from several rolls is one entry: its total and the number of rolls. */
+        var merged = [], byMaterial = {};
+        coreBahanPotong(raw).filter(function (b) { return b.qty > 0; }).forEach(function (b) { var key = coreNormBahan(b.nama), unit = (materialByName[key] || {}).satuan || 'kg'; materials[unit] = coreNum(materials[unit]) + b.qty; if (!byMaterial[key]) merged.push(byMaterial[key] = { nama: b.nama, unit: unit, qty: 0, n: 0 }); byMaterial[key].qty += b.qty; byMaterial[key].n++; });
+        var materialText = merged.map(function (m) { return m.nama + ' ' + coreSlipNumber(m.qty) + ' ' + m.unit + (m.n > 1 ? ' (' + m.n + ' rol)' : ''); }).join(' + ');
+        if (materialText) details += '\nBahan: ' + materialText;
         if (correction && correction.original) details += '\nFisik setelah koreksi ' + coreRibuan(raw.total) + ' pcs; dasar upah awal tetap ' + coreRibuan(g.total) + ' pcs.';
       }
     }
@@ -4284,7 +4287,7 @@ function coreWeeklySlipModel(state, worker, start, end) {
   if (totals.overpaid) summary.push({label:'Pembayaran melebihi hak setelah QC',value:coreRibuan(totals.overpaid) + ' pcs'});
   var business = settings.kopSlip || settings.namaUsaha || 'SOLDIER APPAREL';
   return { model:{layout:'weekly-a4',title:'Slip Upah ' + (sewing ? 'Jahit' : 'Potong'),reference:(sewing ? 'JHT' : 'PTG') + ' / ' + start.replace(/-/g,'') + '-' + end.replace(/-/g,'') + ' / ' + String(worker.id).slice(0,8),recipient:worker.nama || '-',recipientLabel:sewing ? 'Nama penjahit' : 'Tukang potong',period:coreSlipDate(start) + ' — ' + coreSlipDate(end),
-    columns:[{label:'Tanggal',width:14},{label:'Rincian pekerjaan',width:38},{label:'Jumlah',align:'right',width:12},{label:'Tarif / pcs',align:'right',width:17},{label:'Upah',align:'right',width:19}],rows:rows,summary:summary,sections:sections,signatures:[{label:'Disiapkan oleh',name:business},{label:'Penerima',name:worker.nama || '-'}]},
+    columns:[{label:'Tanggal',width:13},{label:'Rincian pekerjaan',width:45},{label:'Jumlah',align:'right',width:11},{label:'Tarif / pcs',align:'right',width:13},{label:'Upah',align:'right',width:18}],rows:rows,summary:summary,sections:sections,signatures:[{label:'Disiapkan oleh',name:business},{label:'Penerima',name:worker.nama || '-'}]},
     n:ordered.length + review.length,belum:totals.pending,tanpaHarga:totals.missingRate,bersih:totals.gross - deduction,totalGross:totals.gross,paidAmount:totals.paid,unpaidAmount:totals.unpaid,reviewCount:totals.review,totalQty:totals.qty };
 }
 function coreGajiSlipModel(state, employee, period) {
@@ -4312,12 +4315,14 @@ function coreSlipModelsHtml(models, settings) {
   if (!(models instanceof Array) || !models.length) throw new Error('Pilih minimal satu slip.');
   settings = settings || {};
   function escape(v) { return String(v == null ? '' : v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}).replace(/\n/g,'<br>'); }
-  function table(columns, rows) { return '<table class="detail"><thead><tr>'+columns.map(function(c){return '<th'+(c.width?' style="width:'+Math.max(1,Math.min(100,coreNum(c.width)))+'%"':'')+'>'+escape(c.label)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(row){return '<tr>'+columns.map(function(c,i){return '<td style="text-align:'+(c.align==='right'?'right':c.align==='center'?'center':'left')+'">'+escape(row[i])+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'; }
+  /* a cell of several lines: the first line is its heading, the rest small detail below it */
+  function cell(v) { var parts = String(v == null ? '' : v).split('\n'); return parts.length < 2 ? escape(parts[0]) : '<b>' + escape(parts[0]) + '</b><span class="sub">' + parts.slice(1).map(escape).join('<br>') + '</span>'; }
+  function table(columns, rows) { return '<table class="detail"><thead><tr>'+columns.map(function(c){return '<th'+(c.width?' style="width:'+Math.max(1,Math.min(100,coreNum(c.width)))+'%"':'')+'>'+escape(c.label)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.map(function(row){return '<tr>'+columns.map(function(c,i){return '<td style="text-align:'+(c.align==='right'?'right':c.align==='center'?'center':'left')+'">'+cell(row[i])+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'; }
   function article(m) { return '<article><header><b>'+escape(settings.kopSlip||settings.namaUsaha||'SOLDIER APPAREL')+'</b><small>'+escape(settings.kopSub||settings.alamat||'')+'</small></header><p class="reference">'+escape(m.reference)+'</p><h1>'+escape(m.title)+'</h1><table class="meta"><tr><td>'+escape(m.recipientLabel)+'<br><b>'+escape(m.recipient)+'</b></td><td>Periode<br><b>'+escape(m.period)+'</b></td></tr></table>'+table(m.columns,m.rows)+(m.sections||[]).map(function(s){return '<section><h2>'+escape(s.title)+'</h2>'+table(s.columns,s.rows)+'</section>';}).join('')+'<table class="summary">'+(m.summary||[]).map(function(s){return '<tr'+(s.emphasis?' class="emphasis"':'')+'><td>'+escape(s.label)+'</td><td>'+escape(s.value)+'</td></tr>';}).join('')+'</table><table class="signatures"><tr>'+(m.signatures||[]).map(function(s){return '<td>'+escape(s.label)+'<br><br><br><b>'+escape(s.name)+'</b></td>';}).join('')+'</tr></table></article>'; }
   var pages=[],group=[];
   function flush(){if(!group.length)return;var h='<table class="four"><tr>';group.forEach(function(m,i){if(i===2)h+='</tr><tr>';h+='<td>'+article(m)+'</td>';});if(group.length%2)h+='<td></td>';h+='</tr></table>';pages.push(h);group=[];}
   models.forEach(function(m){if(m.layout==='four-up'&&m.rows.length<=8&&!(m.sections||[]).some(function(s){return s.rows.length>2;})){group.push(m);if(group.length===4)flush();}else{flush();pages.push(article(m));}});flush();
-  var css='@page{size:A4;margin:12mm}body{font:10pt Arial,Helvetica,sans-serif;color:#182638;margin:0}h1{font-size:17pt;border-bottom:2px solid #233b55;padding-bottom:8px}h2{font-size:10pt;margin-top:16px}header{border-bottom:1px solid #ddd;padding-bottom:8px}header b{font-size:13pt}small{display:block;font-size:8pt}.reference{font-size:8pt;color:#555}table{width:100%;border-collapse:collapse;table-layout:fixed}.meta{margin:12px 0}.meta td{padding:5px}.detail th{background:#233b55;color:white;text-align:left}.detail th,.detail td{padding:6px;border-bottom:1px solid #ddd;word-wrap:break-word}.detail thead{display:table-header-group}.detail tr{page-break-inside:avoid}.summary{width:75%;margin:16px 0 0 auto;page-break-inside:avoid}.summary td{padding:5px;border-bottom:1px solid #ddd}.summary td:last-child{text-align:right}.emphasis{font-weight:bold;background:#edf1f6}.signatures{margin-top:18px;page-break-inside:avoid}.signatures td{text-align:center}.page{page-break-after:always}.page:last-child{page-break-after:auto}.four>tbody>tr>td{width:50%;vertical-align:top;padding:4mm;border:1px dashed #bbb}.four article{font-size:7.5pt}.four h1{font-size:12pt}.four .detail th,.four .detail td{padding:3px}.four .summary{width:100%}.four .summary td{padding:3px}';
+  var css='@page{size:A4;margin:12mm}body{font:10pt Arial,Helvetica,sans-serif;color:#182638;margin:0}h1{font-size:17pt;border-bottom:2px solid #233b55;padding-bottom:8px}h2{font-size:10pt;margin-top:16px}header{border-bottom:1px solid #ddd;padding-bottom:8px}header b{font-size:13pt}small{display:block;font-size:8pt}.reference{font-size:8pt;color:#555}table{width:100%;border-collapse:collapse;table-layout:fixed}.meta{margin:12px 0}.meta td{padding:5px}.detail th{background:#233b55;color:white;text-align:left}.detail th,.detail td{padding:6px;border-bottom:1px solid #ddd;word-wrap:break-word}.detail td{vertical-align:top}.sub{display:block;font-size:8.5pt;line-height:1.3;color:#555;margin-top:1px}.detail thead{display:table-header-group}.detail tr{page-break-inside:avoid}.summary{width:75%;margin:16px 0 0 auto;page-break-inside:avoid}.summary td{padding:5px;border-bottom:1px solid #ddd}.summary td:last-child{text-align:right}.emphasis{font-weight:bold;background:#edf1f6}.signatures{margin-top:18px;page-break-inside:avoid}.signatures td{text-align:center}.page{page-break-after:always}.page:last-child{page-break-after:auto}.four>tbody>tr>td{width:50%;vertical-align:top;padding:4mm;border:1px dashed #bbb}.four article{font-size:7.5pt}.four h1{font-size:12pt}.four .detail th,.four .detail td{padding:3px}.four .summary{width:100%}.four .summary td{padding:3px}';
   return '<!doctype html><html><head><meta charset="utf-8"><style>'+css+'</style></head><body>'+pages.map(function(h){return '<div class="page">'+h+'</div>';}).join('')+'</body></html>';
 }
 
@@ -5209,7 +5214,21 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       if(kind==='order'){out.produkId=id(r.produkId);var product=find('pembelian','product',out.produkId),pd=coreCommerceData(product),supplier=find('pembelian','supplier',pd.supplierId),sd=coreCommerceData(supplier);if(!product||!supplier||pd.aktif===false||sd.aktif===false)fail('Produk atau supplier pembelian tidak ditemukan atau tidak aktif.');out.productSnapshot={id:pd.id,nama:pd.nama,model:pd.model||'',warna:pd.warna||'',supplierId:pd.supplierId};out.supplierSnapshot={id:sd.id,nama:sd.nama,kontak:sd.kontak||'',alamat:sd.alamat||''};out.grupNama=text(r.grupNama,100);out.hargaSatuan=num(r.hargaSatuan,1e12,false,true);out.tanggalOrder=date(r.tanggalOrder);out.totalHarga=out.items.reduce(function(n,i){return n+i.jumlah*out.hargaSatuan;},0);out.catatan=text(r.catatan,1000);if(!Number.isSafeInteger(out.totalHarga))fail('Total terlalu besar.');}
       else{var c=r.customer||{};out.customer={name:text(c.name,120,true),phone:text(c.phone,60),address:text(c.address,400),type:c.type==='reseller'?'reseller':'walkin'};out.date=date(r.date);out.discountPercent=num(r.discountPercent===undefined?0:r.discountPercent,100,false,false);out.shipping=num(r.shipping===undefined?0:r.shipping,1e12,false,true);out.subtotal=out.items.reduce(function(n,i){return n+i.subtotal;},0);out.discountAmount=Math.round(out.subtotal*out.discountPercent/100);out.total=out.subtotal-out.discountAmount+out.shipping;out.notes=text(r.notes,1000);if(!Number.isSafeInteger(out.total))fail('Total terlalu besar.');}
       out.cancelled=old?!!old.cancelled:false;if(out.cancelled)fail('Catatan yang dibatalkan tidak dapat diubah.');
-      if(previous){var current=view(previous);if(current.events.length||previous.sourceHash)fail('Pesanan/nota yang sudah mempunyai riwayat disimpan tetap. Koreksi melalui pembatalan event atau buat catatan baru.');}
+      if(previous){var current=view(previous);
+        if(kind==='nota'){if(current.events.length||previous.sourceHash)fail('Pesanan/nota yang sudah mempunyai riwayat disimpan tetap. Koreksi melalui pembatalan event atau buat catatan baru.');}
+        /* A purchase order entered in this application may still be corrected after payments or receipts,
+           as the earlier application allowed, but never against what was already paid or received.
+           Imported orders and orders still held for review stay fixed. */
+        else if(previous.sourceHash||current.needsReview)fail('Pesanan dari data lama atau yang masih perlu diperiksa disimpan tetap. Koreksi transaksinya atau buat pesanan baru.');
+        else if(current.events.length){
+          if(out.produkId!==old.produkId)fail('Produk tidak dapat diganti setelah ada pembayaran atau penerimaan.');
+          if(old.productSnapshot)out.productSnapshot=old.productSnapshot;if(old.supplierSnapshot)out.supplierSnapshot=old.supplierSnapshot;
+          var got=current.receivedByItem||{};Object.keys(got).forEach(function(k){if(!coreNum(got[k]))return;var kept=out.items.filter(function(i){return i.id===k;})[0];if(!kept||kept.jumlah<coreNum(got[k]))fail('Varian yang sudah diterima tidak boleh dihapus atau dikurangi di bawah jumlah yang diterima.');});
+          if(out.totalHarga<current.totalPaid)fail('Total pesanan tidak boleh lebih kecil dari yang sudah dibayar.');
+          var first=current.events.filter(function(e){return e.kind!=='void'&&!e.voided;}).map(function(e){return String(e.tanggal||'');}).sort()[0];
+          if(first&&out.tanggalOrder>first)fail('Tanggal pesanan tidak boleh sesudah pembayaran atau penerimaan pertama.');
+        }
+      }
     }
     return out;
   }
@@ -5263,7 +5282,15 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     var stamp=now(),stored=[];views.forEach(function(v,i){if(shares[i])stored.push({id:eventId(v.id),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
     checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
   };
-  actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return reply(module,row,p,me);fail('Catatan sudah dibatalkan.');}expected(row,p);if(v.paymentReview||v.receipts.some(function(e){return !e.voided&&e.sourceReview;}))fail('Periksa bukti nominal atau jumlah historis sebelum membatalkan catatan.');if(v.totalPaid||v.totalReceived)fail('Batalkan transaksi pembayaran/penerimaan yang masih berlaku terlebih dahulu.');var data=coreCommerceData(row);data.cancelled=true;data.cancelReason=reason;data.cancelledBy=me.id;data.cancelledAt=now();row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash(data),diubah:now()});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return reply(module,row,p,me);};
+  actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return reply(module,row,p,me);fail('Catatan sudah dibatalkan.');}expected(row,p);if(v.paymentReview||v.receipts.some(function(e){return !e.voided&&e.sourceReview;}))fail('Periksa bukti nominal atau jumlah historis sebelum membatalkan catatan.');/* voidAll (owner, purchase orders entered here): an order that will not happen is removed in one step.
+       Every payment and receipt still in force is corrected with the same reason, then the order is cancelled.
+       Nothing is erased: the events stay in the ledger with their corrections. */
+    if(p.voidAll===true&&module==='pembelian'&&(v.totalPaid||v.totalReceived)){
+      if(row.sourceHash||v.needsReview)fail('Pesanan dari data lama atau yang masih perlu diperiksa tidak dapat dihapus sekaligus. Koreksi transaksinya satu per satu.');
+      var voidStamp=now(),voidDate=String(ctx.env.now().toISOString()).slice(0,10),voids=v.events.filter(function(e){return e.kind!=='void'&&!e.voided&&e.id;}).map(function(e){return {id:'vd_'+coreCommerceHash([v.id,e.id]).slice(0,40),module:module,parentId:v.id,kind:'void',data:JSON.stringify({tanggal:voidDate,catatan:reason,eventId:e.id}),dibuat:voidStamp,dibuatOleh:me.id,sourceHash:''};});
+      checkRows('CommerceEvent',voids);store.appendMany('CommerceEvent',voids);
+    }
+    else if(v.totalPaid||v.totalReceived)fail('Batalkan transaksi pembayaran/penerimaan yang masih berlaku terlebih dahulu.');var data=coreCommerceData(row);data.cancelled=true;data.cancelReason=reason;data.cancelledBy=me.id;data.cancelledAt=now();row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash(data),diubah:now()});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return reply(module,row,p,me);};
   function hppInput(config){
     var source=store.read('CommerceSource'),legacy={production:[],stock:{pembelian:[],rolInfo:{}},meta:{},cuttingPlans:[]};
     store.read('CommerceImport').filter(function(r){return r.status==='complete';}).forEach(function(manifest){var proof=coreCommerceData(manifest),subset=source.filter(function(r){return r.sourceHash===manifest.sourceHash;}).map(function(r){var out={};SCHEMA.CommerceSource.forEach(function(k){out[k]=r[k]===undefined?'':r[k];});return out;}).sort(function(a,b){return a.id.localeCompare(b.id);});if(subset.length!==proof.sourceRows||coreCommerceHash(subset)!==proof.sourceDigest)fail('Snapshot HPP asal tidak utuh atau berubah. Periksa cadangan impor sebelum menghitung.');});
@@ -5412,7 +5439,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.6';
+var UI_VERSION = '1.5.7';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -7609,6 +7636,8 @@ var SLIP_CSS = [
   '.sa-slip-sheet .sa-slip table{min-width:0!important;font-size:inherit;line-height:1.2}',
   '.sa-slip-sheet .sa-slip th,.sa-slip-sheet .sa-slip td{font-size:1em;padding:.85mm;letter-spacing:0;line-height:1.2;white-space:pre-wrap}',
   '.sa-slip-sheet .sa-slip th{font-size:.95em}',
+  '.sa-slip td{vertical-align:top}.sa-slip .sa-slip-utama{display:block;font-weight:700}',
+  '.sa-slip .sa-slip-sub{display:block;font-size:.86em;line-height:1.3;white-space:normal;margin-top:.4mm;color:#5b6b80!important}',
   '.sa-slip-sheet .sa-slip-section{margin-top:2mm}.sa-slip-sheet .sa-slip h4{font-size:1em;letter-spacing:0;text-transform:none;margin:0 0 1mm}',
   '.sa-slip-sheet .sa-slip-note{font-size:.9em;line-height:1.2;margin-bottom:1mm;overflow-wrap:anywhere;white-space:pre-wrap}',
   '.sa-slip-sheet[data-layout="four-up"] .sa-slip-top{display:block;position:relative;min-height:10mm}',
@@ -7664,13 +7693,18 @@ function slipNormal(m) {
     sections: (m.sections || []).map(function (s) { var t = tabel(s.columns, s.rows); return { title: slipTeks(s.title), columns: t.columns, rows: t.rows }; }),
     signatures: (m.signatures || []).map(function (s) { return { label: slipTeks(s.label), name: slipTeks(s.name) }; }) };
 }
+/* isi sel beberapa baris: baris pertama judulnya, baris berikutnya rincian kecil di bawahnya */
+function slipSel(v) {
+  var bagian = String(v).split('\n');
+  return bagian.length < 2 ? esc(v) : '<b class="sa-slip-utama">' + esc(bagian[0]) + '</b><span class="sa-slip-sub">' + bagian.slice(1).map(esc).join('<br>') + '</span>';
+}
 function slipTabel(cols, rows) {
   var sum = 0; cols.forEach(function (c) { sum += c.width > 0 ? c.width : 0; });
   var pakai = sum > 0 && cols.every(function (c) { return c.width > 0; });
   var cls = function (c) { return c.align === 'right' ? 'sa-slip-num' : (c.align === 'center' ? 'sa-slip-center' : ''); };
   return '<div class="sa-slip-table-scroll"><table>' + (pakai ? '<colgroup>' + cols.map(function (c) { return '<col style="width:' + (100 * c.width / sum) + '%">'; }).join('') + '</colgroup>' : '') +
     '<thead><tr>' + cols.map(function (c) { return '<th class="' + cls(c) + '">' + esc(c.label) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-    rows.map(function (r) { return '<tr>' + r.map(function (v, i) { return '<td class="' + cls(cols[i]) + '">' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+    rows.map(function (r) { return '<tr>' + r.map(function (v, i) { return '<td class="' + cls(cols[i]) + '">' + slipSel(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
 }
 var SLIP_LABEL_PENDEK = { 'Potongan cicilan kasbon periode ini': 'Cicilan kasbon', 'Sisa kasbon aktif (informasi, tidak dipotong lagi)': 'Sisa kasbon (info saja)' };
 function slipRender(input) {
@@ -8018,7 +8052,8 @@ function commerceOrderKpi(orders) {
 function commerceOrderCard(o) {
   var snap = o.productSnapshot || {}, items = o.items || [], qty = Number(o.totalQty) || 0, attrs = commerceRecordAttr('pembelian', o.id), batal = /^(batal|cancelled)$/.test(o.status);
   var judul = [o.productName || o.grupNama || o.id, snap.model, snap.warna].filter(Boolean).join(' ');
-  var aksi = batal ? '' : (Number(o.balance) > 0 && !o.paymentReview ? '<button class="btn sm pri" data-a="commercePaymentOpen"' + attrs + '>Bayar</button>' : '') + (!o.receiptReview && Number(o.totalReceived) < qty ? '<button class="btn sm" data-a="commerceReceiptOpen"' + attrs + '>Terima</button>' : '');
+  var aksi = batal ? '' : (Number(o.balance) > 0 && !o.paymentReview ? '<button class="btn sm pri" data-a="commercePaymentOpen"' + attrs + '>Bayar</button>' : '') + (!o.receiptReview && Number(o.totalReceived) < qty ? '<button class="btn sm" data-a="commerceReceiptOpen"' + attrs + '>Terima</button>' : '') +
+    (commerceBisaEdit(o) ? '<button class="btn sm ghost" data-a="commerceOrderOpen" data-id="' + esc(o.id) + '">Edit</button>' : '') + (commerceBisaHapus(o) ? '<button class="btn sm ghost" data-a="commerceCancelOpen"' + attrs + '>Hapus</button>' : '');
   return '<div class="corder"><button class="item" data-a="commerceOrderDetail" data-id="' + esc(o.id) + '">' + commerceThumb(commerceFind('pembelian','products',o.produkId), o.productName || o.grupNama) +
     '<span class="grow"><b>' + esc(judul) + '</b>' + (items.length > 1 ? ' <span class="small muted">(' + items.length + ' varian)</span>' : '') +
     '<br><span class="small muted">' + esc(items.map(function (it) { return (it.nama || '—') + ' (' + nf(it.jumlah) + ')'; }).join(', ')) + '</span>' +
@@ -8040,6 +8075,11 @@ function commerceOrderGroups(orders) {
 }
 function commerceBatal(o) { return /^(batal|cancelled)$/.test(o.status); }
 function commerceBisaBayar(o) { return !commerceBatal(o) && !o.paymentReview && Number(o.balance) > 0; }
+/* Order yang dibuat di aplikasi ini boleh dikoreksi dan dihapus (dibatalkan) walau sudah ada pembayaran atau penerimaan;
+   server menjaga agar tidak bertentangan dengan yang sudah dibayar/diterima. Order dari data lama atau yang masih perlu
+   diperiksa tetap: hanya bisa dihapus selama belum ada pembayaran dan penerimaan. */
+function commerceBisaEdit(o) { return !commerceBatal(o) && !o.legacy && !o.needsReview; }
+function commerceBisaHapus(o) { return me().divisi === 'owner' && !commerceBatal(o) && (commerceBisaEdit(o) || (!Number(o.totalPaid) && !Number(o.totalReceived))); }
 function commerceGroupCard(g) {
   if (g.orders.length < 2) return g.orders.map(commerceOrderCard).join('');
   var hidup = g.orders.filter(function (o) { return !commerceBatal(o); }), total = 0, paid = 0, sisa = 0, qty = 0, got = 0, periksa = 0;
@@ -8052,7 +8092,7 @@ function commerceGroupCard(g) {
 function commerceOrderList(orders) {
   S.listFn = function () {
     var status = S.f['commerceStatus-pembelian'], limit = Number(S.f['commerceLimit-pembelian']) || 50;
-    var found = orders.filter(function (o) { return (!status || !o.status || o.status === status) && cocok(S.f.q, [o.id,o.productName,o.grupNama,o.supplierName]); });
+    var found = orders.filter(function (o) { return (status ? (!o.status || o.status === status) : !commerceBatal(o)) && cocok(S.f.q, [o.id,o.productName,o.grupNama,o.supplierName]); });
     return (found.length ? commerceOrderGroups(found.slice(0, limit)).map(commerceGroupCard).join('') : emptyBox('Tidak ada catatan yang cocok.')) + (found.length > limit ? '<div class="item"><button class="btn" data-a="commerceMore" data-m="pembelian">Tampilkan 50 lagi (' + (found.length - limit) + ' tersisa)</button></div>' : '');
   };
   return '<div class="card flush"><div class="list" id="list">' + S.listFn() + '</div></div>';
@@ -8311,8 +8351,8 @@ function commerceDetail(module,id) {
   var h='<div class="col">'+commerceWarning(row)+'<div class="row wrap">'+commerceStatus(row)+'<span class="grow"></span><span class="muted small">'+tgl(nota?row.date:row.tanggalOrder)+'</span></div>'+
     '<div class="card col"><div class="row">'+(nota?'':commerceThumb(commerceFind('pembelian','products',row.produkId),row.productName||row.grupNama,'l'))+'<div class="grow"><h3>'+esc(nota?customer.name:row.productName||row.grupNama||row.id)+'</h3><p class="small muted">'+esc(nota?[customer.phone,customer.address].filter(Boolean).join(' · '):row.supplierName||'')+'</p></div></div><div class="list">'+lines.map(function(it){return '<div class="item"><span class="grow">'+esc(nota?[it.name,it.color,it.size].filter(Boolean).join(' · '):it.nama)+'</span><b>'+nf(nota?it.qty:it.jumlah)+' pcs</b>'+(nota?'<span>'+rp(it.subtotal)+'</span>':'');}).map(function(s){return s+'</div>';}).join('')+'</div><div class="row wrap"><span class="grow">Total <b>'+rp(total)+'</b></span><span>Sudah dibayar <b>'+rp(row.totalPaid)+'</b></span><span>Sisa <b>'+rp(row.balance)+'</b></span></div></div>'+
     ((nota?row.notes:row.catatan)?'<div class="note">'+esc(nota?row.notes:row.catatan)+'</div>':'')+
-    (!cancelled?'<div class="row wrap">'+(Number(row.balance)>0&&!row.paymentReview?'<button class="btn pri" data-a="commercePaymentOpen"'+attrs+'>Catat pembayaran</button>':'')+(!nota&&!row.receiptReview&&Number(row.totalReceived)<lines.reduce(function(n,it){return n+Number(it.jumlah||0);},0)?'<button class="btn" data-a="commerceReceiptOpen"'+attrs+'>Terima barang</button>':'')+(!row.legacy&&!(row.events||[]).length?'<button class="btn" data-a="'+(nota?'commerceNotaOpen':'commerceOrderOpen')+'" data-id="'+esc(id)+'">Edit rincian</button>':'<span class="small muted">Rincian dengan riwayat disimpan tetap.</span>')+'</div>':'')+
-    commercePaymentsHtml(module,row)+(!cancelled&&me().divisi==='owner'&&!row.totalPaid&&!row.totalReceived?'<button class="btn ghost" data-a="commerceCancelOpen"'+attrs+'>Batalkan catatan</button>':'')+'</div>';
+    (!cancelled?'<div class="row wrap">'+(Number(row.balance)>0&&!row.paymentReview?'<button class="btn pri" data-a="commercePaymentOpen"'+attrs+'>Catat pembayaran</button>':'')+(!nota&&!row.receiptReview&&Number(row.totalReceived)<lines.reduce(function(n,it){return n+Number(it.jumlah||0);},0)?'<button class="btn" data-a="commerceReceiptOpen"'+attrs+'>Terima barang</button>':'')+((nota?!row.legacy&&!(row.events||[]).length:commerceBisaEdit(row))?'<button class="btn" data-a="'+(nota?'commerceNotaOpen':'commerceOrderOpen')+'" data-id="'+esc(id)+'">Edit rincian</button>':'<span class="small muted">'+(nota?'Rincian dengan riwayat disimpan tetap.':'Rincian order dari data lama atau yang masih perlu diperiksa disimpan tetap.')+'</span>')+'</div>':'')+
+    commercePaymentsHtml(module,row)+(!cancelled&&(nota?me().divisi==='owner'&&!row.totalPaid&&!row.totalReceived:commerceBisaHapus(row))?'<button class="btn ghost" data-a="commerceCancelOpen"'+attrs+'>'+(nota?'Batalkan catatan':'Hapus order')+'</button>':'')+'</div>';
   return sheetHtml(nota?'Nota '+(row.noNota||row.number||row.id):'Detail order produk',h,(nota?'':'<button class="btn pri" data-a="commerceShareOpen" data-id="'+esc(id)+'">Gambar untuk supplier</button>')+'<button class="btn" data-a="commercePrint"'+attrs+'>Cetak</button><button class="btn'+(nota?' pri':'')+'" data-a="commercePdf"'+attrs+'>Unduh PDF</button>');
 }
 A.commerceOrderDetail=function(el){var id=el.getAttribute('data-id');openSheet(function(){return commerceDetail('pembelian',id);},{live:true,cls:'wide'});};
@@ -8323,8 +8363,17 @@ A.commerceReceiptOpen=function(el){var row=commerceRecord('pembelian',el.getAttr
 A.commerceReceiptSave=function(el){var f=topForm(),v=formVals(f);if(f._commerceLocked)return;try{var n=commerceNumber(v.jumlah,'Jumlah diterima',true,1e9);if(!n)throw new Error('Jumlah harus lebih dari nol.');return commerceMutation('pembelian','appendCommerceReceipt',{id:v.id,orderId:v.parentId,expectedRevision:v.revision,tanggal:v.tanggal,itemId:v.itemId,jumlah:n,kondisi:v.kondisi,catatan:v.catatan.trim()},f,el);}catch(e){toast(e.message,true);}};
 A.commerceVoidOpen=function(el){if(me().divisi!=='owner')return;var module=el.getAttribute('data-m'),row=commerceRecord(module,el.getAttribute('data-id'));if(!row)return;commerceForm('Koreksi catatan',module,hid('id',newId())+hid('parentId',row.id)+hid('eventId',el.getAttribute('data-event'))+hid('tanggal',todayYmd())+hid('revision',row.revision)+'<div class="note warn">Catatan semula tetap ada dalam riwayat. Koreksi ini membatalkan pengaruh catatan terpilih pada total; catat penggantinya setelah memeriksa hasil.</div>'+fCatatan(''),'commerceVoidSave','Simpan koreksi');};
 A.commerceVoidSave=function(el){var f=topForm(),v=formVals(f),module=f.getAttribute('data-module');if(f._commerceLocked)return;if(!v.catatan.trim())return toast('Isi alasan koreksi.',true);return commerceMutation(module,'voidCommerceEvent',{id:v.id,module:module,parentId:v.parentId,eventId:v.eventId,expectedRevision:v.revision,tanggal:v.tanggal,catatan:v.catatan.trim()},f,el);};
-A.commerceCancelOpen=function(el){if(me().divisi!=='owner')return;var module=el.getAttribute('data-m'),row=commerceRecord(module,el.getAttribute('data-id'));if(!row)return;commerceForm('Batalkan catatan',module,hid('id',row.id)+hid('revision',row.revision)+'<div class="note warn">Hanya catatan tanpa pembayaran dan penerimaan aktif yang dapat dibatalkan. Riwayat tetap disimpan.</div>'+fCatatan(''),'commerceCancelSave','Batalkan catatan');};
-A.commerceCancelSave=function(el){var f=topForm(),v=formVals(f),module=f.getAttribute('data-module');if(f._commerceLocked)return;if(!v.catatan.trim())return toast('Isi alasan pembatalan.',true);return commerceMutation(module,'cancelCommerceRecord',{module:module,id:v.id,expectedRevision:v.revision,catatan:v.catatan.trim()},f,el);};
+A.commerceCancelOpen=function(el){
+  if(me().divisi!=='owner')return toast('Hanya owner yang dapat menghapus atau membatalkan.',true);
+  var module=el.getAttribute('data-m'),row=commerceRecord(module,el.getAttribute('data-id'));if(!row)return;
+  var beli=module==='pembelian',ada=beli&&(Number(row.totalPaid)>0||Number(row.totalReceived)>0);
+  if(ada&&!commerceBisaHapus(row))return toast('Order dari data lama atau yang masih perlu diperiksa tidak dapat dihapus sekaligus. Koreksi transaksinya satu per satu di rincian.',true);
+  var f=commerceForm(beli?'Hapus order':'Batalkan catatan',module,hid('id',row.id)+hid('revision',row.revision)+
+    (beli?'<div class="note warn"><b>'+esc(row.productName||row.id)+'</b> akan dihapus dari daftar.'+(ada?' Order ini sudah ada pembayaran <b>'+rp(row.totalPaid)+'</b> dan penerimaan <b>'+nf(row.totalReceived)+' pcs</b>; catatan itu ikut dibatalkan.':'')+' Riwayatnya tetap tersimpan dan bisa dilihat lewat saringan status “Dibatalkan”.</div>':'<div class="note warn">Hanya catatan tanpa pembayaran dan penerimaan aktif yang dapat dibatalkan. Riwayat tetap disimpan.</div>')+
+    fCatatan(''),'commerceCancelSave',beli?'Hapus order':'Batalkan catatan');
+  f._commerceVoidAll=ada;
+};
+A.commerceCancelSave=function(el){var f=topForm(),v=formVals(f),module=f.getAttribute('data-module');if(f._commerceLocked)return;if(!v.catatan.trim())return toast('Isi alasannya di kolom catatan, mis. tidak jadi order atau salah input.',true);return commerceMutation(module,'cancelCommerceRecord',{module:module,id:v.id,expectedRevision:v.revision,catatan:v.catatan.trim(),voidAll:f._commerceVoidAll===true?true:undefined},f,el);};
 A.commercePrint=function(el){var module=el.getAttribute('data-m'),row=commerceRecord(module,el.getAttribute('data-id'));if(!row||typeof coreCommerceSlipModel!=='function')return toast('Data cetak belum tersedia. Muat ulang aplikasi.',true);return act(el,slipCetak([coreCommerceSlipModel(module,row,S.state.settings)])).catch(quiet);};
 A.commercePdf=function(el){if(Api.mode()==='demo')return A.commercePrint(el);return slipUnduh('makeCommercePdf',{module:el.getAttribute('data-m'),id:el.getAttribute('data-id')});};
 
@@ -8467,6 +8516,8 @@ C.rentang = function (el) { S.f[el.getAttribute('data-k')] = el.value; render();
 function catatanDipangkas() { return S.state.trimmed ? '<div class="note">Catatan yang lebih lama tidak ditampilkan supaya aplikasi tetap ringan. <button class="btn sm" data-a="loadAll">Muat data lama</button></div>' : ''; }
 
 function stokSaldoRows(rows, filter, query) {
+  /* urutan kartu: yang perlu diperiksa dan yang menipis di atas, yang masih ada di tengah, yang habis paling bawah */
+  var STOK_URUT = { minus: 0, kritis: 1, menipis: 2, aman: 3, habis: 4 };
   return rows.filter(function (b) {
     if (!cocok(query, [b.nama])) return false;
     if (filter === 'ada') return b.saldo > 0;
@@ -8476,7 +8527,7 @@ function stokSaldoRows(rows, filter, query) {
     if (filter === 'menipis') return b.status === 'menipis' || b.status === 'kritis';
     if (filter === 'minus') return b.status === 'minus';
     return true;
-  }).sort(function (a,b) { return (STATUS_STOK[a.status][2] - STATUS_STOK[b.status][2]) || (a.nama.toLowerCase() < b.nama.toLowerCase() ? -1 : 1); });
+  }).sort(function (a,b) { return (STOK_URUT[a.status] - STOK_URUT[b.status]) || (a.nama.toLowerCase() < b.nama.toLowerCase() ? -1 : 1); });
 }
 function stokSaldoSummary(rows) {
   var nilai = 0, perlu = 0;
@@ -9743,13 +9794,15 @@ function openKirim(poId, maklonId) {
     sp.main.concat(sp.extra).forEach(function (s) { var row=au[s]||{},n=pos(row.siapKirim);hint[s]='Potong '+nf(row.potong)+' · ditugaskan '+nf(row.kirim)+' · sisa '+nf(n);val[s]=n;if(n>0)maks[s]=n; });
     return sheetHtml('Penugasan jahit', '<div class="col" data-form="kirim" data-siap="' + pos(t.siapKirim) + '">' + hid('id', fid) + hid('poId', po.id) + poHead(po) +
       miniKpi([['Hasil potong',nf(t.potong),'pcs'],['Sudah ditugaskan',nf(t.kirim),'pcs'],['Tersedia',nf(pos(t.siapKirim)),'pcs untuk maklon']]) +
-      '<p class="small muted">Isian awal mengikuti sisa yang belum ditugaskan. Ubah jumlahnya jika hendak membagi ke beberapa maklon.</p>' +
+      '<p class="small muted">Isian awal mengikuti sisa yang belum ditugaskan. Untuk membagi ke beberapa maklon (misalnya satu ukuran untuk satu penjahit): pilih penjahitnya, tekan tombol ukurannya di bawah, lalu simpan. Ulangi untuk ukuran dan penjahit berikutnya.</p>' +
       fSelect('Maklon jahit', 'maklonId', [['', '— pilih maklon —']].concat(list.map(function (u) { return [u.id, u.nama]; })), maklonId || (list.length === 1 ? list[0].id : '')) +
-      '<div class="col gap-s"><div class="label">Jumlah dikirim per ukuran (pcs)</div>' + sizeGrid(sp.main, { hint: hint, extra: sp.extra, val:val, showZero:true, maks: pos(t.siapKirim) ? maks : null, maksLabel: 'Isi semua yang tersedia' }) + '</div>' + sumLine('Total dikirim') +
+      '<div class="col gap-s"><div class="label">Jumlah dikirim per ukuran (pcs)</div>' + sizeGrid(sp.main, { hint: hint, extra: sp.extra, val:val, showZero:true, maks: pos(t.siapKirim) ? maks : null, maksLabel: 'Isi semua yang tersedia' }) + (Object.keys(maks).length > 1 ? '<div class="row wrap gap-s"><span class="small muted">Tugaskan hanya ukuran:</span>' + Object.keys(maks).map(function (s) { return '<button type="button" class="btn ghost sm" data-a="kirimHanya" data-s="' + esc(s) + '">' + esc(s) + ' (' + nf(maks[s]) + ')</button>'; }).join('') + '</div>' : '') + '</div>' + sumLine('Total dikirim') +
       '<div class="f-row">' + fTanggal('Tanggal kirim', 'tanggal') + fTanggal('Target selesai', 'target', '') + '</div>' +
       fNum('Harga jahit / pcs', 'upah', tarifBawaan(po, 'tarifJahit'), 'step="100"', 'Dipakai saat slip setor terbit. Maklon baru melihat harga di slip setor, setelah QC menghitung.') + fCatatan() + '</div>', pos(t.siapKirim) ? footSave('kirimSave', 'Simpan & buat slip') : '<button class="btn" data-a="close">Tutup</button><button class="btn pri" disabled>Semua sudah ditugaskan</button>');
   });
 }
+/* satu ukuran untuk satu penjahit: ukuran yang ditekan diisi penuh, ukuran lain dikosongkan */
+A.kirimHanya = function (el) { var f = el.closest('[data-form]'), s = el.getAttribute('data-s'); $$('input[data-size]', f).forEach(function (i) { i.value = i.getAttribute('data-size') === s ? (i.getAttribute('data-max') || 0) : 0; }); recalc(f); };
 A.kirimSave = function (el) {
   var f = topForm(); var v = formVals(f); var uk;
   if (f._kirimBusy) return;

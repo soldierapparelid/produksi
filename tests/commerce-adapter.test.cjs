@@ -171,6 +171,39 @@ test('the split never invents or loses a rupiah and never pays an order beyond i
   const shares=split(amount,balances);assert.equal(shares.reduce((n,s)=>n+s,0),amount);assert.ok(shares.every((s,i)=>Number.isInteger(s)&&s>=0&&s<=balances[i]),JSON.stringify(shares));
  }
  for(const [amount,balances] of [[0,[5,5]],[11,[5,5]],[-1,[5,5]],[1.5,[5,5]],[5,[]],[5,[5,-1]]])assert.equal(split(amount,balances),null);
+});test('a purchase order entered here can be corrected after payments and receipts, never against what was paid or received',()=>{
+ const f=fixture();f.masters();let o=f.good('saveCommerceOrder',{record:f.order({initialPayment:{jumlah:20000,tanggal:'2026-10-08',metode:'transfer'}})}).record;
+ o=f.good('appendCommerceReceipt',{id:'rcv01',orderId:'order01',expectedRevision:o.revision,tanggal:'2026-10-09',itemId:'size01',jumlah:2,kondisi:'ok'}).record;
+ assert.equal(o.totalPaid,20000);assert.equal(o.totalReceived,2);
+ const edit=(record,rev=o.revision)=>({record:{...o,...record},expectedRevision:rev});
+ /* price and quantities may change, a variant may be added, and the payments and receipts stay as they were */
+ const fixed=f.good('saveCommerceOrder',edit({hargaSatuan:9000,items:[{id:'size01',nama:'M',jumlah:4},{id:'size02',nama:'L',jumlah:1},{id:'size03',nama:'XL',jumlah:2}],catatan:'harga dikoreksi'})).record;
+ assert.equal(fixed.totalHarga,63000);assert.equal(fixed.totalPaid,20000);assert.equal(fixed.balance,43000);assert.equal(fixed.totalReceived,2);assert.equal(fixed.payments.length,1);assert.equal(fixed.receipts.length,1);assert.equal(fixed.productName,'Product Fixture');
+ o=fixed;
+ f.bad('saveCommerceOrder',edit({items:[{id:'size02',nama:'L',jumlah:5}]}),/sudah diterima/);f.bad('saveCommerceOrder',edit({items:[{id:'size01',nama:'M',jumlah:1},{id:'size02',nama:'L',jumlah:9}]}),/sudah diterima/);
+ f.bad('saveCommerceOrder',edit({hargaSatuan:1000}),/sudah dibayar/);f.bad('saveCommerceOrder',edit({tanggalOrder:'2026-10-09'}),/pembayaran atau penerimaan pertama/);
+ f.good('saveCommerceProduct',{record:{id:'product02',nama:'Other Product',supplierId:'supplier01'}});f.bad('saveCommerceOrder',edit({produkId:'product02'}),/Produk tidak dapat diganti/);
+ f.bad('saveCommerceOrder',edit({catatan:'stale'},'old-revision'),/berubah/);
+ /* a renamed master does not rewrite the identity frozen when the order was issued */
+ const product=f.state().products.find(p=>p.id==='product01');f.good('saveCommerceProduct',{record:{...product,nama:'Renamed Later'},expectedRevision:product.revision});
+ assert.equal(f.good('saveCommerceOrder',edit({catatan:'catatan baru'})).record.productName,'Product Fixture');
+});
+test('imported and held orders stay fixed, while the owner can remove a native order with its payments and receipts in one step',()=>{
+ const f=fixture(),b=backup(),p=f.good('previewCommerceImport',{backup:b});f.good('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash});
+ const legacy=f.state().orders.find(o=>o.id==='legacyOrder');f.bad('saveCommerceOrder',{record:{...legacy,catatan:'ubah'},expectedRevision:legacy.revision},/data lama|tidak sah/);f.bad('saveCommerceOrder',{record:{...legacy,items:[{id:'line1',nama:'M',jumlah:5}],catatan:'ubah'},expectedRevision:legacy.revision},/data lama/);
+ f.bad('cancelCommerceRecord',{module:'pembelian',id:'legacyOrder',expectedRevision:legacy.revision,catatan:'hapus',voidAll:true},/Periksa bukti|data lama|perlu diperiksa/);
+ f.masters();let o=f.good('saveCommerceOrder',{record:f.order({initialPayment:{jumlah:20000,tanggal:'2026-10-08',metode:'transfer'}})}).record;
+ o=f.good('appendCommercePayment',{id:'pay02',module:'pembelian',parentId:'order01',expectedRevision:o.revision,tanggal:'2026-10-09',jumlah:5000,metode:'cash'}).record;
+ o=f.good('appendCommerceReceipt',{id:'rcv01',orderId:'order01',expectedRevision:o.revision,tanggal:'2026-10-09',itemId:'size01',jumlah:2,kondisi:'ok'}).record;
+ const request={module:'pembelian',id:'order01',expectedRevision:o.revision,catatan:'tidak jadi order'};
+ f.bad('cancelCommerceRecord',request,/terlebih dahulu/);f.bad('cancelCommerceRecord',{...request,voidAll:true},/owner/,'fixture-admin-token-001');
+ const events=f.raw('CommerceEvent').length,gone=f.good('cancelCommerceRecord',{...request,voidAll:true,withState:true});
+ assert.equal(gone.record.status,'batal');assert.equal(gone.record.totalPaid,0);assert.equal(gone.record.totalReceived,0);assert.equal(gone.record.balance,50000);
+ assert.equal(gone.record.payments.length,2,'the payments stay in the ledger');assert.ok(gone.record.payments.every(e=>e.voided&&e.voidReason==='tidak jadi order'));assert.ok(gone.record.receipts.every(e=>e.voided));
+ assert.equal(f.raw('CommerceEvent').length,events+3,'one correction per payment and receipt, the embedded first payment included');
+ /* sending the same removal again changes nothing; the order cannot be edited or paid any more */
+ f.good('cancelCommerceRecord',{...request,voidAll:true});assert.equal(f.raw('CommerceEvent').length,events+3);
+ f.bad('saveCommerceOrder',{record:{...gone.record,catatan:'x'},expectedRevision:gone.record.revision},/dibatalkan/);f.bad('appendCommercePayment',{id:'pay03',module:'pembelian',parentId:'order01',expectedRevision:gone.record.revision,tanggal:'2026-10-09',jumlah:1000,metode:'cash'},/dibatalkan/);
 });test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
  const f=fixture();f.masters();let a=f.good('saveCommerceOrder',{record:f.order({catatan:'Print fixture'})}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02'})}).record;
  f.h.run(`var originalCommerceEnv=pkEnv_,lastCommercePdf='';pkEnv_=function(){var e=originalCommerceEnv();e.makePdf=function(html){lastCommercePdf=html;return 'fixture-pdf';};return e;};void 0;`);

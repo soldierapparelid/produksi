@@ -72,3 +72,17 @@ test('slip dates reject impossible calendar dates and invalid ISO weeks; PDF mar
   const html=call('coreSlipModelsHtml',[model],{kopSlip:'SOLDIER & CO'});
   assert.ok(html.includes('&lt;script&gt;'));assert.ok(html.includes('SOLDIER &amp; CO'));assert.ok(!html.includes('<script>'));
 });
+
+test('a cutting slip row reads as one tidy entry: sizes on their own line and the same material from several rolls as one total',()=>{
+  const cutter={id:'cut01',nama:'Pemotong Contoh',divisi:'potong'};
+  const st={settings:{ukuran:['M','L'],kopSlip:'SOLDIER'},po:[{id:'po01',nama:'OBLONG CONTOH'}],kasbon:[],
+    potong:[{id:'c1',poId:'po01',userId:'cut01',tanggal:'2026-10-06',total:198,ukuran:{L:198},bahanList:[{nama:'Katun Contoh',qty:25.31},{nama:'Katun Contoh',qty:23.74},{nama:'Rib Contoh',qty:1.5}]}],
+    payroll:[{id:'potong:c1',earnedId:'potong:c1',sourceId:'c1',poId:'po01',pegawaiId:'cut01',jenis:'potong',tanggal:'2026-10-06',total:198,rate:900,paidQty:0,available:198,ukuran:{L:198},issues:[]}]};
+  const result=call('coreWeeklySlipModel',st,cutter,'2026-10-05','2026-10-11'),row=result.model.rows[0];
+  assert.deepEqual(row[1].split('\n'),['OBLONG CONTOH','Ukuran: L 198','Bahan: Katun Contoh 49,05 kg (2 rol) + Rib Contoh 1,5 kg']);
+  assert.equal(result.model.summary.find(s=>s.label==='Bahan terpakai').value,'50,55 kg','the material total is unchanged by the tidier wording');
+  assert.equal(result.totalGross,178200);assert.deepEqual(result.model.columns.map(c=>c.width),[13,45,11,13,18]);
+  ctx.slipModel=JSON.stringify([result.model]);const page=vm.runInContext('coreSlipModelsHtml(JSON.parse(slipModel),{kopSlip:"SOLDIER"})',ctx);
+  assert.match(page,/<b>OBLONG CONTOH<\/b><span class="sub">Ukuran: L 198<br>Bahan: Katun Contoh 49,05 kg \(2 rol\) \+ Rib Contoh 1,5 kg<\/span>/);assert.match(page,/\.sub\{display:block/);
+  assert.match(page,/<td style="text-align:right">198 pcs<\/td>/,'single-line cells are unchanged');
+});
