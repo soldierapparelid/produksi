@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.8';
+var APP_VERSION = '1.5.9';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -252,8 +252,12 @@ function coreRollInventory(cuts, stock, st, plans, excludeId, knownMaterials) {
   var materials = knownMaterials || coreCutAvailability(cuts, stock, st, plans, excludeId);
   materials.forEach(function (r) { materialMap[r.kunci] = r; });
   (stock || []).forEach(function (r) {
-    if (r.jenis !== 'beli' || r.stockMode !== 'roll') return;
+    /* 'rinci' = rol yang dirinci dari stok yang sudah ada (bukan pembelian baru): coreStok tidak menghitungnya,
+       jadi total stok tetap; di sini ia mengurangi saldo lama dan menjadi rol yang bisa dipilih. */
+    if ((r.jenis !== 'beli' && r.jenis !== 'rinci') || r.stockMode !== 'roll') return;
+    var dirinci = r.jenis === 'rinci';
     byId[r.id] = {id:r.id,invoiceId:r.invoiceId || '',invoice:r.invoice || '',bahan:r.bahan,satuan:r.satuan,rollLabel:r.rollLabel || '',qty:coreNum(r.qty),pakai:0,koreksi:0,correctionRevision:'',sourceRevision:coreHash(JSON.stringify([r.id,String(r.bahan || ''),String(r.satuan || ''),String(r.rollLabel || ''),coreNum(r.qty),String(r.invoiceId || ''),String(r.invoice || '')])),saldo:coreNum(r.qty),dicadangkan:0,tersedia:0,status:'tersedia'};
+    if (dirinci) byId[r.id].rinci = true;
   });
   (stock || []).forEach(function (r) { var roll=byId[r.sourceStockId]; if (r.jenis === 'koreksi' && roll) { roll.koreksi += coreNum(r.qty); roll.correctionRevision = r.id; } });
   (cuts || []).forEach(function (r) {
@@ -1643,6 +1647,7 @@ function createCore(store, env) {
     if (r.sourceStockId) fail('Koreksi rol harus melalui hitung fisik rol, bukan edit catatan stok.');
     if (r.id && findRow('StokBahan', String(r.id)) && !r.baru) {
       var lama = findRow('StokBahan', String(r.id));
+      if (lama.jenis === 'rinci') fail('Rincian rol tidak dapat diubah. Hapus rincian yang belum dipakai, lalu rinci ulang.');
       if (lama.sourceStockId) fail('Bukti koreksi rol tidak dapat diubah. Catat hitung fisik baru untuk rol tersebut.');
       ensureRollSourceUnused(lama.id);
       var changes = isiStok(r, lama);
@@ -1698,6 +1703,40 @@ function createCore(store, env) {
     if (store.validateRows) store.validateRows('StokBahan', plan.pending);
     if (plan.pending.length) store.appendMany('StokBahan', plan.pending);
     return { invoiceId: inv.id, rows: plan.rows, total: total };
+  };
+  /* Merinci stok yang sudah ada menjadi rol. Stok lama hanya mencatat total kg; di sini owner mengisi berat tiap rol
+     yang ada di gudang. Total stok, pembelian, dan nilai bahan tidak berubah: yang dirinci hanya berpindah dari
+     "saldo lama" ke rol bernama, sehingga bisa dipilih per rol di PO dan Catat potong. */
+  actions.rinciStokRol = function (p) {
+    ['Pegawai','StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
+    var me = auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh merinci rol stok.');
+    if (typeof coreCutAvailability !== 'function') fail('Paket persiapan potong belum lengkap. Muat ulang aplikasi.');
+    var id = idOk(p.id); if (!id || id.length > 40) fail('Identitas rincian rol tidak sah. Buka kembali formulir.');
+    var input = p.rolls instanceof Array ? p.rolls : []; if (!input.length || input.length > 100) fail('Isi 1 sampai 100 rol.');
+    var weights = input.map(function (r, i) {
+      var q = coreBahanInvoiceNumber(r && r.qty);
+      if (!isFinite(q) || q <= 0 || q > 1e8 || Math.abs(q * 1000 - Math.round(q * 1000)) > 0.000001) fail('Berat rol ' + (i + 1) + ' harus lebih dari nol, maksimal 3 angka desimal.');
+      return Math.round(q * 1000) / 1000;
+    });
+    var total = Math.round(weights.reduce(function (n, q) { return n + q; }, 0) * 1000) / 1000, key = coreNormBahan(p.bahan), note = teks(p.catatan, 300);
+    var semua = store.read('StokBahan'), sudah = semua.filter(function (r) { return r.invoiceId === id; });
+    if (sudah.length) {
+      var sama = sudah.length === weights.length && sudah.every(function (r, i) { return r.jenis === 'rinci' && r.dibuatOleh === me.id && coreNormBahan(r.bahan) === key && coreNum(r.qty) === weights[i]; });
+      if (!sama) fail('Identitas rincian ini sudah dipakai dengan isi berbeda.');
+      return { rows: sudah, total: total };
+    }
+    var inventory = coreRollInventory(store.read('Potong'), semua, settings(), store.read('RencanaPotong')), pool = inventory.legacyMap[key];
+    if (!pool || pool.sembunyi) fail('Bahan ini belum ada di daftar stok aktif.');
+    if (pool.satuan !== 'kg') fail('Rincian rol hanya untuk bahan yang dicatat dalam kg.');
+    if (total > pool.tersedia + 0.000001) fail('Jumlah berat rol (' + total + ' kg) melebihi stok yang belum dirinci dan belum dicadangkan (' + pool.tersedia + ' kg). Periksa lagi beratnya, atau cocokkan fisik dahulu.');
+    var urut = semua.filter(function (r) { return r.stockMode === 'roll' && coreNormBahan(r.bahan) === key; }).length, hari = today(), dibuat = nowIso();
+    var rows = weights.map(function (q, i) {
+      return { id: id + '-r' + (i + 1), jenis: 'rinci', tanggal: hari, bahan: pool.nama, qty: q, satuan: 'kg', rol: 1, harga: 0, total: 0, supplier: '', invoice: 'Rincian stok ' + hari.split('-').reverse().join('/'),
+        sumber: '', alasan: '', catatan: note, dibuatOleh: me.id, dibuat: dibuat, asal: '', invoiceId: id, stockMode: 'roll', rollLabel: 'Rol ' + (urut + i + 1) };
+    });
+    if (store.validateRows) store.validateRows('StokBahan', rows);
+    store.appendMany('StokBahan', rows);
+    return { rows: rows, total: total };
   };
   function ensureRollSourceUnused(id) {
     var used = {}, reserved = false;
@@ -2096,6 +2135,39 @@ function createCore(store, env) {
     return { ditandai: n };
   };
 
+  /* Arsip PO: PO selesai/batal keluar dari daftar (id-nya masuk pengaturan poSembunyi) dan barangnya kembali
+     "belum di-PO". Tidak ada baris yang dihapus; arsip:false mengembalikannya ke daftar. */
+  actions.arsipPO = function (p) {
+    var me = auth(p); mustAdmin(me);
+    if (store.fresh) store.fresh('PO');
+    var ids = (p.ids instanceof Array ? p.ids : [p.id]).map(function (x) { return String(x || ''); }).filter(Boolean);
+    if (!ids.length || ids.length > 1000) fail('Pilih PO yang akan diarsipkan.');
+    var st = settings(), list = st.poSembunyi.slice();
+    if (p.arsip === false) list = list.filter(function (x) { return ids.indexOf(x) < 0; });
+    else ids.forEach(function (id) {
+      var rec = findRow('PO', id); if (!rec) fail('PO tidak ditemukan. Muat data terbaru.');
+      if (rec.status === 'aktif') fail('PO ' + (rec.noPO || rec.nama) + ' masih aktif. Tandai selesai atau batal dahulu, baru diarsipkan.');
+      if (list.indexOf(id) < 0) list.push(id);
+    });
+    if (JSON.stringify(list).length > 45000) fail('Arsip PO sudah terlalu panjang.');
+    st.poSembunyi = list; store.setSettings(st);
+    return { ok: true, jumlah: list.length };
+  };
+  /* Cadangan untuk owner: isi tiap tabel apa adanya, tanpa PIN dan token. Diminta per tabel (dan dipotong per
+     bagian) supaya tiap jawaban kecil; perangkat owner yang merangkainya menjadi satu berkas. Hanya membaca. */
+  var CADANGAN_RAHASIA = { Pegawai: ['pin', 'token', 'gagal', 'kunci'] };
+  actions.getCadangan = function (p) {
+    var me = auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengunduh cadangan.');
+    var daftar = Object.keys(SCHEMA).filter(function (s) { return s !== 'Pengaturan'; });
+    if (!p.tabel) return { tabel: daftar, pengaturan: settings(), appVersion: APP_VERSION, dibuat: nowIso() };
+    var name = String(p.tabel); if (daftar.indexOf(name) < 0) fail('Tabel tidak dikenal.');
+    var hide = CADANGAN_RAHASIA[name] || [], semua = store.read(name), mulai = Math.max(0, coreInt(p.mulai)), rows = [], besar = 0, i = mulai;
+    for (; i < semua.length && (besar < 1500000 || !rows.length); i++) {
+      var o = {}; SCHEMA[name].forEach(function (c) { if (hide.indexOf(c) < 0) o[c] = semua[i][c] === undefined || semua[i][c] === null ? '' : semua[i][c]; });
+      besar += JSON.stringify(o).length; rows.push(o);
+    }
+    return { tabel: name, mulai: mulai, rows: rows, jumlah: semua.length, lanjut: i < semua.length ? i : null };
+  };
   function poDipakai(id) { return ['Potong', 'RencanaPotong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'GudangLama', 'LegacySettlement'].some(function (s) { return store.read(s).some(function (r) { return r.poId === id; }); }); }
   actions.deleteRecord = function (p) {
     var me = auth(p); var admin = coreIsAdmin(me);
@@ -2498,7 +2570,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
-    saveStok: 1, saveInvoiceBahan: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, arsipPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });

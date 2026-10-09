@@ -109,6 +109,12 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.9:
+
+- **Rol terlihat di Stok bahan, dan stok lama bisa dirinci per rol:** kartu bahan menampilkan rol yang tercatat beserta sisa kilonya, dan berapa kg yang belum punya rincian berat tiap rol. Stok dari aplikasi lama hanya mencatat total kg, jadi owner mengisi berat tiap rol lewat **Rinci rol** (`rinciStokRol`). Baris barunya berjenis `rinci`: tidak dihitung sebagai pembelian, sehingga saldo, pembelian, harga rata-rata, dan nilai bahan tidak berubah; yang dirinci hanya berpindah dari saldo lama ke rol yang bisa dipilih di PO dan Catat potong. Pemilih rol menawarkan "Isi berat tiap rol" langsung untuk bahan yang belum dirinci. Rincian yang belum dipakai bisa dihapus; yang sudah dipakai atau dicadangkan tetap.
+- **Arsip PO:** "Hapus dari daftar" 1.5.8 menjadi **Arsipkan**. Ada tab **Arsip** di jajaran Semua barang / Aktif / Selesai / Batal, pilihan status "Arsipkan" di formulir Ubah PO, dan "Kembalikan dari arsip". Aksi `arsipPO` menambah atau mengeluarkan id dari pengaturan `poSembunyi` secara utuh; tidak ada baris yang dihapus, dan barang yang PO-nya diarsipkan kembali tampil "Belum PO".
+- **Cadangan (backup):** Lainnya > Unduh cadangan menyalin semua tabel ke satu berkas JSON di perangkat owner (`getCadangan`, hanya membaca, per tabel dan dipotong per bagian). PIN, token, dan penghitung salah PIN tidak ikut. Berkas ini salinan pengaman; aplikasi tidak menyediakan pemulihan otomatis dari berkas tersebut.
+
 Mulai 1.5.8:
 
 - **Catat potong mengikuti stok rol:** tombol "Catat potong" pada PO yang bahannya sudah disiapkan langsung membuka persiapan itu (rol dan kilo tidak diketik ulang). Tanpa persiapan, owner memilih rol dari Stok bahan di formulir yang sama: kilo tiap rol terisi dari sisa rol, boleh dikurangi bila hanya dipakai sebagian, dan sisa kiloan / saldo lama bisa ditambahkan. `createPotong` menerima `potong.rencana` dari owner dan menulis persiapan bersama hasil potongnya (id tetap, kiriman ulang tidak menggandakan); "Ketik sendiri" tetap ada untuk bahan di luar stok.
