@@ -20,3 +20,8 @@ test('physical stock labels distinguish reserved quantities without inventing mi
  const h=ui();h.run("S.f.stokFilter='all';VIEWS.stok()");const card=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(card,/Saldo fisik/);assert.match(card,/Dicadangkan 5 kg · Tersedia dipakai 15 kg/);assert.doesNotMatch(card,/Saldo tersedia/);
  const original=h.run('S.state.stokRingkas.map(function(x){return x.nama;}).join()');h.run("stokSaldoRows(stokTampil(),'all','')");assert.equal(h.run('S.state.stokRingkas.map(function(x){return x.nama;}).join()'),original);
 });
+
+test('finished materials are listed last; anything that needs attention stays above what is simply available',()=>{
+ const h=ui(),order=h.run("JSON.stringify(stokSaldoRows([{nama:'B habis',status:'habis'},{nama:'A aman',status:'aman'},{nama:'A habis',status:'habis'},{nama:'Z minus',status:'minus'},{nama:'M menipis',status:'menipis'},{nama:'K kritis',status:'kritis'}],'all','').map(function(b){return b.nama;}))");
+ assert.deepEqual(JSON.parse(order),['Z minus','K kritis','M menipis','A aman','A habis','B habis']);
+});

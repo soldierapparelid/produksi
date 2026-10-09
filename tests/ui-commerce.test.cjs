@@ -162,6 +162,20 @@ test('purchase and sales pages are fetched quietly once per sign-in after the ma
   const worker=harness();worker.run("var timers=[];setTimeout=function(fn){timers.push(fn);return 1;};S.state.me={id:'w',divisi:'potong'};commercePrefetch();");assert.equal(worker.run('timers.length'),0);
   const demo=harness();demo.run("var timers=[];setTimeout=function(fn){timers.push(fn);return 1;};Api.mode=function(){return 'demo';};commercePrefetch();");assert.equal(demo.run('timers.length'),0);
 });
+test('each order offers Edit and Hapus where allowed; a removed order leaves the normal list; removal with payments is one owner request',()=>{
+  const h=harness(),orders=shopOrders();orders.push({...orders[1],id:'old',revision:'ro',legacy:true,status:'dp',totalPaid:1000,balance:9000},{...orders[1],id:'oldclean',revision:'rc',legacy:true});
+  h.seed('pembelian',{suppliers:[],products:[],orders});const card=id=>h.run("commerceOrderCard(commerceFind('pembelian','orders',"+JSON.stringify(id)+"))");
+  assert.match(card('o1'),/data-a="commerceOrderOpen" data-id="o1">Edit/);assert.match(card('o1'),/data-a="commerceCancelOpen" data-m="pembelian" data-id="o1">Hapus/);
+  for(const id of ['o3','o5','old']){assert.ok(!card(id).includes('>Edit<'),id+' is not editable');}assert.ok(!card('old').includes('>Hapus<'),'an imported order with payments is not removed in one step');assert.match(card('oldclean'),/>Hapus</);assert.ok(!card('oldclean').includes('>Edit<'));
+  h.run("S.listFn=null;S.sub.commercePurchase='orders';var normal=VIEWS['pembelian-produk']();S.f['commerceStatus-pembelian']='batal';var removed=S.listFn();S.f['commerceStatus-pembelian']='';");
+  assert.ok(!h.run('normal').includes('data-id="o3"'),'removed orders are not in the normal list');assert.match(h.run('removed'),/data-id="o3"/);
+  const el=id=>`{getAttribute:function(k){return k==='data-m'?'pembelian':${JSON.stringify(id)};}}`;
+  h.run(`A.commerceCancelOpen(${el('o1')})`);assert.match(h.run('lastSheet'),/Hapus order/);assert.match(h.run('lastSheet'),/pembayaran <b>Rp4000<\/b> dan penerimaan <b>6 pcs<\/b>/);assert.equal(h.run('currentForm._commerceVoidAll'),true);
+  h.run("currentForm.values={id:'o1',revision:'r1',catatan:''};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();A.commerceCancelSave(null)");assert.equal(h.requests.length,0,'a reason is required');
+  h.run("currentForm.values.catatan=' tidak jadi ';A.commerceCancelSave(null)");assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{module:'pembelian',id:'o1',expectedRevision:'r1',catatan:'tidak jadi',voidAll:true,withState:true});
+  const plain=harness();plain.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});plain.run(`A.commerceCancelOpen(${el('o2')})`);assert.equal(plain.run('currentForm._commerceVoidAll'),false);
+  const admin=harness();admin.run("S.state.me={id:'adm',divisi:'admin'};");admin.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});assert.ok(!admin.run("commerceOrderCard(commerceFind('pembelian','orders','o2'))").includes('>Hapus<'));assert.match(admin.run("commerceOrderCard(commerceFind('pembelian','orders','o2'))"),/>Edit</);admin.run(`A.commerceCancelOpen(${el('o2')})`);assert.match(admin.json('messages').at(-1).text,/Hanya owner/);
+});
 test('order save preserves item identity and sends initial DP in the same request',async()=>{
   const h=harness();h.form({id:'order-one',revision:'',produkId:'product-one',hargaSatuan:'100',tanggalOrder:'2026-10-08',catatan:'',dp:'50',metode:'transfer'},'pembelian',[{id:'line-M',values:{lineName:'M',lineQty:'2'}},{id:'line-L',values:{lineName:'L',lineQty:'3'}}]);h.run('A.commerceOrderSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceOrder');const p=h.requests[0].payload;assert.equal(p.record.initialPayment.jumlah,50);assert.deepEqual(JSON.parse(JSON.stringify(p.record.items)),[{id:'line-M',nama:'M',jumlah:2},{id:'line-L',nama:'L',jumlah:3}]);assert.equal(p.record.id,'order-one');
 });

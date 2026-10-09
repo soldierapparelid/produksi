@@ -18,7 +18,14 @@ function value(markup,size){const re=new RegExp('data-size="'+size+'"[^>]*value=
 test('444 cut minus 138 assigned prefills remaining M156 L150 XL0 and shows per-size context',()=>{
  const f=fixture();f.run("openKirim('po1','')");const out=f.c.rendered;assert.equal(value(out,'M'),'156');assert.equal(value(out,'L'),'150');assert.equal(value(out,'XL'),'0');assert.match(out,/Hasil potong 444 pcs/);assert.match(out,/Sudah ditugaskan 138 pcs/);assert.match(out,/Tersedia 306 pcs/);assert.match(out,/Potong 138 · ditugaskan 138 · sisa 0/);assert.match(out,/membagi ke beberapa maklon/);assert.equal(f.c.requests.length,0);
 });
-test('owner may reduce prefilled quantities to split assignment and duplicate taps send only one request',async()=>{
+test('one size can be given to one sewer: the size button fills that size and clears the others',()=>{
+ const f=fixture();f.run("openKirim('po1','')");const out=f.c.rendered;
+ assert.match(out,/Tugaskan hanya ukuran:/);assert.match(out,/data-a="kirimHanya" data-s="M">M \(156\)/);assert.match(out,/data-a="kirimHanya" data-s="L">L \(150\)/);assert.ok(!/data-a="kirimHanya" data-s="XL"/.test(out),'a size with nothing left is not offered');
+ f.run(`var picked=[{s:'M',value:'156',max:'156'},{s:'L',value:'150',max:'150'},{s:'XL',value:'0',max:null}].map(function(x){return {value:x.value,getAttribute:function(k){return k==='data-size'?x.s:x.max;}};}),recalced=0;
+  var $$=function(sel){return sel==='input[data-size]'?picked:[];},recalc=function(){recalced++;};
+  A.kirimHanya({closest:function(){return {};},getAttribute:function(){return 'L';}});`);
+ assert.deepEqual(JSON.parse(f.run('JSON.stringify(picked.map(function(i){return String(i.value);}))')),['0','150','0']);assert.equal(f.run('recalced'),1);assert.equal(f.c.requests.length,0);
+});test('owner may reduce prefilled quantities to split assignment and duplicate taps send only one request',async()=>{
  const f=fixture();f.run("openKirim('po1','')");const p=f.run('A.kirimSave(button)');f.run('A.kirimSave(button)');assert.equal(f.c.requests.length,1);assert.deepEqual(JSON.parse(JSON.stringify(f.c.requests[0].payload.kirim.ukuran)),{M:50});f.c.requests[0].resolve({id:'saved1'});await p;assert.equal(f.c.closed,1);assert.equal(f.c.slips[0],'saved1');assert.equal(f.c.form._kirimBusy,false);
 });
 test('fully assigned PO keeps all zero sizes visible and has no active save action',()=>{
