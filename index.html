@@ -345,7 +345,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261009-pembelian-grup-155';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261009-pin-seketika-156';</script>
 <script>
 (function () {
 'use strict';
@@ -367,7 +367,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.5';
+var APP_VERSION = '1.5.6';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -5415,7 +5415,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.5';
+var UI_VERSION = '1.5.6';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -5780,6 +5780,7 @@ function tulisSnap() {
   var st = S.state; if (!st || !S.token || st.semua) return;
   var teks; try { teks = JSON.stringify(st); } catch (e) { return; }
   Idb.put('kv', snapKey(), { t: S.token, at: S.lastSync || Date.now(), ui: UI_VERSION, s: teks });
+  kunciTulis();
 }
 /* ditulis sebentar setelah data datang, supaya beberapa perubahan beruntun cukup ditulis sekali */
 function simpanSnap() {
@@ -5815,6 +5816,92 @@ function bacaBoot() {
   return (b && b.users instanceof Array) ? b : null;
 }
 
+/* ---------- langsung terbuka setelah PIN: salinan terkunci ----------
+   Salinan biasa di atas dihapus saat keluar. Supaya setelah PIN diketik layar tidak menunggu server, data terakhir
+   juga disimpan TERKUNCI di perangkat ini, per akun:
+   - isinya dienkripsi (AES-GCM) dengan kunci acak; kunci acak itu dibungkus kunci publik (RSA-OAEP) milik gembok;
+     kunci pribadi gembok dibungkus kunci yang diturunkan dari PIN (PBKDF2). Tanpa PIN, isinya tidak terbaca;
+   - gembok dibuat ulang setiap kali server menerima PIN, jadi selalu mengikuti PIN yang terakhir diterima server;
+   - salinan diperbarui setiap kali salinan biasa ditulis (cukup dengan kunci publik, PIN tidak disimpan di mana pun);
+   - data yang dibuka dari sini hanya tampil selama server memeriksa PIN, tidak bisa dipakai menyimpan apa pun, dan
+     ditutup lagi kalau server menolak atau tidak menjawab (lihat A.pinGo). Server tetap satu-satunya penentu;
+   - salinan dihapus saat PIN ditolak, akun dinonaktifkan, atau sesi diakhiri server; kedaluwarsa setelah KUNCI_UMUR. */
+var KUNCI_UMUR = 14 * 86400000, KUNCI_ITER = 150000, KUNCI_TUNGGU = 20000;
+var kunciAktif = null;
+function kunciKey(userId) { return 'pkl_' + (Api.div() || 'pusat') + '_' + userId; }
+function kunciBisa() { return Api.mode() !== 'demo' && typeof crypto !== 'undefined' && !!crypto.subtle && typeof TextEncoder === 'function' && typeof TextDecoder === 'function'; }
+function kunciPin(pin, salt, iter) {
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(String(pin)), 'PBKDF2', false, ['deriveKey']).then(function (dasar) {
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: salt, iterations: iter, hash: 'SHA-256' }, dasar, { name: 'AES-GCM', length: 256 }, false, ['wrapKey', 'unwrapKey']);
+  });
+}
+/* server baru saja menerima PIN ini: gembok akun ini di perangkat ini dibuat ulang */
+function kunciSiapkan(userId, pin) {
+  if (!kunciBisa() || !userId || !pin) return Promise.resolve(null);
+  var salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), key = kunciKey(userId);
+  return Promise.all([kunciPin(pin, salt, KUNCI_ITER), crypto.subtle.generateKey({ name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['wrapKey', 'unwrapKey'])]).then(function (r) {
+    return Promise.all([crypto.subtle.wrapKey('pkcs8', r[1].privateKey, r[0], { name: 'AES-GCM', iv: iv }), crypto.subtle.exportKey('spki', r[1].publicKey)]);
+  }).then(function (r) {
+    var rec = { v: 1, u: userId, salt: salt, iter: KUNCI_ITER, priv: r[0], privIv: iv, pub: r[1], ui: UI_VERSION, at: 0, k: null, iv: null, c: null };
+    kunciAktif = { key: key, rec: rec, pubKey: null };
+    Idb.put('kv', key, rec);
+    return kunciTulis().then(function () { return rec; });
+  }).catch(function () { return null; });
+}
+/* dipanggil setiap kali salinan biasa ditulis */
+function kunciTulis() {
+  var a = kunciAktif, st = S.state;
+  if (!a || !st || !st.me || st.me.id !== a.rec.u || st.semua || !S.token || !kunciBisa()) return Promise.resolve(false);
+  var teks; try { teks = JSON.stringify(st); } catch (e) { return Promise.resolve(false); }
+  var iv = crypto.getRandomValues(new Uint8Array(12)), waktu = S.lastSync || Date.now();
+  return (a.pubKey ? Promise.resolve(a.pubKey) : crypto.subtle.importKey('spki', a.rec.pub, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['wrapKey']).then(function (k) { a.pubKey = k; return k; })).then(function (pub) {
+    return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']).then(function (dk) {
+      return Promise.all([crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, dk, new TextEncoder().encode(teks)), crypto.subtle.wrapKey('raw', dk, pub, { name: 'RSA-OAEP' })]);
+    });
+  }).then(function (r) {
+    if (kunciAktif !== a) return false;
+    a.rec.c = r[0]; a.rec.k = r[1]; a.rec.iv = iv; a.rec.at = waktu; a.rec.ui = UI_VERSION;
+    Idb.put('kv', a.key, a.rec); return true;
+  }).catch(function () { return false; });
+}
+/* sesi dilanjutkan tanpa PIN (aplikasi dibuka lagi): gembok yang sudah ada dipakai terus supaya salinannya tetap segar */
+function kunciLanjut() {
+  var st = S.state; if (!st || !st.me || !S.token || !kunciBisa()) return;
+  var key = kunciKey(st.me.id), id = st.me.id; if (kunciAktif && kunciAktif.key === key) return;
+  Idb.get('kv', key, function (rec) {
+    if (!rec || rec.v !== 1 || rec.u !== id || !rec.pub || !rec.priv || (kunciAktif && kunciAktif.key === key)) return;
+    if (!S.state || !S.state.me || S.state.me.id !== id || !S.token) return;
+    kunciAktif = { key: key, rec: rec, pubKey: null };
+  });
+}
+/* PIN diketik di layar masuk: kalau gembok akun itu terbuka dengan PIN tersebut, data terakhirnya dikembalikan */
+function kunciBuka(userId, pin) {
+  if (!kunciBisa() || !userId || !pin) return Promise.resolve(null);
+  return new Promise(function (ok) { Idb.get('kv', kunciKey(userId), ok); }).then(function (rec) {
+    if (!rec || rec.v !== 1 || rec.u !== userId || rec.ui !== UI_VERSION || !rec.c || !rec.k || !rec.iv || !rec.at || Date.now() - rec.at > KUNCI_UMUR) return null;
+    return kunciPin(pin, rec.salt, rec.iter).then(function (pk) {
+      return crypto.subtle.unwrapKey('pkcs8', rec.priv, pk, { name: 'AES-GCM', iv: rec.privIv }, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['unwrapKey']);
+    }).then(function (priv) {
+      return crypto.subtle.unwrapKey('raw', rec.k, priv, { name: 'RSA-OAEP' }, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    }).then(function (dk) {
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: rec.iv }, dk, rec.c);
+    }).then(function (buf) {
+      var st = JSON.parse(new TextDecoder().decode(buf));
+      if (!st || !st.me || st.me.id !== userId || !st.settings || !(st.po instanceof Array) || !(st.users instanceof Array) || (Api.div() && st.me.divisi !== Api.div())) return null;
+      return { at: rec.at, state: st };
+    });
+  }).catch(function () { return null; });
+}
+/* perangkat disambungkan ke data pusat lain: semua salinan terkunci dari sumber lama dibuang */
+function kunciHapusSemua() {
+  kunciAktif = null;
+  Idb.all('kv', function (isi) { Object.keys(isi || {}).forEach(function (k) { if (k.indexOf('pkl_') === 0) Idb.del('kv', k); }); }, 'pkl_');
+}
+function kunciHapus(userId) {
+  if (kunciAktif && (!userId || kunciAktif.rec.u === userId)) kunciAktif = null;
+  if (userId) Idb.del('kv', kunciKey(userId));
+}
+
 /* dariSimpanan = waktu (ms) data itu terakhir diambil dari server, diisi kalau st berasal dari salinan di perangkat */
 function applyState(st, dariSimpanan) {
   if (!st || !st.me) return false;
@@ -5832,6 +5919,7 @@ function applyState(st, dariSimpanan) {
   /* owner atau admin masuk di jendela yang tidak dikunci: perangkat ini perangkat owner */
   if (!Api.div() && Api.mode() === 'remote' && coreIsAdmin(st.me) && LS.get('pk_div') !== 'pusat') LS.set('pk_div', 'pusat');
   if (typeof commercePrefetch === 'function') commercePrefetch();
+  if (!S.buka && typeof kunciLanjut === 'function') kunciLanjut();
   return true;
 }
 
@@ -5839,6 +5927,7 @@ function applyState(st, dariSimpanan) {
 function req(action, payload) {
   payload = payload || {};
   if (S.sessionLoad && !S.state) return Promise.reject(new Error('Data akun masih dimuat. Tunggu sampai halaman siap sebelum menggunakan fitur produksi.'));
+  if (S.buka) return Promise.reject(new Error('PIN masih diperiksa ke server. Tunggu sebentar, lalu ulangi.'));
   if (S.token && payload.token === undefined) payload.token = S.token;
   if (S.wantAll) payload.semua = true;
   var workflowWrite = /^(savePO|savePOWithRencana|setStatusPO|saveInvoiceBahan|saveRencanaPotong|cocokkanStokRol|createPotong|createKirim|createSetor|prosesSetor|createQC|createGudang|createUpah|deleteRecord|ubahHarga|tandaiLunas|importRows|gantiImpor|applyLegacyMigration|recoverLegacyMigration|saveHistoryCorrection|saveCommerceSupplier|saveCommerceProduct|saveCommerceOrder|saveCommerceNota|appendCommercePayment|appendCommerceGroupPayment|appendCommerceReceipt|voidCommerceEvent|cancelCommerceRecord|saveCommerceHpp|saveCommerceHppSettings|applyCommerceImport)$/;
@@ -5861,6 +5950,9 @@ function req(action, payload) {
   });
 }
 function signOutLocal() {
+  /* sesi diakhiri server (PIN diganti, akun dinonaktifkan, dikeluarkan): salinan terkunci akun itu ikut dihapus */
+  if (S.buka) { clearTimeout(S.buka.timer); S.buka = null; }
+  kunciHapus(S.state && S.state.me ? S.state.me.id : '');
   clearSessionLoad(); S.token = ''; S.state = null; LS.del(tokenKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null }; closeAll();
   boot();
 }
@@ -6028,6 +6120,7 @@ function paintSync() {
   if (S.lastSync) { var d = new Date(S.lastSync); kapan = (coreYmd(d) === todayYmd() ? '' : tgl(coreYmd(d)) + ' ') + jam(d.toISOString()); }
   var t = S.off ? 'Tidak tersambung' + (kapan ? ' · data ' + kapan : '')
     : (S.busy > 0 ? (syncing && S.busy === 1 ? 'Memperbarui…' : (S.tulis > 0 ? 'Menyimpan…' : 'Memuat…')) : (Api.mode() === 'demo' ? 'Mode coba' : 'Tersambung' + (kapan ? ' · ' + kapan : '')));
+  if (S.buka) t = 'Memeriksa PIN…';
   var lab = $('#sync-t'); if (lab) lab.textContent = t;
 }
 
@@ -6406,33 +6499,66 @@ function hydrateSession(model) {
   return model.request;
 }
 A.sessionRetry = function () { return hydrateSession(S.sessionLoad); };
+/* Data terakhir yang dibuka dengan PIN dari salinan terkunci hanya tampil selama server memeriksa PIN itu.
+   Jawaban apa pun selain "PIN diterima" menutupnya lagi; tanpa jawaban, ia ditutup sendiri setelah KUNCI_TUNGGU. */
+function kunciTutup() {
+  var b = S.buka; if (!b) return;
+  clearTimeout(b.timer); S.buka = null;
+  if (!S.token) { S.state = null; D = { user: {}, po: {}, produk: {} }; closeAll(); }
+}
 A.pinGo = function () {
   var g = S.gate; if (!g.user || g.sending) return;
   if (g.pin.length < 4) { g.err = 'PIN minimal 4 angka.'; return render(); }
-  var loginUserId = g.user.id;
+  var loginUserId = g.user.id, pin = g.pin;
   g.sending = true; g.waitingLong = false; render();
   if (typeof tanda === 'function') tanda('pk-pin-kirim');
   var waitMessage = setTimeout(function () { if (S.gate === g && g.sending) { g.waitingLong = true; render(); } }, 6000);
   function finished() { clearTimeout(waitMessage); g.sending = false; g.waitingLong = false; }
+  /* selagi server memeriksa PIN, salinan terkunci di perangkat dicoba dibuka dengan PIN yang sama */
+  var ditolak = false;
+  kunciBuka(loginUserId, pin).then(function (hit) {
+    /* server sudah menolak PIN ini, padahal PIN ini membuka salinan di perangkat: salinan itu dikunci dengan PIN lama */
+    if (hit && ditolak) return kunciHapus(loginUserId);
+    if (!hit || S.gate !== g || !g.sending || S.state || S.token || S.sessionLoad) return;
+    S.buka = { g: g, timer: setTimeout(function () { if (S.buka && S.buka.g === g) { kunciTutup(); render(); } }, KUNCI_TUNGGU) };
+    S.tab = ''; S.sub = {}; applyState(hit.state, hit.at || 1); render();
+    if (typeof tanda === 'function') tanda('pk-pin-lokal');
+  });
   var request;
   /* stateIfWarm: kalau server sudah siap (lihat panaskan), datanya ikut dikirim bersama jawaban PIN, satu kali jalan */
-  try { request = Api.call('login', { userId: loginUserId, pin: g.pin, av: APP_VERSION, workflowVersion: 2, deferState: true, stateIfWarm: true }); }
+  try { request = Api.call('login', { userId: loginUserId, pin: pin, av: APP_VERSION, workflowVersion: 2, deferState: true, stateIfWarm: true }); }
   catch (error) { request = Promise.reject(error); }
   return Promise.resolve(request).then(function (res) {
     finished();
     if (S.gate !== g) return;
-    if (!g.user || g.user.id !== loginUserId) return render();
-    if (res && res.salah) { g.pin = ''; g.err = res.pesan; return render(); }
+    var terbuka = !!(S.buka && S.buka.g === g);
+    /* salah ketik tidak menghapus apa pun: salinan hanya dihapus kalau PIN yang ditolak server ternyata membukanya */
+    function tolak(pesan) { ditolak = true; if (terbuka) { kunciTutup(); kunciHapus(loginUserId); } g.pin = ''; g.err = pesan; return render(); }
+    if (!g.user || g.user.id !== loginUserId) { if (terbuka) kunciTutup(); return render(); }
+    if (res && res.salah) return tolak(res.pesan);
     var verified = res && (res.deferredState === true ? res.me : res.state && res.state.me);
     var locked = typeof Api.div === 'function' ? Api.div() : '';
-    if (!res || !res.token || !verified || verified.id !== loginUserId || (res.deferredState === true && !verified.divisi) || (locked && verified.divisi !== locked)) { g.pin = ''; g.err = 'Jawaban masuk belum lengkap atau tidak sesuai akun. Silakan masukkan PIN dan coba lagi.'; return render(); }
+    if (!res || !res.token || !verified || verified.id !== loginUserId || (res.deferredState === true && !verified.divisi) || (locked && verified.divisi !== locked)) return tolak('Jawaban masuk belum lengkap atau tidak sesuai akun. Silakan masukkan PIN dan coba lagi.');
     if (typeof tanda === 'function') tanda('pk-pin-server');
+    if (S.buka) { clearTimeout(S.buka.timer); S.buka = null; }
     S.token = res.token; LS.set(tokenKey(), res.token); LS.set(lastKey(), loginUserId);
-    S.gate = { user: null, pin: '', err: '', setup: null }; S.tab = '';
-    if (res.deferredState === true) { beginSessionLoad(res); return; }
+    S.gate = { user: null, pin: '', err: '', setup: null }; if (!terbuka) S.tab = '';
+    kunciSiapkan(loginUserId, pin);
+    if (res.deferredState === true) {
+      /* data terakhir sudah di layar: cukup disegarkan di belakang, tanpa layar tunggu */
+      if (terbuka && S.state) { startSync(); sync(true); render(); return; }
+      beginSessionLoad(res); return;
+    }
     applyState(res.state); startSync(); render();
     if (typeof tanda === 'function') tanda('pk-pin-tampil');
-  }, function (e) { finished(); if (S.gate !== g) return; if (!g.user || g.user.id !== loginUserId) return render(); g.pin = ''; g.err = e.message || 'Gagal masuk.'; render(); });
+  }, function (e) {
+    finished(); if (S.gate !== g) return;
+    var terbuka = !!(S.buka && S.buka.g === g); if (terbuka) kunciTutup();
+    /* sambungan putus bukan penolakan: salinan terkunci dibiarkan */
+    if (!(e && e.net)) { ditolak = true; if (terbuka) kunciHapus(loginUserId); }
+    if (!g.user || g.user.id !== loginUserId) return render();
+    g.pin = ''; g.err = e.message || 'Gagal masuk.'; render();
+  });
 };
 A.setup = function (el) {
   var v = formVals(el.closest('form'));
@@ -6869,11 +6995,13 @@ A.pinSave = function (el) {
   var v = formVals(sheets[sheets.length - 1].node);
   if (!/^\d{4,6}$/.test(v.pinBaru)) return toast('PIN baru harus 4 sampai 6 angka.', true);
   if (v.pinBaru !== v.pin2) return toast('PIN baru dan ulangannya tidak sama.', true);
-  act(el, req('changePin', { pinLama: v.pinLama, pinBaru: v.pinBaru })).then(function () { closeSheet(); toast('PIN diganti. Perangkat lain otomatis keluar.'); }).catch(quiet);
+  act(el, req('changePin', { pinLama: v.pinLama, pinBaru: v.pinBaru })).then(function () { kunciSiapkan(me().id, v.pinBaru); closeSheet(); toast('PIN diganti. Perangkat lain otomatis keluar.'); }).catch(quiet);
 };
 A.logout = function () {
   confirmBox({ title: 'Keluar dari aplikasi?', text: 'Anda perlu memasukkan PIN lagi untuk masuk.', ok: 'Keluar' }, function () {
     var tk = S.token;
+    if (S.buka) { clearTimeout(S.buka.timer); S.buka = null; }
+    snapSegera();
     Api.call('logout', { token: tk }).catch(quiet);
     clearSessionLoad(); S.token = ''; S.state = null; LS.del(tokenKey()); LS.del(lastKey()); hapusSnap(); S.gate = { user: null, pin: '', err: '', setup: null };
     setTimeout(function () { closeAll(); boot(); }, 120);
@@ -10454,7 +10582,7 @@ document.addEventListener('keydown', function (ev) {
 
 window.addEventListener('hashchange', function () {
   if (!Api.rehash()) return;
-  if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); }
+  if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); kunciHapusSemua(); }
   clearSessionLoad(); S.token = bacaToken(); S.state = null; S.boot = null; S.gate = { user: null, pin: '', err: '', setup: null }; closeAll(); boot();
 });
 
@@ -10639,7 +10767,7 @@ if (window.PK_HOSTED && 'serviceWorker' in navigator) {
 /* mulai: baca dulu simpanan perangkat (IndexedDB), baru tentukan divisi, sambungan, dan sesi */
 LS.init(function () {
   Api.init();
-  if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); }
+  if (Api.sumberBaru()) { LS.del(bootKey()); hapusSnap(); kunciHapusSemua(); }
   S.token = bacaToken();
   muatGambarTersimpan();
   bacaSnap(function (snap) { boot(snap); });

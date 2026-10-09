@@ -109,6 +109,14 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.6, aplikasi **langsung terbuka setelah PIN** pada perangkat yang pernah dipakai akun itu. Perubahan ini hanya di tampilan; server tetap satu-satunya penentu sah-tidaknya PIN.
+
+- **Salinan terkunci.** Selain salinan biasa (yang tetap dihapus saat keluar), data terakhir tiap akun disimpan terenkripsi di IndexedDB dengan kunci `pkl_<divisi>_<id pegawai>`. Isinya dienkripsi AES-GCM dengan kunci acak; kunci acak itu dibungkus kunci publik RSA-OAEP 2048 milik gembok; kunci pribadi gembok dibungkus kunci AES yang diturunkan dari PIN (PBKDF2-SHA256, 150.000 putaran, salt acak). PIN tidak disimpan. Gembok dibuat ulang setiap kali server menerima PIN (termasuk setelah ganti PIN di perangkat itu), dan salinan diperbarui setiap kali salinan biasa ditulis, cukup dengan kunci publik.
+- **Saat PIN dikirim.** Permintaan `login` ke server tetap dikirim seperti biasa. Bersamaan dengan itu salinan terkunci dicoba dibuka dengan PIN yang sama; kalau terbuka, data terakhir ditampilkan dengan keterangan "Memeriksa PIN…". Selama itu tidak ada sesi: `req()` menolak semua permintaan, sinkron tidak berjalan, dan salinan tidak ditulis. Jawaban "diterima" memasang sesi lalu menyegarkan data di belakang layar; jawaban lain apa pun menutup tampilan itu, dan tanpa jawaban tampilan ditutup sendiri setelah 20 detik.
+- **Kapan salinan dihapus.** PIN yang ditolak server tetapi membuka salinan (artinya PIN sudah diganti), akun dinonaktifkan atau sesi diakhiri server, dan perangkat disambungkan ke data pusat lain. Salah ketik tidak menghapus apa pun. Salinan dari versi tampilan lain atau lebih tua dari 14 hari tidak dipakai. Mode coba tidak menyimpan salinan.
+- **Batas yang diketahui.** Orang yang memegang perangkat dan mengetahui PIN lama (setelah PIN diganti dari perangkat lain) dapat melihat data terakhir di perangkat itu sampai server menjawab, paling lama 20 detik per percobaan, dan percobaan pertama yang dijawab server menghapus salinannya. PIN 4–6 angka juga dapat ditebak di luar jaringan oleh orang yang menyalin isi penyimpanan perangkat; pakai PIN 6 angka dan kunci layar perangkat. Dengan sambungan terputus, salinan terkunci tidak membuka aplikasi.
+- Ukuran di browser dengan server tiruan lokal berjeda 2,2 detik (data sintetis): masuk pertama 2,2 detik; masuk berikutnya setelah keluar, layar utama tampil sekitar 0,1 detik setelah PIN dikirim dan konfirmasi server datang 2,2 detik kemudian.
+
 Mulai 1.5.5, **Pembelian produk** mengikuti cara kerja aplikasi sebelumnya.
 
 - **Daftar order per supplier.** Order dengan supplier dan tanggal order yang sama (atau nama grup yang sama) tampil dalam satu kelompok dengan jumlah model, pcs, total, yang sudah dibayar, yang sudah diterima, dan sisa bayar. Order tunggal tampil seperti biasa.
