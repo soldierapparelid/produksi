@@ -154,3 +154,30 @@ test('legacy single-size preparation shows only its allowed size and held source
  evaluate(c,"plan.legacyBlocked='Ukuran sudah dipotong; periksa owner';openPotong('po','plan')");assert.doesNotMatch(c.rendered,/data-a="potongSave"/);assert.match(c.rendered,/periksa owner/);
  evaluate(c,"actor.divisi='owner';po.cutting={reviewPlans:[{ukuran:['XL','XXL'],reason:'Jatah lama mencakup beberapa ukuran dan perlu diperiksa owner sebelum dipakai.'}]}");const panel=evaluate(c,'rencanaPotongPanel(po)');assert.match(panel,/Jatah bahan lama · perlu diperiksa/);assert.match(panel,/Ukuran: XL · XXL/);assert.doesNotMatch(panel,/data-a="potongOpen"/);
 });
+
+test('Catat potong on a PO whose material is already prepared opens that preparation, unless other material is asked for',()=>{
+ const c=ui();evaluate(c,"actor.divisi='owner';var direct={getAttribute:function(k){return k==='data-id'?'po':'';}};A.potongOpen(direct)");
+ assert.match(c.rendered,/name="rencanaId" value="plan"/);assert.match(c.rendered,/Bahan yang disiapkan owner/);assert.match(c.rendered,/5 kg/);assert.match(c.rendered,/data-a="potongUbahBahan"/);assert.match(c.rendered,/data-langsung="1"/);assert.doesNotMatch(c.rendered,/data-bahan-qty/);
+ evaluate(c,"var other={getAttribute:function(k){return {'data-id':'po','data-langsung':'1'}[k]||'';}};A.potongOpen(other)");assert.match(c.rendered,/name="rencanaId" value=""/);assert.match(c.rendered,/data-bahan-qty/);
+ evaluate(c,"plan.status='terpakai';A.potongOpen(direct)");assert.match(c.rendered,/name="rencanaId" value=""/,'a used preparation is not offered again');
+ evaluate(c,"plan.status='siap';actor.divisi='potong';A.potongOpen(direct)");assert.match(c.rendered,/Pilih bahan yang sudah disiapkan owner/);
+});
+test('owner without a preparation picks rolls from stock: kilos follow the rolls, a leftover can be added, typing by hand stays possible',async()=>{
+ const c=ui();vm.runInContext(part('function poPrepareOwner()','function poPendingPlansHtml()'),c);
+ evaluate(c,`function jumlahPerSatuan(rows){return rows.reduce(function(n,r){return n+Number(r.qty);},0)+' kg';}
+   $$=function(s,f){if(s==='[data-roll-choice]')return f.rollRows||[];if(s==='[data-po-legacy-bahan]')return f.legacyRows||[];if(s==='[data-rencana-bahan]')return f.rows;return [];};
+   actor.divisi='owner';S.state.rencanaPotong=[];po.bahan='katun  COMBED';stocks=[{kunci:'katun combed',nama:'Katun Combed',satuan:'kg',saldo:52,tersedia:52,legacyTersedia:3}];
+   S.state.stokRol=[{id:'rollA',bahan:'Katun Combed',satuan:'kg',qty:25,tersedia:25,invoice:'BON-1',rollLabel:'Rol 1'},{id:'rollB',bahan:'Katun Combed',satuan:'kg',qty:24,tersedia:24,invoice:'BON-1',rollLabel:'Rol 2'},{id:'rollC',bahan:'Katun Combed',satuan:'kg',qty:20,tersedia:0,invoice:'BON-0',rollLabel:'Rol 9'}];openPotong('po','')`);
+ assert.match(c.rendered,/data-potong-bahan/);assert.match(c.rendered,/name="rencanaBaru" value="new-plan_cut"/);assert.match(c.rendered,/Kilonya otomatis mengikuti sisa rol/);
+ assert.match(c.rendered,/data-roll-choice="rollA"[\s\S]*?25 kg tersedia[\s\S]*?data-roll-qty value="25"/);assert.match(c.rendered,/data-roll-choice="rollB"[\s\S]*?24 kg tersedia[\s\S]*?data-roll-qty value="24"/);assert.doesNotMatch(c.rendered,/data-roll-choice="rollC"/);
+ assert.match(c.rendered,/Tambahkan sisa kiloan/);assert.match(c.rendered,/data-potong-manual hidden/);assert.match(c.rendered,/data-bahan-qty/);
+ evaluate(c,`function row(id,qty){return {nodes:{'[data-roll-select]':{checked:true},'[data-roll-qty]':{value:String(qty)}},getAttribute:function(){return id;}};}
+   form.values={id:'result',poId:'po',rencanaId:'',rencanaRevision:'',rencanaBaru:'result_cut',prepareMode:'roll',includeLegacy:true,legacyRol:'0',tanggal:'2026-10-08',catatan:'',userId:'cutter',tarif:'200'};
+   form.nodes['[data-potong-bahan]']={};form.nodes['[data-roll-picker]']={getAttribute:function(){return '';}};form.rollRows=[row('rollA',25),row('rollB',24)];form.legacyRows=[{values:{legacyBahan:'Katun Combed',legacyQty:'2'}}];`);
+ const sent=evaluate(c,'A.potongSave(el)');evaluate(c,'A.potongSave(el)');assert.equal(c.calls.length,1,'a double tap sends once');assert.equal(c.calls[0].action,'createPotong');
+ assert.deepEqual(plain(c.calls[0].payload.potong),{id:'result',poId:'po',userId:'cutter',tanggal:'2026-10-08',ukuran:{M:50},rencana:{alokasiBahan:[{stokId:'rollA',qty:25},{stokId:'rollB',qty:24}],legacyBahanList:[{nama:'Katun Combed',qty:2,satuan:'kg'}],legacyRol:0,id:'result_cut'},tarif:'200',catatan:''});
+ c.calls[0].resolve({});await sent;assert.equal(c.closed,1);assert.equal(c.form._potongBusy,false);
+ /* more than the roll holds is stopped on the device; "ketik sendiri" keeps the old hand-typed path */
+ evaluate(c,"form.rollRows=[row('rollA',25.5)];A.potongSave(el)");assert.equal(c.calls.length,1);assert.match(c.messages.join(' '),/tidak melebihi sisa/);
+ evaluate(c,"form.values.prepareMode='manual';A.potongSave(el)");assert.equal(c.calls.length,2);assert.equal(c.calls[1].payload.potong.rencana,undefined);assert.deepEqual(plain(c.calls[1].payload.potong.bahanList),[]);
+});
