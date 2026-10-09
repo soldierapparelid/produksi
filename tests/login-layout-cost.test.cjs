@@ -19,11 +19,13 @@ function fixture(){
   h.events.length=0;h.cold();
   return {h,calls,userId:setup.data.state.me.id,login:()=>h.request('login',{userId:setup.data.state.me.id,pin:'1234',deferState:true})};
 }
-test('a code-only release performs one fresh account read and session commit, not every table header',()=>{
+test('a code-only release performs one account read and a property-only session commit, not every table header',()=>{
   const f=fixture(),previousMarker=f.h.properties.schema;
   f.h.run("APP_VERSION='9.9.9-code-only';");
   const r=f.login();assert.equal(r.ok,true,r.error);assert.equal(r.data.deferredState,true);assert.equal(r.data.appVersion,'9.9.9-code-only');
-  assert.deepEqual(f.calls.reads,{Pegawai:1});assert.equal(f.calls.writes,1);assert.equal(f.calls.formats,1);assert.equal(f.calls.properties,1);
+  /* The new code version starts with an empty row cache, so the account is read once; the session goes to script properties. */
+  assert.deepEqual(f.calls.reads,{Pegawai:1});assert.equal(f.calls.writes,0);assert.equal(f.calls.formats,0);assert.equal(f.calls.properties,0);
+  assert.ok(String(f.h.properties['s_'+f.userId]).split(',').includes(r.data.token));
   assert.equal(f.h.events.filter(e=>e[0]==='lock').length,1,'only the actual auth lock is acquired');
   assert.equal(f.h.events.filter(e=>e[0]==='flush').length,1,'session is durably committed before success');
   assert.equal(f.h.properties.schema,previousMarker,'no redundant schema property mutation');

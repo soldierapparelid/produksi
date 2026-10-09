@@ -37,7 +37,9 @@ test('a fully empty existing sheet gets real headers before the first data appen
   h.run(`pkStore_().lock(function(){pkStore_().append('Produk',{id:'prod001',nama:'One'});});`);
   assert.equal(h.sheets.Produk.values[1][h.sheets.Produk.values[0].indexOf('id')],'prod001');assert.equal(m.max,1);
 });
-test('staged PIN verification updates the physical account row without capacity reads',()=>{
+test('staged PIN verification touches no physical account cell while the account cache is warm, and one data range when it is cold',()=>{
   const h=harness(),setup=h.request('setupOwner',{nama:'Fixture',pin:'1234'});h.cold();const m=meter(h.sheets.Pegawai);
-  const r=h.request('login',{userId:setup.data.state.me.id,pin:'1234',deferState:true});assert.equal(r.ok,true,r.error);assert.equal(r.data.deferredState,true);assert.deepEqual(m,{last:0,max:0,values:1,dataRange:1});
+  const r=h.request('login',{userId:setup.data.state.me.id,pin:'1234',deferState:true});assert.equal(r.ok,true,r.error);assert.equal(r.data.deferredState,true);assert.deepEqual(m,{last:0,max:0,values:0,dataRange:0});
+  for(const key of Object.keys(h.cached))if(key.includes('|Pegawai|'))delete h.cached[key];h.cold();
+  const cold=h.request('login',{userId:setup.data.state.me.id,pin:'1234',deferState:true});assert.equal(cold.ok,true,cold.error);assert.deepEqual(m,{last:0,max:0,values:1,dataRange:1});
 });

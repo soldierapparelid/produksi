@@ -20,6 +20,7 @@ function harness(){
     function appLabel(d){return d||'Produksi';}function logoImg(){return '<i>Logo</i>';}function inisial(n){return String(n||'').slice(0,1);}function ic(){return '<i></i>';}
     function signOutLocal(){clearSessionLoad();S.token='';S.state=null;signedOut++;}function hapusSnap(){snapshotRemoved++;}
     function bacaBoot(){return cachedBoot;}function simpanBoot(b){bootSaved.push(b);}function pilihTerakhir(){}function gateDepan(){return false;}function sync(){return Promise.resolve();}function seedDemo(){}
+    var warmed=0;function panaskan(){warmed++;}
   `,c);
   vm.runInContext(part('function clearSessionLoad()','A.setup = function'),c);
   vm.runInContext(part('var bootKe = 0;','/* Data contoh'),c);
@@ -117,6 +118,31 @@ test('production request is rejected locally while the authenticated state is st
   const h=harness();await authenticate(h);
   vm.runInContext(part('function req(', 'function signOutLocal('),h.c);
   const error=await h.run("req('createPotong',{}).catch(function(e){return e;})");assert.match(error.message,/Data akun masih dimuat/);assert.equal(h.requests.length,2);
+});
+
+test('the sign-in screen warms the server without credentials, at most once per four minutes, and asks for a one-trip answer',async()=>{
+  const h=harness();
+  /* use the real warm-up function instead of the counting stub */
+  h.run("var fakeNow=1000000;var Date={now:function(){return fakeNow;}};");
+  vm.runInContext(part('var hangatPada = 0;','var Idb = '),h.c);
+  h.run("S.gate={user:null,pin:'',err:''};boot()");
+  const kinds=()=>h.requests.map(r=>r.action);
+  assert.deepEqual(kinds(),['hangat','bootstrap'],'warming starts while the public sign-in data is still loading');
+  assert.equal(JSON.stringify(h.requests[0].payload),'{}','no token, PIN or account id is sent');
+  assert.equal(h.requests[1].payload.stateIfWarm,true);
+  h.run('panaskan();panaskan()');assert.equal(h.requests.filter(r=>r.action==='hangat').length,1,'repeat calls inside four minutes are dropped');
+  h.run('fakeNow+=239000;panaskan()');assert.equal(h.requests.filter(r=>r.action==='hangat').length,1);
+  h.run('fakeNow+=2000;panaskan()');assert.equal(h.requests.filter(r=>r.action==='hangat').length,2);
+  h.requests.filter(r=>r.action==='hangat').forEach(r=>r.reject(new Error('offline')));await Promise.resolve();await Promise.resolve();
+  assert.equal(h.run('S.gate.err||""'),'','a failed warm-up is silent');
+  h.run("fakeNow+=600000;S.state={me:{id:'worker'}};panaskan();S.state=null;S.sessionLoad={token:'x'};panaskan();S.sessionLoad=null;");
+  assert.equal(h.requests.filter(r=>r.action==='hangat').length,2,'never while signed in or loading an authenticated session');
+  h.run("Api.mode=function(){return 'demo';};fakeNow+=600000;panaskan();Api.mode=function(){return 'gas';};");
+  assert.equal(h.requests.filter(r=>r.action==='hangat').length,2,'never in the offline trial mode');
+  const before=h.requests.length;h.run("S.gate={user:{id:'worker'},pin:'1234',err:''};");const done=h.run('A.pinGo()');
+  const login=h.requests[before];assert.equal(login.action,'login');assert.equal(login.payload.deferState,true);assert.equal(login.payload.stateIfWarm,true);
+  login.resolve({token:'one-trip-token',state:state()});await done;
+  assert.equal(h.run('S.state.me.id'),'worker');assert.equal(h.requests.filter(r=>r.action==='getState').length,0,'a warm server answers PIN and data in one round trip');
 });
 
 test('changing the backend while PIN is in flight invalidates both deferred and older full-state replies',async()=>{

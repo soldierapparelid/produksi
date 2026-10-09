@@ -8,14 +8,15 @@ function fixture(){
   const state=call('getState',{token:setup.data.token});assert.equal(state.ok,true,state.error);
   return {h,call,owner:setup.data.state.me.id,token:setup.data.token,ver:state.data.ver,av:state.data.appVersion};
 }
-test('another account login keeps business sync small while publishing its new durable session',()=>{
-  const f=fixture(),oldTable=Number(f.h.properties.v_Pegawai);
+test('another account login keeps business sync small while recording its new durable session outside the account sheet',()=>{
+  const f=fixture(),oldTable=Number(f.h.properties.v_Pegawai),accountWrites=f.h.sheets.Pegawai.writes;
   const login=f.call('login',{userId:'worker001',pin:'4567',deferState:true});assert.equal(login.ok,true,login.error);
-  assert.equal(Number(f.h.properties.ver),f.ver);assert.equal(Number(f.h.properties.v_Pegawai),oldTable+1);
+  assert.equal(Number(f.h.properties.ver),f.ver);assert.equal(Number(f.h.properties.v_Pegawai),oldTable,'a sign-in changes neither the business version nor the account table');
+  assert.equal(f.h.sheets.Pegawai.writes,accountWrites);assert.ok(String(f.h.properties.s_worker001).split(',').includes(login.data.token));
   const reads={};for(const [name,sheet]of Object.entries(f.h.sheets)){const range=sheet.getDataRange.bind(sheet);sheet.getDataRange=()=>{reads[name]=(reads[name]||0)+1;return range();};}
   const sync=f.call('sync',{token:f.token,ver:f.ver,av:f.av});assert.equal(sync.ok,true,sync.error);
   assert.deepEqual(sync.data,{same:true,ver:f.ver});assert.equal(sync.data.po,undefined);
-  assert.deepEqual(Object.keys(reads),['Pengaturan'],'production and fresh versioned account cache remain reusable');
+  assert.deepEqual(Object.keys(reads),[],'a no-change poll after a colleague signs in opens no spreadsheet at all');
   const worker=f.call('getState',{token:login.data.token});assert.equal(worker.ok,true,worker.error);assert.equal(worker.data.me.id,'worker001');
 });
 test('wrong PIN counters and lockout update fresh account evidence without a production-version storm',()=>{

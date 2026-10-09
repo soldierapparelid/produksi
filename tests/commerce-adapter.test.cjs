@@ -63,7 +63,13 @@ test('additive migration freezes original snapshots, never counts DP twice, hold
  const p=f.good('previewCommerceImport',{backup:b,reference});assert.equal(p.summary.receiptReview,1);assert.equal(p.summary.images,1);assert.equal(f.raw('CommerceRecord').length,0);
  const applied=f.good('applyCommerceImport',{backup:b,reference,sourceHash:p.sourceHash,planHash:p.planHash});assert.equal(applied.applied,true);
  const order=f.state().orders[0];assert.equal(order.totalPaid,10000);assert.equal(order.balance,40000);assert.equal(order.receiptReview,true);assert.equal(order.receipts[0].itemId,'missing-item-id');
- assert.equal(f.state('nota').notes[0].totalPaid,90000);assert.equal(f.state().products[0].gambar,'data:image/png;base64,AAAA');assert.equal(JSON.stringify(f.raw('CommerceSource')).includes('never-copy'),false);
+ assert.equal(f.state('nota').notes[0].totalPaid,90000);assert.equal(JSON.stringify(f.raw('CommerceSource')).includes('never-copy'),false);
+ /* The list carries a marker only; the exact picture is stored unchanged and fetched separately. */
+ const pictured=f.state().products[0];assert.equal(pictured.hasPicture,true);assert.equal(pictured.gambar,undefined);assert.equal(JSON.parse(f.raw('CommerceRecord').find(r=>r.kind==='product').data).gambar,'data:image/png;base64,AAAA');
+ const wanted={items:[{id:pictured.id,rev:pictured.revision.slice(0,16)}]};assert.deepEqual(f.good('getCommerceImages',wanted).images,{[pictured.id]:'data:image/png;base64,AAAA'});
+ f.h.run(`var pictureBase=pkStore_,pictureReads=[];pkStore_=function(){var s=pictureBase();if(!s.pictureTracked){var read=s.read;s.read=function(n){pictureReads.push(n);return read(n);};s.pictureTracked=true;}return s;};void 0;`);
+ assert.deepEqual(f.good('getCommerceImages',wanted).images,{[pictured.id]:'data:image/png;base64,AAAA'});assert.equal(f.h.run('pictureReads.indexOf("CommerceRecord")'),-1,'a repeated picture comes from the per-image cache');
+ f.bad('getCommerceImages',wanted,/owner|admin/,'fixture-cutter-token-001');f.bad('getCommerceImages',{items:[{id:pictured.id,rev:'../x'}]},/tidak sah/);
  const source=f.raw('CommerceSource').find(r=>r.kind==='order');assert.deepEqual(JSON.parse(source.data),b.soldier_pembelian_produk.orders[0]);
  f.bad('appendCommerceReceipt',{id:'manual-new',orderId:order.id,expectedRevision:order.revision,itemId:'guessed',jumlah:1},/Hubungan/);
  const before=f.raw('CommerceSource');f.good('applyCommerceImport',{backup:b,reference,sourceHash:p.sourceHash,planHash:p.planHash});assert.deepEqual(f.raw('CommerceSource'),before);
@@ -105,7 +111,36 @@ test('native mutations do not read the large immutable source snapshot and revok
  const f=fixture();f.masters();f.h.run(`var commerceNoSourceBase=pkStore_,commerceTablesRead=[];pkStore_=function(){var s=commerceNoSourceBase();if(!s.readTracked){var read=s.read;s.read=function(n){commerceTablesRead.push(n);return read(n);};s.readTracked=true;}return s;};void 0;`);
  f.good('saveCommerceOrder',{record:f.order()});assert.equal(f.h.run('commerceTablesRead.indexOf("CommerceSource")'),-1);
  f.good('getCommerceState',{module:'pembelian'},'fixture-admin-token-001');const values=f.h.sheets.Pegawai.values,head=values[0],row=values.find(r=>r[head.indexOf('id')]==='adminfixture');row[head.indexOf('aktif')]=false;
- f.bad('getCommerceState',{module:'nota'},/nonaktif/,'fixture-admin-token-001');
+  /* A silent sheet edit (no edit trigger): money writes still recheck the physical account row. Lists follow
+    the account cache like every other page, and the edit trigger ends that at once. */
+ f.bad('saveCommerceSupplier',{record:{id:'blocked01',nama:'Blocked'}},/nonaktif/,'fixture-admin-token-001');
+ f.h.run(`onEdit({range:{getSheet:function(){return {getName:function(){return 'Pegawai';}};}}});void 0;`);
+ f.bad('getCommerceState',{module:'nota'},/nonaktif/,'fixture-admin-token-001');f.bad('getCommerceImages',{items:[]},/nonaktif/,'fixture-admin-token-001');
+});
+test('one answer carries the refreshed page after a save, and lists never carry product photos',()=>{
+ const f=fixture();f.masters();const picture='data:image/jpeg;base64,'+'A'.repeat(4000);
+ let product=f.state().products[0];
+ const saved=f.good('saveCommerceProduct',{record:{...product,gambar:picture},expectedRevision:product.revision,withState:true});
+ assert.equal(saved.record.hasPicture,true);assert.equal(saved.record.gambar,undefined);assert.equal(saved.commerce.module,'pembelian');assert.equal(saved.commerce.products[0].revision,saved.record.revision);
+ assert.equal(JSON.stringify(saved).includes(picture),false);assert.equal(JSON.stringify(f.state()).includes(picture),false);
+ assert.deepEqual(f.good('getCommerceImages',{items:[{id:'product01',rev:saved.record.revision.slice(0,16)}]}).images,{product01:picture});
+ /* Editing other fields keeps the stored photo; the lean record never erases it. */
+ product=f.state().products[0];const renamed=f.good('saveCommerceProduct',{record:{...product,nama:'Product renamed'},expectedRevision:product.revision,withState:true});
+ assert.equal(renamed.record.hasPicture,true);assert.equal(JSON.parse(f.raw('CommerceRecord').find(r=>r.kind==='product').data).gambar,picture);
+ /* A stale revision still shows the current photo, but only the exact revision is kept in the per-image cache. */
+ assert.deepEqual(f.good('getCommerceImages',{items:[{id:'product01',rev:saved.record.revision.slice(0,16)}]}).images,{product01:picture});
+ const order=f.good('saveCommerceOrder',{record:f.order(),withState:true});assert.equal(order.commerce.orders.length,1);assert.equal(order.commerce.orders[0].productName,'Product renamed');assert.equal(order.commerce.version,f.state().version);
+ const paid=f.good('appendCommercePayment',{id:'pay01',module:'pembelian',parentId:'order01',expectedRevision:order.record.revision,tanggal:'2026-10-08',jumlah:10000,metode:'cash',withState:true});
+ assert.equal(paid.commerce.orders[0].totalPaid,10000);assert.equal(paid.record.revision,paid.commerce.orders[0].revision);
+ /* The same request sent again answers with the same record and the current page, without a second payment. */
+ const again=f.good('appendCommercePayment',{id:'pay01',module:'pembelian',parentId:'order01',expectedRevision:order.record.revision,tanggal:'2026-10-08',jumlah:10000,metode:'cash',withState:true});
+ assert.equal(again.commerce.orders[0].totalPaid,10000);assert.equal(f.raw('CommerceEvent').length,1);
+ assert.equal(f.good('saveCommerceSupplier',{record:{id:'supplier02',nama:'No state asked'}}).commerce,undefined);
+});
+test('many orders reuse one product and supplier index and keep the names the per-record view gives',()=>{
+ const f=fixture();f.masters();for(let i=0;i<6;i++)f.good('saveCommerceOrder',{record:f.order({id:'order0'+i})});
+ const listed=f.state().orders,single=f.good('saveCommerceOrder',{record:f.order({id:'order00'})}).record;
+ assert.equal(listed.length,6);assert.deepEqual(listed.find(o=>o.id==='order00'),single);assert.ok(listed.every(o=>o.productName==='Product Fixture'&&o.supplierName==='Supplier Fixture'));
 });
 test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
  const f=fixture();f.masters();let a=f.good('saveCommerceOrder',{record:f.order({catatan:'Print fixture'})}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02'})}).record;

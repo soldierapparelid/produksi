@@ -5,8 +5,8 @@ const block=html.slice(html.indexOf('/* COMMERCE UI START'),html.indexOf('/* COM
 assert.ok(block.length>10000,'native commerce implementation exists');
 function harness(){
   const requests=[],context=vm.createContext({console,setTimeout,clearTimeout,request(action,payload){return new Promise((resolve,reject)=>requests.push({action,payload,resolve,reject}));}});
-  vm.runInContext(`var A={},C={},R={},VIEWS={},S={token:'session-one',state:{me:{id:'owner',divisi:'owner'},settings:{}},f:{},sub:{},tab:'beranda'},Api={mode:function(){return 'gas';}},messages=[],renders=0,drops=0,prints=[],pdfs=[],nextId=0,lastSheet='';
-  function me(){return S.state.me;}function isAdmin(){return !!S.state&&['owner','admin'].includes(me().divisi);}function req(a,p){return request(a,p);}function refresh(){renders++;}function render(){renders++;}function toast(t,b){messages.push({text:t,bad:!!b});}function quiet(){}function nf(x){return String(Number(x)||0);}function nfQty(x){return nf(x);}function rp(x){return 'Rp'+String(Number(x)||0);}function tgl(x){return String(x||'');}function todayYmd(){return '2026-10-08';}function newId(){return 'new_'+(++nextId);}function ic(){return '';}
+  vm.runInContext(`var A={},C={},R={},VIEWS={},S={token:'session-one',state:{me:{id:'owner',divisi:'owner'},settings:{}},f:{},sub:{},tab:'beranda',img:{}},Api={mode:function(){return 'gas';},div:function(){return '';}},kv={},idbWrites=[],Idb={get:function(s,k,fn){fn(kv[k]);},put:function(s,k,v){kv[k]=v;idbWrites.push(k);},del:function(s,k){delete kv[k];}},UI_VERSION='ui-test',IMG_TOKO='cm.',messages=[],renders=0,drops=0,prints=[],pdfs=[],nextId=0,lastSheet='';
+  function me(){return S.state.me;}function isAdmin(){return !!S.state&&['owner','admin'].includes(me().divisi);}function req(a,p){return request(a,p);}function refresh(){renders++;}function render(){renders++;}function toast(t,b){messages.push({text:t,bad:!!b});}function quiet(){}function nf(x){return String(Number(x)||0);}function nfQty(x){return nf(x);}function rp(x){return 'Rp'+String(Number(x)||0);}function tgl(x){return String(x||'');}function todayYmd(){return '2026-10-08';}function newId(){return 'new_'+(++nextId);}function ic(){return '';}function inisial(n){return String(n||'?').charAt(0).toUpperCase();}function commerceSnapKey(m){return 'pks_cm_'+m+'_pusat';}
   function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function act(el,p){return Promise.resolve(p).catch(function(e){toast(e.message,true);throw e;});}function emptyBox(x){return '<p>'+esc(x)+'</p>';}function seg(){return '';}function searchBox(){return '';}function cocok(q,a){return !q||a.join(' ').toLowerCase().includes(q.toLowerCase());}function paintList(){}function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fCatatan(x){return '<textarea name="catatan">'+esc(x)+'</textarea>';}function footSave(x){return x;}function sheetHtml(t,b,f){return '<h2>'+esc(t)+'</h2>'+b+(f||'');}
   var currentForm={values:{},rows:[],note:{hidden:true,innerHTML:''},fields:[],sheet:{buttons:[]},getAttribute:function(k){return k==='data-module'?this.module:null;},closest:function(){return this.sheet;}};
@@ -45,6 +45,69 @@ test('financial uncertainty freezes the same intent, performs no automatic retry
 });
 test('a write success triggers one fresh commerce read even when an older read is running',async()=>{
   const h=harness();h.form({},'nota');const old=h.run("commerceFetch('nota')"),save=h.run("commerceMutation('nota','saveCommerceNota',{record:{id:'fixed'}},currentForm,null)");h.requests[1].resolve({record:{id:'fixed'}});await turn();assert.equal(h.requests.length,3);assert.equal(h.requests[2].action,'getCommerceState');h.requests[2].resolve(reply('nota',{notes:[{id:'fixed'}]},12));await save;h.requests[0].resolve(reply('nota',{notes:[]},11));await assert.rejects(old);assert.equal(h.run("commerceData('nota').notes[0].id"),'fixed');assert.equal(h.run('drops'),1);
+});
+test('a save answer that carries the refreshed page needs no second request and still outranks an older read',async()=>{
+  const h=harness();h.form({},'nota');const old=h.run("commerceFetch('nota')"),save=h.run("commerceMutation('nota','saveCommerceNota',{record:{id:'fixed'}},currentForm,null)");
+  assert.equal(h.requests[1].payload.withState,true);assert.equal(h.run('currentForm._commerceIntent.payload.withState'),undefined,'the kept intent stays exactly what the form sent');
+  h.requests[1].resolve({record:{id:'fixed'},commerce:reply('nota',{notes:[{id:'fixed'}]},12)});await save;
+  assert.equal(h.requests.length,2,'no second request');assert.equal(h.run('drops'),1);assert.equal(h.run("commerceData('nota').notes[0].id"),'fixed');assert.equal(h.run("commerceEntry('nota').version"),12);
+  h.requests[0].resolve(reply('nota',{notes:[]},11));await assert.rejects(old);assert.equal(h.run("commerceData('nota').notes[0].id"),'fixed');
+  assert.equal(JSON.parse(h.run("kv.pks_cm_nota_pusat.s")).notes[0].id,'fixed','the device copy follows the saved page');
+});
+test('a save answer with a foreign or incomplete page falls back to one fresh read; HPP never asks for a page in the answer',async()=>{
+  for(const page of [{module:'nota',actor:{id:'other',divisi:'owner'},notes:[],version:12},{module:'pembelian',actor:{id:'owner',divisi:'owner'},orders:[],version:12}]){
+    const h=harness();h.form({},'nota');const save=h.run("commerceMutation('nota','saveCommerceNota',{record:{id:'fixed'}},currentForm,null)");h.requests[0].resolve({record:{id:'fixed'},commerce:page});await turn();
+    assert.equal(h.requests.length,2);assert.equal(h.requests[1].action,'getCommerceState');h.requests[1].resolve(reply('nota',{notes:[{id:'fixed'}]},12));await save;assert.equal(h.run('drops'),1);
+  }
+  const h=harness();h.form({},'hpp');h.run("commerceMutation('hpp','saveCommerceHppSettings',{pajak:1},currentForm,null)");assert.equal(h.requests[0].payload.withState,undefined);
+});
+test('lists mark product photos for separate loading, never fetch them inline, and refuse unsafe picture text',()=>{
+  const h=harness(),marked=h.run("commerceThumb({id:'p1',nama:'Kaos Polos',revision:'abcdef0123456789ffff',hasPicture:true})");
+  assert.match(marked,/data-img="cm\.p1"/);assert.match(marked,/data-ver="abcdef0123456789"/);assert.ok(!marked.includes('background-image'));
+  assert.ok(!h.run("commerceThumb({id:'p2',nama:'Tanpa foto',revision:'abcdef0123456789'})").includes('data-img'));assert.ok(!h.run("commerceThumb(null,'Produk terhapus')").includes('data-img'));
+  assert.match(h.run("commerceThumb({gambar:'data:image/jpeg;base64,AAAA'},'Baru','l')"),/class="thumb l has" style="background-image:url\(&quot;data:image\/jpeg;base64,AAAA&quot;\)"/);
+  for(const unsafe of ["javascript:alert(1)","data:image/svg+xml;base64,AAAA","data:image/png;base64,AA\"onload=\"x"])assert.ok(!h.run("commerceThumb({gambar:"+JSON.stringify(unsafe)+"},'X')").includes('background-image'));
+  h.seed('pembelian',{suppliers:[],products:[{id:'p1',nama:'Kaos Polos',revision:'abcdef0123456789ffff',hasPicture:true}],orders:[{id:'o1',produkId:'p1',productName:'Kaos Polos',tanggalOrder:'2026-10-08',items:[{id:'a',nama:'M',jumlah:2}],totalHarga:10,balance:10,totalReceived:0,events:[]}]});
+  h.run("S.listFn=null;S.sub.commercePurchase='orders';var orderPage=VIEWS['pembelian-produk']();S.sub.commercePurchase='products';var productPage=VIEWS['pembelian-produk']();");
+  assert.match(h.run('orderPage'),/data-a="commerceOrderDetail"[^>]*><span class="thumb" data-img="cm\.p1"/);assert.match(h.run('productPage'),/data-kind="products"[^>]*><span class="thumb" data-img="cm\.p1"/);
+  assert.match(h.run("commerceDetail('pembelian','o1')"),/<span class="thumb l" data-img="cm\.p1"/);assert.equal(h.requests.length,0);
+});
+test('a saved product keeps its photo on the device under the new revision without another download',()=>{
+  const h=harness();h.run("currentForm._commerceIntent={action:'saveCommerceProduct',payload:{record:{id:'p1',gambar:'data:image/jpeg;base64,NEW'}}};commerceKeepPicture(currentForm,{record:{id:'p1',revision:'1111111111111111aaaa',hasPicture:true}});");
+  assert.deepEqual(h.json("S.img['cm.p1']"),{ver:'1111111111111111',data:'data:image/jpeg;base64,NEW'});assert.equal(h.run("kv['cm.p1']"),'1111111111111111|data:image/jpeg;base64,NEW');
+  /* renamed only: the photo the form was opened with moves to the new revision */
+  h.run("currentForm._commerceOriginal={revision:'1111111111111111aaaa'};currentForm._commerceIntent={action:'saveCommerceProduct',payload:{record:{id:'p1'}}};commerceKeepPicture(currentForm,{record:{id:'p1',revision:'2222222222222222bbbb',hasPicture:true}});");
+  assert.deepEqual(h.json("S.img['cm.p1']"),{ver:'2222222222222222',data:'data:image/jpeg;base64,NEW'});
+  /* a photo cached for some other revision is never relabelled */
+  h.run("currentForm._commerceOriginal={revision:'9999999999999999cccc'};commerceKeepPicture(currentForm,{record:{id:'p1',revision:'3333333333333333dddd',hasPicture:true}});");
+  assert.equal(h.run("S.img['cm.p1'].ver"),'2222222222222222');
+});
+test('the device copy opens the page at once for the same session only, and any server answer replaces it',async()=>{
+  const copy=JSON.stringify({suppliers:[],products:[],orders:[{id:'from-device'}]});
+  const h=harness();h.run(`kv.pks_cm_pembelian_pusat={t:'session-one',a:'owner',ui:'ui-test',at:5,v:40,s:${JSON.stringify(copy)}};`);
+  const p=h.run("S.tab='pembelian-produk';commerceFetch('pembelian',false)");assert.equal(h.requests.length,1,'the server is still asked');assert.equal(h.run("commerceData('pembelian').orders[0].id"),'from-device');
+  assert.match(h.run("commerceLoadView('pembelian','Pembelian produk','x',function(){return 'LIST';})"),/data terakhir di perangkat[\s\S]*LIST/);
+  h.requests[0].resolve(reply('pembelian',{suppliers:[],products:[],orders:[{id:'from-server'}]},12));await p;
+  assert.equal(h.run("commerceData('pembelian').orders[0].id"),'from-server','a lower server version still replaces a device copy');assert.equal(h.run("commerceEntry('pembelian').lama"),0);assert.equal(JSON.parse(h.run('kv.pks_cm_pembelian_pusat.s')).orders[0].id,'from-server');
+  for(const stored of [{t:'someone-else',a:'owner',ui:'ui-test'},{t:'session-one',a:'other',ui:'ui-test'},{t:'session-one',a:'owner',ui:'older-ui'}]){
+    const x=harness();x.run(`kv.pks_cm_pembelian_pusat=Object.assign({at:5,v:40,s:${JSON.stringify(copy)}},${JSON.stringify(stored)});commerceFetch('pembelian',false).catch(function(){});`);assert.equal(x.run("commerceEntry('pembelian').data"),null);
+  }
+  const offline=harness();offline.run(`kv.pks_cm_pembelian_pusat={t:'session-one',a:'owner',ui:'ui-test',at:5,v:40,s:${JSON.stringify(copy)}};`);const failed=offline.run("commerceFetch('pembelian',false)");offline.requests[0].reject(new Error('Server tidak bisa dihubungi.'));await assert.rejects(failed);
+  assert.match(offline.run("commerceLoadView('pembelian','Pembelian produk','x',function(){return 'LIST';})"),/belum diperbarui dari pusat[\s\S]*LIST/);
+  const hpp=harness();hpp.run("kv.pks_cm_hpp_pusat={t:'session-one',a:'owner',ui:'ui-test',at:5,v:1,s:'{\"models\":[]}'};commerceFetch('hpp',false).catch(function(){});");assert.equal(hpp.run("commerceEntry('hpp').data"),null,'HPP is never opened from a device copy');
+});
+test('the order list follows the earlier app: four totals, variants and paid amount per card, and quick actions only where allowed',()=>{
+  const h=harness(),base={produkId:'p1',productName:'Kaos',productSnapshot:{model:'Oversize',warna:'Hitam'},supplierName:'Supplier A',tanggalOrder:'2026-10-08',hargaSatuan:1000,items:[{id:'a',nama:'M',jumlah:6},{id:'b',nama:'L',jumlah:4}],totalQty:10,totalHarga:10000,events:[]};
+  const orders=[{...base,id:'open',status:'dp',totalPaid:4000,balance:6000,totalReceived:3},{...base,id:'done',status:'selesai',totalPaid:10000,balance:0,totalReceived:10},{...base,id:'cancelled',status:'batal',totalPaid:0,balance:10000,totalReceived:0},{...base,id:'held',status:'review',needsReview:true,paymentReview:true,receiptReview:true,totalPaid:99999,balance:0,totalReceived:2}];
+  h.seed('pembelian',{suppliers:[],products:[],orders});
+  const kpi=h.run("commerceOrderKpi(commerceData('pembelian').orders)");
+  assert.match(kpi,/Order aktif<\/span><span class="v">2</);assert.match(kpi,/Belum bayar<\/span><span class="v money">Rp6000</,'cancelled and held amounts are not added');assert.match(kpi,/di luar 1 order yang perlu diperiksa/);assert.match(kpi,/Sudah diterima<\/span><span class="v">15</);assert.match(kpi,/Belum diterima<\/span><span class="v">15</);
+  const card=id=>h.run("commerceOrderCard(commerceFind('pembelian','orders',"+JSON.stringify(id)+"))");
+  const open=card('open');assert.match(open,/Kaos Oversize Hitam/);assert.match(open,/\(2 varian\)/);assert.match(open,/M \(6\), L \(4\)/);assert.match(open,/3\/10 diterima/);assert.match(open,/Dibayar Rp4000/);assert.match(open,/Sisa Rp6000/);
+  assert.match(open,/data-a="commercePaymentOpen" data-m="pembelian" data-id="open">Bayar/);assert.match(open,/data-a="commerceReceiptOpen" data-m="pembelian" data-id="open">Terima/);
+  for(const id of ['done','cancelled','held']){const c=card(id);assert.ok(!c.includes('commercePaymentOpen'),id+' offers no payment');assert.ok(!c.includes('commerceReceiptOpen'),id+' offers no receipt');}
+  h.run("S.listFn=null;S.sub.commercePurchase='orders';var listed=VIEWS['pembelian-produk']();");assert.match(h.run('listed'),/class="grid g-kpi"[\s\S]*class="corder"/);
+  h.run("S.sub.commercePurchase='products';var masters=VIEWS['pembelian-produk']();");assert.ok(!h.run('masters').includes('g-kpi'));
 });
 test('order save preserves item identity and sends initial DP in the same request',async()=>{
   const h=harness();h.form({id:'order-one',revision:'',produkId:'product-one',hargaSatuan:'100',tanggalOrder:'2026-10-08',catatan:'',dp:'50',metode:'transfer'},'pembelian',[{id:'line-M',values:{lineName:'M',lineQty:'2'}},{id:'line-L',values:{lineName:'L',lineQty:'3'}}]);h.run('A.commerceOrderSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceOrder');const p=h.requests[0].payload;assert.equal(p.record.initialPayment.jumlah,50);assert.deepEqual(JSON.parse(JSON.stringify(p.record.items)),[{id:'line-M',nama:'M',jumlah:2},{id:'line-L',nama:'L',jumlah:3}]);assert.equal(p.record.id,'order-one');
