@@ -19,7 +19,9 @@ function ui(){
     function esc(s){return String(s==null?'':s);}function nf(n){return String(n);}function nfQty(n){return String(Math.round(Number(n)*1000)/1000).replace('.',',');}function ic(){return '';}function emptyBox(s){return s;}
     function hid(k,v){return '<input name="'+k+'" value="'+v+'">';}function fCatatan(){return '';}function footSave(a,l){return '<button data-a="'+a+'">'+l+'</button>';}function recalc(){}
     var confirmText='',confirmFn=null;function confirmBox(o,fn){confirmText=o.title+' '+o.text;confirmFn=fn;}
+    var sheets=[],rolls=[];function dropSheet(){}function stokRolById(id){return rolls.filter(function(r){return r.id===id;})[0]||null;}function fNum(l,n,v,a,h){return '<input name="'+n+'" value="'+v+'">'+(h||'');}
   `,c);
+  vm.runInContext(part('function rolRinciBebas(','function stokRolBahan('),c);
   vm.runInContext(part('/* Rinci rol: owner mengisi','A.cocokOpen = function (el) {'),c);
   vm.runInContext('rollPilihanSegarkan=function(){refreshed++;};',c);
   return {c,run:s=>vm.runInContext(s,c),json:s=>JSON.parse(vm.runInContext('JSON.stringify('+s+')',c))};
@@ -48,6 +50,18 @@ test('a mistyped roll that nobody used yet can be taken back; the list offers it
   const h=ui();h.run("A.rinciRolHapus({getAttribute:function(){return 'rinci-1-r2';}})");assert.match(h.run('confirmText'),/Total stok tidak berubah/);
   const done=h.run('confirmFn(null)');assert.deepEqual(h.json('requests[0]'),{action:'deleteRecord',payload:{sheet:'StokBahan',id:'rinci-1-r2'}});h.run('requests[0].resolve({})');await done;assert.match(h.run('messages[messages.length-1]'),/kembali ke stok tanpa rincian rol/);
   const list=part('A.cocokOpen = function (el) {','function openCocokLegacy(');assert.match(list,/r\.rinci&&!coreNum\(r\.pakai\)&&!coreNum\(r\.koreksi\)&&!coreNum\(r\.dicadangkan\)&&!r\.correctionRevision\?'<button class="btn sm ghost" data-a="rinciRolHapus"/);
+});
+
+test('a tapped roll opens its weight for correction; a roll already in use explains why it stays',async()=>{
+  const h=ui();h.run("rolls=[{id:'rin-1',bahan:'Scuba Hitam',rollLabel:'Rol 2',qty:48.85,saldo:48.85,rinci:true},{id:'rin-2',bahan:'Scuba Hitam',rollLabel:'Rol 3',qty:20,saldo:5,pakai:15,rinci:true}];info.legacyTersedia=10;form.values={id:'rin-1',lama:'48.85',qty:'24.35'};");
+  h.run("A.rinciRolEdit({getAttribute:function(){return 'rin-1';}})");let view=h.run('rendered');assert.match(view,/Ubah rol/);assert.match(view,/Scuba Hitam · Rol 2/);assert.match(view,/name="qty" value="48.85"/);assert.match(view,/Paling banyak 58,85 kg/);assert.match(view,/Total stok tidak berubah/);
+  assert.match(view,/data-a="rinciRolHapus" data-id="rin-1"/);assert.match(view,/data-a="rinciEditSave"/);
+  const sent=h.run('A.rinciEditSave(null)');h.run('A.rinciEditSave(null)');assert.equal(h.run('requests.length'),1,'a double tap sends once');assert.deepEqual(h.json('requests[0]'),{action:'ubahRinciRol',payload:{id:'rin-1',qty:24.35,expectedQty:48.85}});
+  h.run('requests[0].resolve({})');await sent;assert.equal(h.run('closed'),1);assert.equal(h.run('refreshed'),1);assert.match(h.run('messages[messages.length-1]'),/diperbarui/);
+  h.run("A.rinciRolEdit({getAttribute:function(){return 'rin-2';}})");view=h.run('rendered');assert.match(view,/sudah dipakai, dicadangkan, atau pernah dikoreksi/);assert.doesNotMatch(view,/rinciEditSave|rinciRolHapus/);
+  for(const bad of ['','0','-2','1.0001','abc']){h.run('requests.length=0;form.values.qty='+JSON.stringify(bad)+';A.rinciEditSave(null)');assert.equal(h.run('requests.length'),0,bad);}
+  h.run("messages.length=0;A.rinciRolEdit({getAttribute:function(){return 'gone';}})");assert.match(h.run('messages[0]'),/sudah berubah/);
+  h.run("actor.divisi='admin';messages.length=0;rendered='';A.rinciRolEdit({getAttribute:function(){return 'rin-1';}})");assert.match(h.run('messages[0]'),/owner/);assert.equal(h.run('rendered'),'');
 });
 
 test('more than the stock without roll detail, or an unsound weight, is stopped on the device',()=>{

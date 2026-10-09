@@ -109,6 +109,8 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.10, rol hasil "Rinci rol" yang salah ketik bisa dibetulkan langsung: di kartu Stok bahan, owner mengetuk rolnya lalu mengubah berat (`ubahRinciRol`) atau menghapusnya. Ini hanya untuk rol rincian yang belum dipakai, dicadangkan, atau dikoreksi; selisihnya kembali ke, atau diambil dari, stok yang belum dirinci, sehingga total stok tetap. Rol dari invoice pembelian dan rol yang sudah dipakai tidak berubah lewat jalur ini.
+
 Mulai 1.5.9:
 
 - **Rol terlihat di Stok bahan, dan stok lama bisa dirinci per rol:** kartu bahan menampilkan rol yang tercatat beserta sisa kilonya, dan berapa kg yang belum punya rincian berat tiap rol. Stok dari aplikasi lama hanya mencatat total kg, jadi owner mengisi berat tiap rol lewat **Rinci rol** (`rinciStokRol`). Baris barunya berjenis `rinci`: tidak dihitung sebagai pembelian, sehingga saldo, pembelian, harga rata-rata, dan nilai bahan tidak berubah; yang dirinci hanya berpindah dari saldo lama ke rol yang bisa dipilih di PO dan Catat potong. Pemilih rol menawarkan "Isi berat tiap rol" langsung untuk bahan yang belum dirinci. Rincian yang belum dipakai bisa dihapus; yang sudah dipakai atau dicadangkan tetap.

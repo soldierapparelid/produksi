@@ -25,11 +25,17 @@ test('a stock card lists the recorded rolls and the kilos that have no roll deta
  const h=ui();h.run(`var actor={divisi:'owner'};function me(){return actor;}function nfQty2(){return '';}
   S.state.stokRol=[{id:'r1',bahan:'katun  TERSEDIA',rollLabel:'Rol 1',saldo:25,dicadangkan:0,invoice:'BON-1'},{id:'r2',bahan:'Katun tersedia',rollLabel:'Rol 2',saldo:24,dicadangkan:4,invoice:'BON-1'},{id:'r3',bahan:'Katun tersedia',rollLabel:'Rol 3',saldo:0,dicadangkan:0},{id:'x',bahan:'Rib menipis',rollLabel:'Rol 9',saldo:2,dicadangkan:0}];
   S.state.stokRingkas[1].legacySaldo=7.5;S.f.stokFilter='all';VIEWS.stok()`);
- const card=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(card,/2 rol tercatat/);assert.match(card,/<span class="chip"[^>]*>Rol 1 · 25 kg<\/span>/);assert.match(card,/<span class="chip warn"[^>]*dicadangkan 4 kg[^>]*>Rol 2 · 24 kg<\/span>/);assert.doesNotMatch(card,/Rol 3|Rol 9/);
+ const card=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(card,/<span class="rol-pil">2 rol tercatat<\/span>49 kg/,'the roll count stands out, with the kilos those rolls hold');assert.match(card,/<span class="chip info"[^>]*>Rol 1 · 25 kg<\/span>/);assert.match(card,/<span class="chip warn"[^>]*dicadangkan 4 kg[^>]*>Rol 2 · 24 kg<\/span>/);assert.doesNotMatch(card,/Rol 3|Rol 9/);
  assert.match(card,/Belum dirinci per rol: <b>7,5 kg<\/b>/);assert.match(card,/data-a="rinciRolOpen" data-b="Katun tersedia">Rinci rol/);
  h.run("S.state.stokRol=[];");const old=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(old,/Belum ada rincian berat tiap rol: <b>7,5 kg<\/b>/);assert.doesNotMatch(old,/rol tercatat/);
  h.run("actor.divisi='admin'");assert.doesNotMatch(h.run('stokKartu(S.state.stokRingkas[1])'),/rinciRolOpen/);
  h.run("S.state.stokRingkas[3].legacySaldo=8");assert.doesNotMatch(h.run('stokKartu(S.state.stokRingkas[3])'),/stok-rol/,'only kg materials have rolls');assert.doesNotMatch(h.run('stokKartu(S.state.stokRingkas[0])'),/stok-rol/);
+});
+test('an itemised roll that nobody used yet can be tapped on the card to correct or remove it; other rolls stay plain',()=>{
+ const h=ui();h.run("var actor={divisi:'owner'};function me(){return actor;}S.state.stokRol=[{id:'r1',bahan:'Katun tersedia',rollLabel:'Rol 1',saldo:25.5,rinci:true},{id:'r2',bahan:'Katun tersedia',rollLabel:'Rol 2',saldo:48.85,rinci:true,dicadangkan:10},{id:'r3',bahan:'Katun tersedia',rollLabel:'Rol 3',saldo:20},{id:'r4',bahan:'Katun tersedia',rollLabel:'Rol 4',saldo:9,rinci:true,pakai:1}];S.f.stokFilter='all';VIEWS.stok()");
+ let card=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(card,/<button type="button" class="chip info" data-a="rinciRolEdit" data-id="r1"[^>]*>Rol 1 · 25,5 kg /);assert.match(card,/Ketuk rol untuk mengubah berat atau menghapusnya/);
+ for(const id of ['r2','r3','r4'])assert.ok(!card.includes('data-a="rinciRolEdit" data-id="'+id+'"'),id+' is reserved, bought, or already used');assert.match(card,/<span class="chip warn"[^>]*>Rol 2 · 48,85 kg<\/span>/);assert.match(card,/<span class="chip info"[^>]*>Rol 3 · 20 kg<\/span>/);
+ h.run("actor.divisi='admin'");card=h.run('stokKartu(S.state.stokRingkas[1])');assert.doesNotMatch(card,/rinciRolEdit|Ketuk rol/);assert.match(card,/<span class="chip info"[^>]*>Rol 1 · 25,5 kg<\/span>/);
 });
 test('finished materials are listed last; anything that needs attention stays above what is simply available',()=>{
  const h=ui(),order=h.run("JSON.stringify(stokSaldoRows([{nama:'B habis',status:'habis'},{nama:'A aman',status:'aman'},{nama:'A habis',status:'habis'},{nama:'Z minus',status:'minus'},{nama:'M menipis',status:'menipis'},{nama:'K kritis',status:'kritis'}],'all','').map(function(b){return b.nama;}))");

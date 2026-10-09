@@ -84,6 +84,28 @@ test('an itemised roll is cut like a bought roll; an unused one can be taken bac
   assert.deepEqual(f.good('getState').stokRol.map(r => [r.rollLabel, r.saldo]), [['Rol 1', 0]]);
 });
 
+test('a mistyped itemised weight is corrected in place while the roll is untouched; the difference moves to or from the stock without roll detail', () => {
+  const f = fixture();
+  const rolls = f.good('rinciStokRol', { id: 'rinci-batch-0001', bahan: 'Scuba Hitam', rolls: [{ qty: 25 }, { qty: 48.85 }] }).rows;
+  assert.equal(f.material('scuba hitam').legacySaldo, 154.2);
+  const fixed = f.good('ubahRinciRol', { id: rolls[1].id, qty: 24.35, expectedQty: 48.85 });
+  assert.equal(fixed.qty, 24.35); assert.equal(fixed.rollLabel, 'Rol 2'); assert.equal(fixed.jenis, 'rinci');
+  const m = f.material('scuba hitam'); assert.equal(m.saldo, 228.05); assert.equal(m.beli, 228.05); assert.equal(m.legacySaldo, 178.7);
+  assert.deepEqual(f.good('getState').stokRol.map(r => [r.rollLabel, r.saldo, r.tersedia]), [['Rol 1', 25, 25], ['Rol 2', 24.35, 24.35]]);
+  assert.equal(f.good('ubahRinciRol', { id: rolls[1].id, qty: 24.35, expectedQty: 48.85 }).qty, 24.35, 'the same correction sent again changes nothing');
+  f.bad('ubahRinciRol', { id: rolls[1].id, qty: 30, expectedQty: 48.85 }, /sudah berubah/);
+  f.bad('ubahRinciRol', { id: rolls[1].id, qty: 203.06, expectedQty: 24.35 }, /melebihi stok yang belum dirinci/);
+  assert.equal(f.good('ubahRinciRol', { id: rolls[1].id, qty: 203.05, expectedQty: 24.35 }).qty, 203.05, 'up to everything that has no roll detail');
+  assert.equal(f.material('scuba hitam').legacySaldo, 0);
+  f.bad('ubahRinciRol', { id: rolls[1].id, qty: 24 }, /owner/, f.admin); f.bad('ubahRinciRol', { id: 'old-stock-0001', qty: 24 }, /tidak ditemukan/); f.bad('ubahRinciRol', { id: 'unknown-roll-01', qty: 24 }, /tidak ditemukan/);
+  for (const qty of [0, -1, 1.0001, 'x', '']) f.bad('ubahRinciRol', { id: rolls[1].id, qty }, /lebih dari nol/);
+  /* once a roll is set aside for a PO its weight stays */
+  f.good('ubahRinciRol', { id: rolls[1].id, qty: 24 });
+  f.good('savePOWithRencana', { po: { newId: 'ubah-po-00001', nama: 'Fixture Ubah', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M'] }, rencana: { id: 'ubah-plan-0001', alokasiBahan: [{ stokId: rolls[0].id, qty: 25 }], catatan: '' } });
+  f.bad('ubahRinciRol', { id: rolls[0].id, qty: 26 }, /dipakai, dicadangkan/);
+  assert.equal(f.raw('StokBahan').find(r => r.id === rolls[0].id).qty, 25);
+});
+
 test('archiving a finished PO keeps every row and only moves it out of the lists; it can be brought back', () => {
   const f = fixture(), id = 'arsip-po-0001';
   f.good('savePOWithRencana', { po: { newId: id, nama: 'Fixture Arsip', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M'] }, rencana: { id: 'arsip-plan-0001', bahanList: [{ nama: 'Scuba Hitam', qty: 10 }], rol: 1, catatan: '' } });
