@@ -5,8 +5,18 @@ function coreCommerceKey(module,kind,id) { return 'cm_'+coreCommerceHash([module
 function coreCommerceCopy(value) { return JSON.parse(JSON.stringify(value)); }
 function coreCommerceRows(value) { return (value instanceof Array ? value : value && typeof value === 'object' ? Object.keys(value).map(function(k){return value[k];}) : []).filter(function(v){return v && typeof v === 'object';}); }
 function coreCommerceData(row) { return coreMap(row && row.data); }
-function coreCommerceRecordView(row, events, records) {
-  var value=coreCommerceCopy(coreCommerceData(row)), embedded=value._initialPayment, own=(events||[]).filter(function(e){return e.module===row.module&&e.parentId===value.id;});
+/* One pass over the tables for drawing many records. Without it every order
+   parses every product again (photo included) just to find two names. */
+function coreCommerceLookup(records, events) {
+  var out={products:Object.create(null),suppliers:Object.create(null),events:Object.create(null)};
+  (records||[]).forEach(function(r){if(r.module!=='pembelian'||r.kind!=='product'&&r.kind!=='supplier')return;var d=coreCommerceData(r),box=r.kind==='product'?out.products:out.suppliers;if(!box[d.id])box[d.id]={id:d.id,nama:d.nama,supplierId:d.supplierId};});
+  (events||[]).forEach(function(e){var k=e.module+'|'+e.parentId;(out.events[k]||(out.events[k]=[])).push(e);});
+  return out;
+}
+/* Product photos travel separately (getCommerceImages); lists carry a marker only. */
+function coreCommerceLean(value) { if(value&&value.gambar)value.hasPicture=true;if(value)delete value.gambar;return value; }
+function coreCommerceRecordView(row, events, records, lookup) {
+  var value=coreCommerceCopy(coreCommerceData(row)), embedded=value._initialPayment, own=(lookup?lookup.events[row.module+'|'+value.id]||[]:events||[]).filter(function(e){return e.module===row.module&&e.parentId===value.id;});
   var revision=coreCommerceHash({record:row.revision,events:own.map(function(e){return [e.id,e.data];}).sort(function(a,b){return a[0].localeCompare(b[0]);})});
   ['_createHash','_createActor','_lastMutation','_initialPayment'].forEach(function(k){delete value[k];});
   value.revision=revision; value.createdBy=row.dibuatOleh;value.createdAt=row.dibuat;value.updatedAt=row.diubah;value.legacy=!!row.sourceHash;
@@ -29,9 +39,13 @@ function coreCommerceRecordView(row, events, records) {
   value.needsReview=!!(value.paymentReview||value.receiptReview);value.reviewReasons=reasons;value.receivedByItem=byItem;
   value.status=value.cancelled?'batal':value.needsReview?'review':row.kind==='nota'?(value.balance===0?'lunas':value.totalPaid>0?'dp':'belum'):(value.balance===0&&value.totalReceived>=quantity?'selesai':value.balance===0?'lunas':value.totalReceived>0?'sebagian':value.totalPaid>0?'dp':'pending');
   if(row.kind==='order'){
-    var product=(records||[]).filter(function(r){return r.module==='pembelian'&&r.kind==='product'&&coreCommerceData(r).id===value.produkId;})[0],p=coreCommerceData(product);
-    var supplier=(records||[]).filter(function(r){return r.module==='pembelian'&&r.kind==='supplier'&&coreCommerceData(r).id===p.supplierId;})[0];
-    value.productName=(value.productSnapshot||p).nama||'';value.supplierName=(value.supplierSnapshot||coreCommerceData(supplier)).nama||'';
+    var p,s;
+    if(lookup){p=lookup.products[value.produkId];if(!p||p.id!==value.produkId)p={};s=lookup.suppliers[p.supplierId];if(!s||s.id!==p.supplierId)s={};}
+    else{
+      var product=(records||[]).filter(function(r){return r.module==='pembelian'&&r.kind==='product'&&coreCommerceData(r).id===value.produkId;})[0];p=coreCommerceData(product);
+      var supplier=(records||[]).filter(function(r){return r.module==='pembelian'&&r.kind==='supplier'&&coreCommerceData(r).id===p.supplierId;})[0];s=coreCommerceData(supplier);
+    }
+    value.productName=(value.productSnapshot||p).nama||'';value.supplierName=(value.supplierSnapshot||s).nama||'';
   }
   return value;
 }
@@ -49,7 +63,10 @@ function coreCommerceSlipModel(module,record,context) {
 function coreInstallCommerceActions(actions,ctx) {
   var store=ctx.store, tables=['CommerceRecord','CommerceEvent','CommerceSource','CommerceImport'];
   function fail(s){ctx.fail(s);}
-  function admin(p,owner){if(store.fresh)store.fresh('Pegawai');var me=ctx.auth(p);if(!coreIsAdmin(me)||owner&&me.divisi!=='owner')fail(owner?'Hanya owner yang boleh melakukan tindakan ini.':'Modul ini hanya untuk owner atau admin.');return me;}
+  /* Writes and imports recheck the physical account row. Lists, photos and PDF
+     (reading=true) use the same account check as the rest of the application,
+     so opening a page does not open the spreadsheet only to read accounts. */
+  function admin(p,owner,reading){if(!reading&&store.fresh)store.fresh('Pegawai');var me=ctx.auth(p);if(!coreIsAdmin(me)||owner&&me.divisi!=='owner')fail(owner?'Hanya owner yang boleh melakukan tindakan ini.':'Modul ini hanya untuk owner atau admin.');return me;}
   function fresh(names){names=names||['CommerceRecord','CommerceEvent','CommerceImport'];if(store.checkpoint)store.checkpoint(names);else if(store.fresh)names.forEach(function(s){store.fresh(s);});}
   function pending(){return store.read('CommerceImport').filter(function(r){return r.status!=='complete';});}
   function writable(p,owner){var me=admin(p,owner);fresh();if(pending().length)fail('Impor modul belum selesai. Owner perlu melanjutkan impor dengan file dan bukti yang sama.');return me;}
@@ -61,6 +78,16 @@ function coreInstallCommerceActions(actions,ctx) {
   function all(){return store.read('CommerceRecord');}
   function find(module,kind,key){return all().filter(function(r){return r.module===module&&r.kind===kind&&coreCommerceData(r).id===key;})[0];}
   function view(row){if(!row)fail('Catatan tidak ditemukan.');return coreCommerceRecordView(row,store.read('CommerceEvent'),all());}
+  function stateOf(module,me){
+    var rows=all(),events=store.read('CommerceEvent'),lookup=coreCommerceLookup(rows,events),out={module:module,version:store.version(),actor:{id:me.id,divisi:me.divisi}};
+    function list(kind){return rows.filter(function(r){return r.module===module&&r.kind===kind;}).map(function(r){return coreCommerceRecordView(r,events,rows,lookup);});}
+    if(module==='pembelian'){out.suppliers=list('supplier');out.products=list('product').map(coreCommerceLean);out.orders=list('order');}
+    if(module==='nota')out.notes=list('nota');
+    return out;
+  }
+  /* A saved form asks for the refreshed page in the same answer (withState),
+     so the device does not need a second request after every save. */
+  function reply(module,row,p,me){var out={record:coreCommerceLean(view(row))};if(p.withState===true&&(module==='pembelian'||module==='nota'))out.commerce=stateOf(module,me);return out;}
   function expected(row,p){if(!p.expectedRevision||p.expectedRevision!==view(row).revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');}
   function checkRows(table,rows){if(store.validateRows)store.validateRows(table,rows);else rows.forEach(function(r){Object.keys(r).forEach(function(k){if(String(r[k]).length>49000)fail('Catatan terlalu panjang untuk disimpan.');});});}
   function sourcePicture(v){if(!v)return '';if(typeof v!=='string'||v.length>48000||!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v))fail('Gambar harus JPEG/PNG/WebP berukuran kecil.');return v;}
@@ -84,12 +111,12 @@ function coreInstallCommerceActions(actions,ctx) {
   function save(module,kind,p){
     var me=writable(p),r=p.record||{},key=id(r.id),old=find(module,kind,key),actor=me.id;
     var rawIntent=coreCommerceCopy(r);delete rawIntent.revision;var intent=coreCommerceHash({kind:kind,input:rawIntent,before:p.expectedRevision||''});
-    if(old){var data=coreCommerceData(old);if(!p.expectedRevision&&data._createHash===intent&&data._createActor===actor)return {record:view(old)};if(data._lastMutation&&data._lastMutation.hash===intent&&data._lastMutation.actor===actor)return {record:view(old)};expected(old,p);}
+    if(old){var data=coreCommerceData(old);if(!p.expectedRevision&&data._createHash===intent&&data._createActor===actor)return reply(module,old,p,me);if(data._lastMutation&&data._lastMutation.hash===intent&&data._lastMutation.actor===actor)return reply(module,old,p,me);expected(old,p);}
     else if(p.expectedRevision)fail('Catatan asal tidak ditemukan.');
     var data=normalize(kind,r,old);if(kind==='nota'){if(old)data.noNota=coreCommerceData(old).noNota||key;else{var prefix='SA-'+data.date.replace(/-/g,'').slice(2)+'-',sequence=0;store.read('CommerceImport').forEach(function(row){sequence=Math.max(sequence,coreNum((coreCommerceData(row).summary||{}).notaCounter));});all().filter(function(row){return row.kind==='nota';}).forEach(function(row){var note=coreCommerceData(row),n=String(note.noNota||note.id||''),match=/^SA-\d{6}-(\d+)$/.exec(n);if(match)sequence=Math.max(sequence,Number(match[1]));});if(sequence>=999999)fail('Nomor nota tanggal ini penuh.');data.noNota=prefix+('000'+(sequence+1)).slice(-Math.max(3,String(sequence+1).length));}}
     if(old){var prev=coreCommerceData(old);data._createHash=prev._createHash;data._createActor=prev._createActor;if(prev._initialPayment)data._initialPayment=prev._initialPayment;}else{data._createHash=intent;data._createActor=actor;var pay=initial(r,kind,data,me);if(pay)data._initialPayment=pay;}
     data._lastMutation={hash:intent,actor:actor};var stamp=now(),row={id:coreCommerceKey(module,kind,key),module:module,kind:kind,parentId:'',data:JSON.stringify(data),revision:coreCommerceHash([data,stamp,actor]),dibuat:old?old.dibuat:stamp,dibuatOleh:old?old.dibuatOleh:actor,diubah:stamp,sourceHash:old?old.sourceHash:''};
-    checkRows('CommerceRecord',[row]);if(old)store.update('CommerceRecord',old.id,row);else store.append('CommerceRecord',row);return {record:view(row)};
+    checkRows('CommerceRecord',[row]);if(old)store.update('CommerceRecord',old.id,row);else store.append('CommerceRecord',row);return reply(module,row,p,me);
   }
   actions.saveCommerceSupplier=function(p){return save('pembelian','supplier',p);};
   actions.saveCommerceProduct=function(p){return save('pembelian','product',p);};
@@ -103,15 +130,15 @@ function coreInstallCommerceActions(actions,ctx) {
     if(kind==='payment'){d.jumlah=num(p.jumlah,1e15,true,true);d.metode=text(p.metode||'cash',40,true);tender(p,d);}
     if(kind==='receipt'){if(module!=='pembelian')fail('Penerimaan hanya untuk pembelian.');d.itemId=id(p.itemId);d.jumlah=num(p.jumlah,1e8,true,true);d.kondisi=text(p.kondisi,100);}
     if(kind==='void')d.eventId=id(p.eventId);
-    if(prior){if(prior.module!==module||prior.parentId!==parent||prior.kind!==kind||prior.dibuatOleh!==me.id||coreCommerceHash(coreCommerceData(prior))!==coreCommerceHash(d))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return {record:view(row)};}
+    if(prior){if(prior.module!==module||prior.parentId!==parent||prior.kind!==kind||prior.dibuatOleh!==me.id||coreCommerceHash(coreCommerceData(prior))!==coreCommerceHash(d))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return reply(module,row,p,me);}
     expected(row,p);if(record.cancelled)fail('Catatan sudah dibatalkan.');if(d.tanggal<String(record.tanggalOrder||record.date||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');
     if(kind==='payment'&&(record.paymentReview||d.jumlah>record.balance))fail('Pembayaran melebihi sisa tagihan atau riwayat nominal perlu diperiksa.');
     if(kind==='receipt'){var item=(record.items||[]).filter(function(i){return i.id===d.itemId;})[0];if(record.receiptReview||!item)fail('Hubungan varian penerimaan perlu diperiksa; tidak boleh ditebak.');if(d.jumlah>coreNum(item.jumlah)-coreNum(record.receivedByItem[d.itemId]))fail('Penerimaan melebihi sisa varian pesanan.');}
     if(kind==='void'){var source=record.events.filter(function(e){return e.id===d.eventId;})[0];if(!source||source.kind==='void'||source.voided)fail('Transaksi asal tidak ditemukan atau telah dibatalkan.');}
-    var stored={id:key,module:module,parentId:parent,kind:kind,data:JSON.stringify(d),dibuat:now(),dibuatOleh:me.id,sourceHash:''};checkRows('CommerceEvent',[stored]);store.append('CommerceEvent',stored);return {record:view(row)};
+    var stored={id:key,module:module,parentId:parent,kind:kind,data:JSON.stringify(d),dibuat:now(),dibuatOleh:me.id,sourceHash:''};checkRows('CommerceEvent',[stored]);store.append('CommerceEvent',stored);return reply(module,row,p,me);
   }
   actions.appendCommercePayment=function(p){return event(p,'payment');};actions.appendCommerceReceipt=function(p){return event(p,'receipt');};actions.voidCommerceEvent=function(p){return event(p,'void');};
-  actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return {record:v};fail('Catatan sudah dibatalkan.');}expected(row,p);if(v.paymentReview||v.receipts.some(function(e){return !e.voided&&e.sourceReview;}))fail('Periksa bukti nominal atau jumlah historis sebelum membatalkan catatan.');if(v.totalPaid||v.totalReceived)fail('Batalkan transaksi pembayaran/penerimaan yang masih berlaku terlebih dahulu.');var data=coreCommerceData(row);data.cancelled=true;data.cancelReason=reason;data.cancelledBy=me.id;data.cancelledAt=now();row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash(data),diubah:now()});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return {record:view(row)};};
+  actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return reply(module,row,p,me);fail('Catatan sudah dibatalkan.');}expected(row,p);if(v.paymentReview||v.receipts.some(function(e){return !e.voided&&e.sourceReview;}))fail('Periksa bukti nominal atau jumlah historis sebelum membatalkan catatan.');if(v.totalPaid||v.totalReceived)fail('Batalkan transaksi pembayaran/penerimaan yang masih berlaku terlebih dahulu.');var data=coreCommerceData(row);data.cancelled=true;data.cancelReason=reason;data.cancelledBy=me.id;data.cancelledAt=now();row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash(data),diubah:now()});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return reply(module,row,p,me);};
   function hppInput(config){
     var source=store.read('CommerceSource'),legacy={production:[],stock:{pembelian:[],rolInfo:{}},meta:{},cuttingPlans:[]};
     store.read('CommerceImport').filter(function(r){return r.status==='complete';}).forEach(function(manifest){var proof=coreCommerceData(manifest),subset=source.filter(function(r){return r.sourceHash===manifest.sourceHash;}).map(function(r){var out={};SCHEMA.CommerceSource.forEach(function(k){out[k]=r[k]===undefined?'':r[k];});return out;}).sort(function(a,b){return a.id.localeCompare(b.id);});if(subset.length!==proof.sourceRows||coreCommerceHash(subset)!==proof.sourceDigest)fail('Snapshot HPP asal tidak utuh atau berubah. Periksa cadangan impor sebelum menghitung.');});
@@ -119,19 +146,25 @@ function coreInstallCommerceActions(actions,ctx) {
     source.forEach(function(r){var data=coreCommerceData(r);if(r.kind==='hpp-production')legacy.production.push(data);if(r.kind==='hpp-purchase')legacy.stock.pembelian.push(data);if(r.kind==='hpp-rollinfo')legacy.stock.rolInfo[r.parentId]=data;if(r.kind==='hpp-meta')legacy.meta=data;if(r.kind==='hpp-plan')legacy.cuttingPlans.push(data);});
     legacy.workers=coreCommerceRows(legacy.meta.tukangJahit||legacy.meta.maklon||{});var input={config:config,legacy:legacy,tables:{},settings:ctx.settings()};['PO','Produk','Potong','SlipKirim','StokBahan','RencanaPotong','KoreksiRiwayat'].forEach(function(s){input.tables[s]=store.read(s);});return input;
   }
-  actions.getCommerceState=function(p){var me=admin(p),module=p.module;if(['pembelian','nota','hpp'].indexOf(module)<0)fail('Modul tidak dikenal.');var waiting=pending();if(waiting.length)fail('Impor modul belum selesai. Owner perlu melanjutkan file yang sama sebelum modul dipakai.');var rows=all(),events=store.read('CommerceEvent'),out={module:module,version:store.version(),actor:{id:me.id,divisi:me.divisi}};
-    function list(kind){return rows.filter(function(r){return r.module===module&&r.kind===kind;}).map(function(r){return coreCommerceRecordView(r,events,rows);});}
-    if(module==='pembelian'){out.suppliers=list('supplier');out.products=list('product');out.orders=list('order');}
-    if(module==='nota')out.notes=list('nota');
+  actions.getCommerceState=function(p){var me=admin(p,false,true),module=p.module;if(['pembelian','nota','hpp'].indexOf(module)<0)fail('Modul tidak dikenal.');var waiting=pending();if(waiting.length)fail('Impor modul belum selesai. Owner perlu melanjutkan file yang sama sebelum modul dipakai.');var out=stateOf(module,me);
     if(module==='hpp'){var row=find('hpp','config','config');out.config=row?coreCommerceCopy(coreCommerceData(row)):{configs:{},modelConfigs:{},marketplace:{},pajak:0};['_lastMutation','_createHash','_createActor'].forEach(function(k){delete out.config[k];});out.revision=row?view(row).revision:'';if(typeof coreCommerceHpp==='function')Object.assign(out,coreCommerceHpp(hppInput(out.config)));else{out.models=[];out.warnings=['Perhitungan HPP belum tersedia.'];}}
     return out;
   };
-  function saveHpp(p,settingsOnly){var me=writable(p),row=find('hpp','config','config'),current=row?coreCommerceCopy(coreCommerceData(row)):{id:'config',configs:{},modelConfigs:{},marketplace:{},pajak:0};var intent=coreCommerceHash({modelId:p.modelId,config:p.config,marketplace:p.marketplace,pajak:p.pajak,before:p.expectedRevision||''});if(current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return {revision:view(row).revision};if(row)expected(row,p);else if(p.expectedRevision)fail('Konfigurasi asal tidak ditemukan.');
+  /* Photos for the products on screen. Each (product, revision) is kept in the
+     small per-image cache, so repeat requests do not load the record table. */
+  actions.getCommerceImages=function(p){admin(p,false,true);if(pending().length)fail('Impor modul belum selesai. Owner perlu melanjutkan file yang sama sebelum modul dipakai.');
+    var seen={},items=(p.items instanceof Array?p.items:[]).slice(0,12).map(function(i){i=i||{};var rev=String(i.rev||'');if(!/^[a-f0-9]{8,64}$/.test(rev))fail('Identitas catatan tidak sah.');return {id:id(i.id),rev:rev,key:'cm.'+i.id+'.'+rev};}).filter(function(i){if(seen[i.id])return false;seen[i.id]=true;return true;});
+    var out={},left=items;if(store.imgGet&&items.length){var hit=store.imgGet(items.map(function(i){return i.key;}));left=items.filter(function(i){if(!hit[i.key])return true;out[i.id]=hit[i.key];return false;});}
+    if(left.length){var want={},fresh={},events=store.read('CommerceEvent');left.forEach(function(i){want[i.id]=i;});
+      all().forEach(function(r){if(r.module!=='pembelian'||r.kind!=='product')return;var d=coreCommerceData(r),i=Object.prototype.hasOwnProperty.call(want,d.id)?want[d.id]:null;if(!i||!d.gambar||out[d.id])return;out[d.id]=d.gambar;if(coreCommerceRecordView(r,events,[]).revision.indexOf(i.rev)===0)fresh[i.key]=d.gambar;});
+      if(store.imgPut)store.imgPut(fresh);}
+    return {images:out};
+  };  function saveHpp(p,settingsOnly){var me=writable(p),row=find('hpp','config','config'),current=row?coreCommerceCopy(coreCommerceData(row)):{id:'config',configs:{},modelConfigs:{},marketplace:{},pajak:0};var intent=coreCommerceHash({modelId:p.modelId,config:p.config,marketplace:p.marketplace,pajak:p.pajak,before:p.expectedRevision||''});if(current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return {revision:view(row).revision};if(row)expected(row,p);else if(p.expectedRevision)fail('Konfigurasi asal tidak ditemukan.');
     if(settingsOnly){if(p.pajak!==undefined)current.pajak=num(p.pajak,100,false,false);if(p.marketplace!==undefined){if(!p.marketplace||typeof p.marketplace!=='object'||p.marketplace instanceof Array||Object.keys(p.marketplace).length>20)fail('Pengaturan marketplace tidak sah.');current.marketplace={};Object.keys(p.marketplace).forEach(function(k){id(k);var m=p.marketplace[k];current.marketplace[k]={nama:text(m.nama,80,true),fee:num(m.fee,100,false,false),fixedPerPcs:num(m.fixedPerPcs===undefined?0:m.fixedPerPcs,1e12,false,true)};});}}
     else{var modelId=text(p.modelId,500,true),config=p.config;if(typeof coreCommerceHpp!=='function'||typeof coreCommerceHppConfig!=='function')fail('Perhitungan HPP belum tersedia.');var model=coreCommerceHpp(hppInput(current)).models.filter(function(m){return m.id===modelId;})[0];if(!model||['__proto__','constructor','prototype'].indexOf(modelId)>=0)fail('Model HPP tidak ditemukan.');config=coreCommerceHppConfig(config,model);current.modelConfigs=current.modelConfigs||{};current.modelConfigs[modelId]=config;}
     current._lastMutation={hash:intent,actor:me.id};var stamp=now(),saved={id:coreCommerceKey('hpp','config','config'),module:'hpp',kind:'config',parentId:'',data:JSON.stringify(current),revision:coreCommerceHash(current),dibuat:row?row.dibuat:stamp,dibuatOleh:row?row.dibuatOleh:me.id,diubah:stamp,sourceHash:row?row.sourceHash:''};checkRows('CommerceRecord',[saved]);if(row)store.update('CommerceRecord',row.id,saved);else store.append('CommerceRecord',saved);return {revision:view(saved).revision};
   }
   actions.saveCommerceHpp=function(p){return saveHpp(p,false);};actions.saveCommerceHppSettings=function(p){return saveHpp(p,true);};
-  actions.makeCommercePdf=function(p){admin(p);if(!ctx.env.makePdf)fail('PDF tersedia setelah aplikasi terpasang.');var module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Jenis dokumen tidak dikenal.');if(pending().length)fail('Impor belum selesai.');var grouped=p.ids!==undefined,ids=grouped?p.ids:[p.id];if(!(ids instanceof Array)||!ids.length||ids.length>20||grouped&&module!=='pembelian')fail('Pilih 1 sampai 20 pesanan pembelian untuk PDF gabungan.');var seen={},supplierId='',records=ids.map(function(key){key=id(key);if(seen[key])fail('Pesanan gabungan tidak boleh ganda.');seen[key]=true;var record=view(find(module,module==='nota'?'nota':'order',key));if(p.expectedRevisions&&p.expectedRevisions[key]!==record.revision)fail('Pesanan berubah sejak pilihan cetak dibuka. Muat ulang dan pilih kembali.');if(grouped){var sid=(record.supplierSnapshot||{}).id;if(!sid||supplierId&&sid!==supplierId)fail('PDF gabungan harus memakai identitas supplier yang sama.');supplierId=sid;}return record;});var models=records.map(function(record){return coreCommerceSlipModel(module,record,{});}),name=grouped?'Pembelian-Gabungan.pdf':(module==='nota'?'Nota-':'Pembelian-')+p.id+'.pdf';return {base64:ctx.env.makePdf(coreSlipModelsHtml(models,ctx.settings()),name),nama:name};};
+  actions.makeCommercePdf=function(p){admin(p,false,true);if(!ctx.env.makePdf)fail('PDF tersedia setelah aplikasi terpasang.');var module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Jenis dokumen tidak dikenal.');if(pending().length)fail('Impor belum selesai.');var grouped=p.ids!==undefined,ids=grouped?p.ids:[p.id];if(!(ids instanceof Array)||!ids.length||ids.length>20||grouped&&module!=='pembelian')fail('Pilih 1 sampai 20 pesanan pembelian untuk PDF gabungan.');var seen={},supplierId='',records=ids.map(function(key){key=id(key);if(seen[key])fail('Pesanan gabungan tidak boleh ganda.');seen[key]=true;var record=view(find(module,module==='nota'?'nota':'order',key));if(p.expectedRevisions&&p.expectedRevisions[key]!==record.revision)fail('Pesanan berubah sejak pilihan cetak dibuka. Muat ulang dan pilih kembali.');if(grouped){var sid=(record.supplierSnapshot||{}).id;if(!sid||supplierId&&sid!==supplierId)fail('PDF gabungan harus memakai identitas supplier yang sama.');supplierId=sid;}return record;});var models=records.map(function(record){return coreCommerceSlipModel(module,record,{});}),name=grouped?'Pembelian-Gabungan.pdf':(module==='nota'?'Nota-':'Pembelian-')+p.id+'.pdf';return {base64:ctx.env.makePdf(coreSlipModelsHtml(models,ctx.settings()),name),nama:name};};
   if(typeof coreInstallCommerceMigration==='function')coreInstallCommerceMigration(actions,{store:store,env:ctx.env,auth:admin,fail:fail,fresh:fresh,pending:pending,checkRows:checkRows});
 }

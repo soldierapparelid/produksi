@@ -29,8 +29,10 @@ test('Apps Script and PWA reopen the same authenticated snapshot while demo and 
     assert.equal(vm.runInContext('snapshotResult',c),null,'locked worker division rejects owner snapshot');
     vm.runInContext("division='';UI_VERSION='new-version';bacaSnap(function(v){snapshotResult=v;});",c);
     assert.equal(vm.runInContext('snapshotResult',c),null,'new UI must not reuse incompatible state');
-    vm.runInContext('hapusSnap();',c);
+    vm.runInContext("kv.pks_cm_pembelian_pusat={t:'session-example'};kv.pks_cm_nota_pusat={t:'session-example'};kv.other_app_key='kept';hapusSnap();",c);
     assert.equal(vm.runInContext('kv.pks_pusat',c),undefined);
+    assert.equal(vm.runInContext('kv.pks_cm_pembelian_pusat||kv.pks_cm_nota_pusat',c),undefined,'purchase and sales copies leave with the session');
+    assert.equal(vm.runInContext('kv.other_app_key',c),'kept');
   }
   const d=snapshot('demo');vm.runInContext('simpanSnap();bacaSnap(function(v){snapshotResult=v;});',d);
   assert.equal(vm.runInContext('timers.length',d),0);assert.equal(vm.runInContext('snapshotResult',d),null);

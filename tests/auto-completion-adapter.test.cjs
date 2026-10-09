@@ -93,10 +93,22 @@ test('reopening a completed PO starts a new full waiting period', () => {
 
 test('automatic completion reauthenticates after its lock checkpoint and never exposes owner data to workers', () => {
   const f = fixture(); f.good('getState'); f.at(WEEK);
-  const peg = f.h.sheets.Pegawai, cols = peg.values[0], who = peg.values.find(r => r[cols.indexOf('id')] === f.ownerId);
-  who[cols.indexOf('token')] = 'replacement_session_not_cached';
+  /* The owner's session (kept in script properties since 1.5.3) is revoked by another device exactly
+     while this request waits for the completion lock; the first authentication had already passed. */
+  const locks = f.h.context.LockService, getScriptLock = locks.getScriptLock; let pending = true;
+  locks.getScriptLock = () => { const lock = getScriptLock(), wait = lock.waitLock.bind(lock); lock.waitLock = (...args) => { if (pending) { pending = false; delete f.h.properties['s_' + f.ownerId]; } return wait(...args); }; return lock; };
   const writes = f.h.sheets.PO.writes, blocked = f.call('getState');
+  locks.getScriptLock = getScriptLock;
+  assert.equal(pending, false, 'the request reached the completion lock');
   assert.equal(blocked.ok, false); assert.match(blocked.error, /Sesi berakhir/);
+  assert.equal(f.h.sheets.PO.writes, writes);
+  /* A session still stored in the account sheet by an older version: replaced there without any cache update. */
+  const peg = f.h.sheets.Pegawai, cols = peg.values[0], who = peg.values.find(r => r[cols.indexOf('id')] === 'cutter01');
+  f.h.run(`pkStore_().lock(function(){pkStore_().update('Pegawai','cutter01',{token:'cutter_legacy_session_0001'});});`);
+  f.h.cold(); assert.equal(f.h.run(`pkStore_().read('Pegawai').filter(function(u){return u.id==='cutter01';})[0].token`), 'cutter_legacy_session_0001', 'the account cache knows the legacy session');
+  who[cols.indexOf('token')] = 'replacement_session_not_cached';
+  const stale = f.call('getState', { token: 'cutter_legacy_session_0001' });
+  assert.equal(stale.ok, false); assert.match(stale.error, /Sesi berakhir/);
   assert.equal(f.h.sheets.PO.writes, writes);
   const worker = f.good('getState', { token: 'worker_session_example_1234' });
   assert.equal(worker.me.divisi, 'jahit');

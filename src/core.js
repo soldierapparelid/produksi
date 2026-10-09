@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.2';
+var APP_VERSION = '1.5.4';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -743,7 +743,22 @@ function createCore(store, env) {
   function users() { return store.read('Pegawai'); }
   function findUser(id) { var us = users(); for (var i = 0; i < us.length; i++) if (us[i].id === id) return us[i]; return null; }
   function findRow(sheet, id) { if (!id) return null; var rs = store.read(sheet); for (var i = 0; i < rs.length; i++) if (rs[i].id === id) return rs[i]; return null; }
-  function tokensOf(u) { return String(u.token || '').split(',').filter(Boolean); }
+  /* Sesi masuk (token). Kalau penyimpanannya menyediakan tempat khusus (store.sesi; di server: catatan kecil milik
+     script, bukan Google Sheets), sesi baru dicatat di sana, sehingga masuk dan keluar tidak perlu membuka spreadsheet.
+     Token yang masih ada di kolom token (sesi dari versi sebelumnya) tetap berlaku sampai orangnya keluar, PIN-nya
+     diganti, atau akunnya dinonaktifkan. */
+  function tokenKolom(u) { return String(u.token || '').split(',').filter(Boolean); }
+  function tokenSesi(u) { return store.sesi ? store.sesi.get(u.id) : []; }
+  function tokensOf(u) { return tokenKolom(u).concat(tokenSesi(u)); }
+  function hapusSesi(id) { if (store.sesi) store.sesi.set(id, []); }
+  /* tabel yang dibaca buildState untuk satu akun; dipakai juga untuk memanaskan cache dan memeriksa "sudah siap" */
+  function stateTables(me) {
+    var perlu = ['Pengaturan', 'Pegawai', 'Produk', 'PO', 'Potong', 'RencanaPotong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'GudangLama', 'SlipUpah', 'LegacySettlement', 'KoreksiRiwayat'];
+    if (!me || coreIsAdmin(me)) perlu = perlu.concat(['StokBahan', 'GajiHarian', 'Karyawan', 'Kasbon']);
+    else if (me.divisi === 'potong') perlu.push('StokBahan', 'Kasbon');
+    else if (me.divisi === 'jahit') perlu.push('Kasbon');
+    return perlu;
+  }
 
   function auth(payload) {
     var token = payload && String(payload.token || '');
@@ -846,13 +861,7 @@ function createCore(store, env) {
     if (arguments.length < 3) migrationStatus = durableMigrationStatus();
     var semua = !!(opt && opt.semua);
     /* tabel yang akan dibaca diambil dari cache dalam satu kali ambil (kalau penyimpanannya mendukung) */
-    if (store.prefetch) {
-      var perlu = ['Pengaturan', 'Pegawai', 'Produk', 'PO', 'Potong', 'RencanaPotong', 'SlipKirim', 'SlipSetor', 'QC', 'Gudang', 'GudangLama', 'SlipUpah', 'LegacySettlement', 'KoreksiRiwayat'];
-      if (coreIsAdmin(me)) perlu = perlu.concat(['StokBahan', 'GajiHarian', 'Karyawan', 'Kasbon']);
-      else if (me.divisi === 'potong') perlu.push('StokBahan', 'Kasbon');
-      else if (me.divisi === 'jahit') perlu.push('Kasbon');
-      store.prefetch(perlu);
-    }
+    if (store.prefetch) store.prefetch(stateTables(me));
     var st = settings();
     var allUsers = users();
     var produk = store.read('Produk');
@@ -1013,11 +1022,29 @@ function createCore(store, env) {
   }
   function loginResult(u, opt, allowDeferred) {
     var token = genToken();
-    var list = tokensOf(u); list.push(token);
-    while (list.length > MAX_SESI) list.shift();
-    store.update('Pegawai', u.id, { token: list.join(','), gagal: 0, kunci: '' });
-    if (allowDeferred && opt && opt.deferState === true) return deferredSession(findUser(u.id), token);
-    return { token: token, state: buildState(findUser(u.id), opt) };
+    if (store.sesi) {
+      var s = tokenSesi(u); s.push(token);
+      while (s.length > MAX_SESI) s.shift();
+      store.sesi.set(u.id, s);
+      /* Tab Pegawai hanya ditulis kalau ada hitungan salah PIN atau kunci yang perlu dihapus. Sesi yang terbuang
+         karena melebihi batas langsung tidak berlaku: setiap permintaan memeriksa tokennya ke daftar sesi ini. */
+      if (coreNum(u.gagal) || u.kunci) store.update('Pegawai', u.id, { gagal: 0, kunci: '' });
+    } else {
+      var list = tokenKolom(u); list.push(token);
+      while (list.length > MAX_SESI) list.shift();
+      store.update('Pegawai', u.id, { token: list.join(','), gagal: 0, kunci: '' });
+    }
+    var actor = findUser(u.id);
+    if (allowDeferred && opt && opt.deferState === true) {
+      /* Satu kali jalan: kalau semua tabel untuk akun ini sudah ada di cache server, datanya langsung ikut dikirim
+         sehingga perangkat tidak perlu bolak-balik kedua. Kalau belum, identitas dikirim dulu seperti biasa dan
+         perangkat mengambil datanya sendiri; PIN tidak pernah tertahan oleh pembacaan Google Sheets yang lama. */
+      if (opt.stateIfWarm === true && store.cached && store.cached(stateTables(actor))) {
+        try { return { token: token, state: buildState(actor, opt) }; } catch (e) {}
+      }
+      return deferredSession(actor, token);
+    }
+    return { token: token, state: buildState(actor, opt) };
   }
 
   /* ---------- aksi ---------- */
@@ -1027,9 +1054,14 @@ function createCore(store, env) {
     /* Resume only after checking the current account row. The caller can show
        this verified identity while fetching its scoped production state once. */
     if (p && p.deferState === true && p.token) {
-      if (store.fresh) store.fresh('Pegawai');
+      /* Akun dibaca dari cache berversi (versinya naik setiap akun diubah lewat aplikasi atau diedit di sheet).
+         Baris fisik baru dibaca kalau sesi itu tidak ditemukan di sana. */
       var resumed = null; try { resumed = auth(p); } catch (e) {}
-      if (resumed) return deferredSession(resumed, String(p.token));
+      if (!resumed && store.fresh) { store.fresh('Pegawai'); try { resumed = auth(p); } catch (e2) {} }
+      /* Kalau perangkat meminta dan semua tabel akun ini sudah ada di cache, lanjut ke jalur biasa di bawah yang
+         langsung menyertakan datanya (satu kali jalan). Kalau belum, identitas dikirim dulu. */
+      var siap = !!(resumed && p.stateIfWarm === true && store.cached && store.cached(stateTables(resumed)));
+      if (resumed && !siap) return deferredSession(resumed, String(p.token));
     }
     var us = users();
     var st = settings();
@@ -1066,10 +1098,13 @@ function createCore(store, env) {
   };
 
   actions.login = function (p) {
-    /* PIN, disabled state and failed-attempt counters come from the physical
-       account row inside the login lock, which is also needed by session update. */
-    if (store.fresh) store.fresh('Pegawai');
+    /* Jalur cepat: akun dari cache berversi di dalam kunci login. Dipakai hanya kalau akunnya aktif, tidak sedang
+       dikunci, tidak punya hitungan salah PIN, dan PIN-nya cocok; sesi lalu dicatat tanpa menyentuh Google Sheets.
+       Untuk keadaan lain (PIN tidak cocok, akun tidak ditemukan, ada hitungan/kunci) baris fisik dibaca dulu,
+       sehingga penolakan dan penghitung salah PIN selalu berdasarkan isi sheet yang terbaru. */
     var u = findUser(String(p.userId || ''));
+    var cepat = !!(store.sesi && u && u.aktif && pinOk(u) && !u.kunci && !coreNum(u.gagal) && String(u.pin) === String(p.pin || ''));
+    if (!cepat) { if (store.fresh) store.fresh('Pegawai'); u = findUser(String(p.userId || '')); }
     if (!u || !u.aktif) fail('Pegawai tidak ditemukan.');
     if (!pinOk(u)) fail('Akun ini belum punya PIN. Minta owner membuatkannya di menu Pegawai.');
     var now = env.now().getTime();
@@ -1089,10 +1124,21 @@ function createCore(store, env) {
   actions.logout = function (p) {
     var token = String(p.token || ''); if (!token) return { ok: true };
     users().forEach(function (u) {
-      var list = tokensOf(u); var i = list.indexOf(token);
+      var list = tokenKolom(u); var i = list.indexOf(token);
       if (i >= 0) { list.splice(i, 1); store.update('Pegawai', u.id, { token: list.join(',') }); }
+      if (store.sesi) { var s = tokenSesi(u); var j = s.indexOf(token); if (j >= 0) { s.splice(j, 1); store.sesi.set(u.id, s); } }
     });
     return { ok: true };
+  };
+
+  /* Memanaskan server: tanpa login dan tanpa mengembalikan data apa pun. Tabel yang salinannya sudah tidak ada di
+     cache dibaca dari sheet dan disimpan lagi. Aplikasi memanggilnya saat layar masuk tampil, sehingga begitu PIN
+     dimasukkan server tidak perlu lagi membuka Google Sheets. */
+  actions.hangat = function () {
+    var perlu = stateTables(null);
+    if (store.prefetch) store.prefetch(perlu);
+    perlu.forEach(function (n) { if (n === 'Pengaturan') store.getSettings(); else store.read(n); });
+    return { siap: true };
   };
 
   actions.changePin = function (p) {
@@ -1101,7 +1147,9 @@ function createCore(store, env) {
     if (me.divisi !== 'owner') fail('PIN hanya bisa diganti oleh owner. Minta owner menggantinya di menu Pegawai.');
     if (String(me.pin) !== String(p.pinLama || '')) fail('PIN lama salah.');
     var pin = String(p.pinBaru || '').trim(); if (!/^\d{4,6}$/.test(pin)) fail('PIN baru harus 4 sampai 6 angka.');
-    store.update('Pegawai', me.id, { pin: pin, token: String(p.token) });   /* perangkat lain otomatis keluar */
+    /* perangkat lain otomatis keluar: hanya sesi perangkat ini yang dipertahankan */
+    store.update('Pegawai', me.id, { pin: pin, token: store.sesi ? '' : String(p.token) });
+    if (store.sesi) store.sesi.set(me.id, [String(p.token)]);
     return { ok: true };
   };
 
@@ -1152,6 +1200,7 @@ function createCore(store, env) {
       var patch = { nama: nama, divisi: divisi, hp: teks(u.hp, 30), catatan: teks(u.catatan, 200), aktif: u.aktif === undefined ? old.aktif : !!u.aktif };
       if (u.pin) { if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengatur PIN.'); if (!/^\d{4,6}$/.test(String(u.pin))) fail('PIN harus 4 sampai 6 angka.'); patch.pin = String(u.pin); patch.gagal = 0; patch.kunci = ''; if (old.id !== me.id) patch.token = ''; }
       if (patch.aktif === false || patch.divisi !== old.divisi) patch.token = '';
+      if (patch.token === '') hapusSesi(old.id);
       store.update('Pegawai', old.id, patch);
       return publicUser(findUser(old.id), true);
     }
