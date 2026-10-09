@@ -100,3 +100,27 @@ test('additional prepared work on an existing active PO supports both selected r
  const h=ui();h.run("D.po.existing={id:'existing',status:'aktif'};function poHead(){return '';}function poIdEl(){return {getAttribute:function(k){return k==='data-po'?'existing':'';}};}form.values.id='nextplan';form.values.poId='existing';form.values.revision='';");vm.runInContext(part('A.rencanaPotongOpen =','function saveRencanaPotongUI('),h.c);h.run('A.rencanaPotongOpen(poIdEl())');assert.match(h.run('rendered'),/data-roll-picker/);assert.match(h.run('rendered'),/Saldo lama/);assert.match(h.run('rendered'),/pemotongan berikutnya/);assert.deepEqual(h.json("rencanaPotongValues(form,'siap').rencana.alokasiBahan"),[{stokId:'rollA',qty:5},{stokId:'rollC',qty:2}]);
  h.run("form.values.prepareMode='legacy';form.legacy=[{values:{legacyBahan:'Katun',legacyQty:'3'}}]");assert.deepEqual(h.json("rencanaPotongValues(form,'siap').rencana.bahanList"),[{nama:'Katun',qty:3,satuan:'kg'}]);
 });
+
+test('a material without roll detail offers "Isi berat tiap rol" to the owner right in the picker',()=>{
+ const h=ui();h.run("stock.push({kunci:'lama',nama:'Lama',satuan:'kg',saldo:50,legacyTersedia:50})");
+ const none=h.run("rollChoicesHtml('Lama',[],'')");assert.match(none,/Stok bahan ini 50 kg belum dirinci per rol/);assert.match(none,/class="btn sm pri" data-a="rinciRolOpen" data-b="Lama">Isi berat tiap rol/);
+ const some=h.run("rollChoicesHtml('Katun',[],'')");assert.match(some,/data-roll-choice="rollA"/);assert.match(some,/Masih 10 kg belum dirinci per rol/);assert.match(some,/class="btn sm" data-a="rinciRolOpen" data-b="Katun"/);
+ assert.doesNotMatch(h.run("rollChoicesHtml('Rib',[],'')"),/rinciRolOpen/,'nothing left to itemise');
+ h.run("actor.divisi='admin'");assert.doesNotMatch(h.run("rollChoicesHtml('Lama',[],'')"),/rinciRolOpen/);
+});
+test('Ubah PO offers "Arsipkan": the PO keeps a finished status, enters the archive, and another status takes it out again',async()=>{
+ const tick=()=>new Promise(r=>setImmediate(r));
+ const h=ui();h.run("S.state.settings.poSembunyi=[];D.po.done={id:'done',nama:'Kaos',asal:'lama',jenis:'stok',status:'selesai',ukuran:{M:10},total:10};D.po.run={id:'run',nama:'Kaos',asal:'lama',jenis:'stok',status:'aktif',ukuran:{M:10},total:10};openPO('done','')");
+ assert.match(h.run('rendered'),/<option value="arsip">Arsipkan \(barang kembali ke Belum PO\)<\/option>/);assert.match(h.run('rendered'),/<option value="selesai" selected>/);
+ h.run("form.values.id='done';form.values.status='arsip'");let done=h.run('A.poSave(button)');await tick();
+ assert.equal(h.run('requests[0].action'),'savePO');assert.equal(h.run('requests[0].payload.po.status'),'selesai','the PO itself stays finished');h.resolve(0,{id:'done'});await tick();
+ assert.deepEqual(h.json('{a:requests[1].action,p:requests[1].payload}'),{a:'arsipPO',p:{id:'done',arsip:true}});h.resolve(1,{ok:true});await done;assert.match(h.run('messages[messages.length-1]'),/diarsipkan/);
+ /* an active PO is closed first, in the same save */
+ h.run("requests.length=0;form.values.id='run'");done=h.run('A.poSave(button)');await tick();assert.equal(h.run('requests[0].payload.po.status'),'selesai');h.resolve(0,{id:'run'});await tick();assert.deepEqual(h.json('requests[1].payload'),{id:'run',arsip:true});h.resolve(1,{ok:true});await done;
+ /* already archived: the form shows it, and saving with another status takes it out of the archive */
+ h.run("S.state.settings.poSembunyi=['done'];openPO('done','')");assert.match(h.run('rendered'),/<option value="arsip" selected>/);
+ h.run("requests.length=0;form.values.id='done';form.values.status='arsip'");done=h.run('A.poSave(button)');await tick();h.resolve(0,{id:'done'});await done;assert.equal(h.run('requests.length'),1,'nothing more to do when it is already archived');
+ h.run("requests.length=0;form.values.status='selesai'");done=h.run('A.poSave(button)');await tick();assert.equal(h.run('requests[0].payload.po.status'),'selesai');h.resolve(0,{id:'done'});await tick();assert.deepEqual(h.json('requests[1].payload'),{id:'done',arsip:false});h.resolve(1,{ok:true});await done;
+ /* an ordinary save of a PO that is not archived asks for nothing else */
+ h.run("S.state.settings.poSembunyi=[];requests.length=0;form.values.status='batal'");done=h.run('A.poSave(button)');await tick();h.resolve(0,{id:'done'});await done;assert.equal(h.run('requests.length'),1);assert.equal(h.run('requests[0].payload.po.status'),'batal');
+});

@@ -39,7 +39,7 @@ test('active POs are grouped by series, ordered by stage, coloured per stage, wi
   assert.match(view,/<span class="po-pita">Sudah potong<\/span>/);assert.match(view,/3 PO · 1 belum di-PO/);
   assert.match(view,/Zipper Hitam[\s\S]*?data-a="poBaruProduk" data-id="p1"/);assert.match(view,/data-a="poBaruProduk" data-id="p4"/);
   for(const gone of ['p2','p3','p5'])assert.ok(!view.includes('data-a="poBaruProduk" data-id="'+gone+'"'),gone+' already has an active PO or is inactive');
-  assert.ok(!view.includes('data-id="z9"'),'a finished PO is not in the active tab');assert.ok(!view.includes('data-a="poHapus"'),'an active PO has no remove button');
+  assert.ok(!view.includes('data-id="z9"'),'a finished PO is not in the active tab');assert.ok(!view.includes('data-a="poArsip"'),'an active PO has no archive button');
   assert.match(view,/po-leg w-potong"><i><\/i>Belum dipotong <b>3<\/b>/);assert.match(view,/po-leg w-belum"><i><\/i>Belum di-PO <b>2<\/b>/);
   h.run("S.f.poTahap='kirim'");const cut=h.run('VIEWS.po()');assert.match(cut,/data-id="a2"/);assert.ok(!cut.includes('data-id="a1"')&&!cut.includes('poBaruProduk'));
   h.run("S.f.poTahap='';S.f.q='hitam'");const found=h.run('VIEWS.po()');assert.match(found,/data-id="p1"/);assert.ok(!found.includes('data-id="p4"'));
@@ -56,23 +56,27 @@ test('"Semua barang" sits in the same row and shows every PO and every product w
   assert.match(view,/data-a="poBaruProduk" data-id="p1"/);assert.match(view,/data-a="poBaruProduk" data-id="p2"/);
   assert.ok(at(view,'<h3>Tactical</h3>')<at(view,'<h3>Zipper</h3>'));assert.ok(at(view,'data-id="a1"')<at(view,'data-id="s1"')&&at(view,'data-id="s1"')<at(view,'data-id="p1"'),'running first, then finished, then not ordered yet');
   assert.match(view,/2 PO · 1 belum di-PO/);assert.match(view,/po-leg w-selesai"><i><\/i>Selesai <b>1<\/b>/);assert.match(view,/po-leg w-batal"><i><\/i>Batal <b>1<\/b>/);
-  assert.ok(!view.includes('data-a="poHapus"')&&!view.includes('poHapusSemua')&&!view.includes('data-a="poDihapus"')&&!view.includes('data-c="poTahap"'),'removing stays in the Selesai and Batal tabs');
-  h.run('A.poHapusSemua()');assert.equal(h.run('requests.length'),0);assert.equal(h.run('confirmFn'),null);
+  assert.match(view,/data-v="arsip">Arsip 1</);
+  assert.ok(!view.includes('data-a="poArsip"')&&!view.includes('poArsipSemua')&&!view.includes('data-c="poTahap"'),'archiving stays in the Selesai and Batal tabs');
+  h.run('A.poArsipSemua()');assert.equal(h.run('requests.length'),0);assert.equal(h.run('confirmFn'),null);
   h.run("S.f.q='tactical'");view=h.run('VIEWS.po()');assert.match(view,/data-id="x1"/);assert.ok(!view.includes('data-id="a1"'));h.run("S.f.q='polos'");assert.match(h.run('VIEWS.po()'),/data-id="p2"/);
 });
 
-test('a finished PO is removed from the list by hiding it, and comes back from "Yang dihapus"',async()=>{
-  const h=ui();h.c.fixture=[po('s1',{status:'selesai',dibuat:'2026-10-02',workflow:{ukuran:{},issues:[],complete:true}}),po('s2',{status:'selesai',workflow:{ukuran:{},issues:['periksa'],complete:false}}),po('s3',{status:'selesai'}),po('x1',{status:'batal'}),po('a1')];
-  h.run("seed(fixture,[],['s3','not-loaded-po']);S.f.poStatus='selesai'");let view=h.run('VIEWS.po()');
-  assert.match(view,/Selesai 2</);assert.match(view,/Batal 1</);assert.match(view,/Aktif 1</);assert.match(view,/data-a="poDihapus">Yang dihapus 1</);
-  assert.match(view,/data-a="poHapus" data-id="s1"/);assert.match(view,/data-a="poHapus" data-id="s2"/);assert.ok(!view.includes('data-id="s3"'));assert.match(view,/data-a="poHapusSemua"/);
+test('a finished PO is archived, not erased: it leaves the lists, its product is "Belum PO" again, and it comes back from the Arsip tab',async()=>{
+  const h=ui();h.c.fixture=[po('s1',{status:'selesai',dibuat:'2026-10-02',produkId:'p1',workflow:{ukuran:{},issues:[],complete:true}}),po('s2',{status:'selesai',workflow:{ukuran:{},issues:['periksa'],complete:false}}),po('s3',{status:'selesai'}),po('x1',{status:'batal'}),po('a1')];
+  h.run("seed(fixture,[{id:'p1',nama:'Kaos Satu',series:'Seri',aktif:true}],['s3','not-loaded-po']);S.f.poStatus='selesai'");let view=h.run('VIEWS.po()');
+  assert.match(view,/data-v="selesai" class="on">Selesai 2</);assert.match(view,/Batal 1</);assert.match(view,/Aktif 1</);assert.match(view,/data-v="arsip">Arsip 1</);
+  assert.match(view,/data-a="poArsip" data-id="s1"/);assert.match(view,/data-a="poArsip" data-id="s2"/);assert.ok(!view.includes('data-id="s3"'));assert.match(view,/data-a="poArsipSemua"/);
   assert.match(view,/class="po w-selesai" data-a="poOpen" data-id="s1"/);assert.match(view,/class="po w-review" data-a="poOpen" data-id="s2"/);
-  h.run(`A.poHapus(${el('s1')})`);assert.match(h.run('confirmText'),/tetap tersimpan/);await h.run('confirmFn(null)');
-  assert.deepEqual(h.json('requests[0]'),{action:'deleteRecord',payload:{sheet:'PO',id:'s1',sembunyikan:true}});assert.match(h.run('messages[0]'),/Catatannya tetap tersimpan/);
-  h.run('A.poHapusSemua()');assert.match(h.run('confirmText'),/Hapus 2 PO dari daftar/);await h.run('confirmFn(null)');
-  assert.deepEqual(h.json('requests[1]'),{action:'saveSettings',payload:{settings:{poSembunyi:['s3','not-loaded-po','s1','s2']}}});
-  h.run('A.poDihapus()');view=h.run('VIEWS.po()');assert.match(view,/data-a="poKembali" data-id="s3"/);assert.ok(!view.includes('data-id="s1"'));assert.ok(!view.includes('data-a="poHapus"'));
-  h.run(`A.poKembali(${el('s3')})`);assert.deepEqual(h.json('requests[2]'),{action:'saveSettings',payload:{settings:{poSembunyi:['not-loaded-po']}}});
-  h.run("A.poStatus({getAttribute:function(){return 'batal';}})");assert.equal(h.run('S.f.poDihapus'),false);assert.match(h.run('VIEWS.po()'),/data-a="poHapus" data-id="x1"/);
-  h.run("actor.divisi='qc'");assert.ok(!h.run('VIEWS.po()').includes('data-a="poHapus"'));
+  h.run('A.poArsip(' + el('s1') + ')');assert.match(h.run('confirmText'),/Belum PO/);assert.match(h.run('confirmText'),/tetap tersimpan/);await h.run('confirmFn(null)');
+  assert.deepEqual(h.json('requests[0]'),{action:'arsipPO',payload:{id:'s1'}});assert.match(h.run('messages[0]'),/diarsipkan/);
+  h.run('A.poArsipSemua()');assert.match(h.run('confirmText'),/Arsipkan 2 PO/);await h.run('confirmFn(null)');
+  assert.deepEqual(h.json('requests[1]'),{action:'arsipPO',payload:{ids:['s1','s2']}});
+  h.run("A.poStatus({getAttribute:function(){return 'arsip';}})");view=h.run('VIEWS.po()');assert.match(view,/data-v="arsip" class="on">Arsip 1</);assert.match(view,/data-a="poKembali" data-id="s3"/);assert.ok(!view.includes('data-id="s1"'));assert.ok(!view.includes('data-a="poArsip"'));
+  h.run('A.poKembali(' + el('s3') + ')');assert.deepEqual(h.json('requests[2]'),{action:'arsipPO',payload:{id:'s3',arsip:false}});
+  h.run("A.poStatus({getAttribute:function(){return 'batal';}})");assert.match(h.run('VIEWS.po()'),/data-a="poArsip" data-id="x1"/);
+  h.run("actor.divisi='qc'");assert.ok(!h.run('VIEWS.po()').includes('data-a="poArsip"'));
+  /* the product whose only PO is finished shows as not ordered again, ready for a new PO */
+  h.run("actor.divisi='owner';S.f.poStatus='aktif'");assert.match(h.run('VIEWS.po()'),/Kaos Satu[\s\S]*?data-a="poBaruProduk" data-id="p1"/);
+  h.run("seed(fixture,[],[]);S.f.poStatus='arsip'");assert.match(h.run('VIEWS.po()'),/Arsip masih kosong/);
 });

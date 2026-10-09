@@ -21,6 +21,16 @@ test('physical stock labels distinguish reserved quantities without inventing mi
  const original=h.run('S.state.stokRingkas.map(function(x){return x.nama;}).join()');h.run("stokSaldoRows(stokTampil(),'all','')");assert.equal(h.run('S.state.stokRingkas.map(function(x){return x.nama;}).join()'),original);
 });
 
+test('a stock card lists the recorded rolls and the kilos that have no roll detail yet; only the owner can itemise them',()=>{
+ const h=ui();h.run(`var actor={divisi:'owner'};function me(){return actor;}function nfQty2(){return '';}
+  S.state.stokRol=[{id:'r1',bahan:'katun  TERSEDIA',rollLabel:'Rol 1',saldo:25,dicadangkan:0,invoice:'BON-1'},{id:'r2',bahan:'Katun tersedia',rollLabel:'Rol 2',saldo:24,dicadangkan:4,invoice:'BON-1'},{id:'r3',bahan:'Katun tersedia',rollLabel:'Rol 3',saldo:0,dicadangkan:0},{id:'x',bahan:'Rib menipis',rollLabel:'Rol 9',saldo:2,dicadangkan:0}];
+  S.state.stokRingkas[1].legacySaldo=7.5;S.f.stokFilter='all';VIEWS.stok()`);
+ const card=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(card,/2 rol tercatat/);assert.match(card,/<span class="chip"[^>]*>Rol 1 · 25 kg<\/span>/);assert.match(card,/<span class="chip warn"[^>]*dicadangkan 4 kg[^>]*>Rol 2 · 24 kg<\/span>/);assert.doesNotMatch(card,/Rol 3|Rol 9/);
+ assert.match(card,/Belum dirinci per rol: <b>7,5 kg<\/b>/);assert.match(card,/data-a="rinciRolOpen" data-b="Katun tersedia">Rinci rol/);
+ h.run("S.state.stokRol=[];");const old=h.run('stokKartu(S.state.stokRingkas[1])');assert.match(old,/Belum ada rincian berat tiap rol: <b>7,5 kg<\/b>/);assert.doesNotMatch(old,/rol tercatat/);
+ h.run("actor.divisi='admin'");assert.doesNotMatch(h.run('stokKartu(S.state.stokRingkas[1])'),/rinciRolOpen/);
+ h.run("S.state.stokRingkas[3].legacySaldo=8");assert.doesNotMatch(h.run('stokKartu(S.state.stokRingkas[3])'),/stok-rol/,'only kg materials have rolls');assert.doesNotMatch(h.run('stokKartu(S.state.stokRingkas[0])'),/stok-rol/);
+});
 test('finished materials are listed last; anything that needs attention stays above what is simply available',()=>{
  const h=ui(),order=h.run("JSON.stringify(stokSaldoRows([{nama:'B habis',status:'habis'},{nama:'A aman',status:'aman'},{nama:'A habis',status:'habis'},{nama:'Z minus',status:'minus'},{nama:'M menipis',status:'menipis'},{nama:'K kritis',status:'kritis'}],'all','').map(function(b){return b.nama;}))");
  assert.deepEqual(JSON.parse(order),['Z minus','K kritis','M menipis','A aman','A habis','B habis']);
