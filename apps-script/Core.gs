@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.9';
+var APP_VERSION = '1.5.10';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -1738,6 +1738,25 @@ function createCore(store, env) {
     store.appendMany('StokBahan', rows);
     return { rows: rows, total: total };
   };
+  /* Salah ketik berat saat merinci: berat rol rincian boleh dibetulkan selama rol itu belum dipakai, dicadangkan,
+     atau dikoreksi. Selisihnya kembali ke, atau diambil dari, stok yang belum dirinci; total stok tetap. */
+  actions.ubahRinciRol = function (p) {
+    ['Pegawai','StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
+    var me = auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengubah rincian rol.');
+    var id = idOk(p.id), row = id ? findRow('StokBahan', id) : null;
+    if (!row || row.jenis !== 'rinci' || row.stockMode !== 'roll') fail('Rincian rol tidak ditemukan. Muat data terbaru.');
+    var q = coreBahanInvoiceNumber(p.qty);
+    if (!isFinite(q) || q <= 0 || q > 1e8 || Math.abs(q * 1000 - Math.round(q * 1000)) > 0.000001) fail('Berat rol harus lebih dari nol, maksimal 3 angka desimal.');
+    q = Math.round(q * 1000) / 1000;
+    if (coreNum(row.qty) === q) return row;
+    if (p.expectedQty !== undefined && p.expectedQty !== '' && coreNum(p.expectedQty) !== coreNum(row.qty)) fail('Berat rol ini sudah berubah sejak formulir dibuka. Muat data terbaru.');
+    ensureRollSourceUnused(id);
+    var pool = coreRollInventory(store.read('Potong'), store.read('StokBahan'), settings(), store.read('RencanaPotong')).legacyMap[coreNormBahan(row.bahan)];
+    var longgar = pool ? coreNum(pool.tersedia) : 0;
+    if (q - coreNum(row.qty) > longgar + 0.000001) fail('Berat baru melebihi stok yang belum dirinci. Paling banyak ' + (Math.round((coreNum(row.qty) + Math.max(0, longgar)) * 1000) / 1000) + ' kg untuk rol ini.');
+    store.update('StokBahan', id, { qty: q });
+    return findRow('StokBahan', id);
+  };
   function ensureRollSourceUnused(id) {
     var used = {}, reserved = false;
     store.read('Potong').forEach(function (r) { if (r.rencanaId) used[r.rencanaId] = true; if (coreParseJSON(r.alokasiBahan,[]).some(function (a) { return a.stokId === id; })) reserved = true; });
@@ -2570,7 +2589,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, arsipPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });

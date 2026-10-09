@@ -338,6 +338,11 @@ ol.steps { margin: 0; padding: 0; }
 .stok-rinci > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-s); padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .stok-rinci b { font-variant-numeric: tabular-nums; font-size: 14.5px; overflow-wrap: anywhere; }
 .stok-rol { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px dashed var(--line); }
+button.chip { cursor: pointer; }
+button.chip .ic { width: 12px; height: 12px; }
+.rol-jumlah { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--info); }
+.rol-pil { padding: 2px 9px; border-radius: 99px; background: var(--info); color: var(--bg); font-weight: 700; }
+.rol-belum b { color: var(--warn); }
 .item .n small { font-family: var(--f-body); font-weight: 500; }
 table.gaji-grid th, table.gaji-grid td { text-align: center; padding: 6px 5px; }
 table.gaji-grid th:first-child, table.gaji-grid td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; min-width: 120px; white-space: normal; }
@@ -356,7 +361,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261009-arsip-rol-159';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261009-ubah-rol-1510';</script>
 <script>
 (function () {
 'use strict';
@@ -378,7 +383,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.9';
+var APP_VERSION = '1.5.10';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -2097,6 +2102,25 @@ function createCore(store, env) {
     store.appendMany('StokBahan', rows);
     return { rows: rows, total: total };
   };
+  /* Salah ketik berat saat merinci: berat rol rincian boleh dibetulkan selama rol itu belum dipakai, dicadangkan,
+     atau dikoreksi. Selisihnya kembali ke, atau diambil dari, stok yang belum dirinci; total stok tetap. */
+  actions.ubahRinciRol = function (p) {
+    ['Pegawai','StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
+    var me = auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengubah rincian rol.');
+    var id = idOk(p.id), row = id ? findRow('StokBahan', id) : null;
+    if (!row || row.jenis !== 'rinci' || row.stockMode !== 'roll') fail('Rincian rol tidak ditemukan. Muat data terbaru.');
+    var q = coreBahanInvoiceNumber(p.qty);
+    if (!isFinite(q) || q <= 0 || q > 1e8 || Math.abs(q * 1000 - Math.round(q * 1000)) > 0.000001) fail('Berat rol harus lebih dari nol, maksimal 3 angka desimal.');
+    q = Math.round(q * 1000) / 1000;
+    if (coreNum(row.qty) === q) return row;
+    if (p.expectedQty !== undefined && p.expectedQty !== '' && coreNum(p.expectedQty) !== coreNum(row.qty)) fail('Berat rol ini sudah berubah sejak formulir dibuka. Muat data terbaru.');
+    ensureRollSourceUnused(id);
+    var pool = coreRollInventory(store.read('Potong'), store.read('StokBahan'), settings(), store.read('RencanaPotong')).legacyMap[coreNormBahan(row.bahan)];
+    var longgar = pool ? coreNum(pool.tersedia) : 0;
+    if (q - coreNum(row.qty) > longgar + 0.000001) fail('Berat baru melebihi stok yang belum dirinci. Paling banyak ' + (Math.round((coreNum(row.qty) + Math.max(0, longgar)) * 1000) / 1000) + ' kg untuk rol ini.');
+    store.update('StokBahan', id, { qty: q });
+    return findRow('StokBahan', id);
+  };
   function ensureRollSourceUnused(id) {
     var used = {}, reserved = false;
     store.read('Potong').forEach(function (r) { if (r.rencanaId) used[r.rencanaId] = true; if (coreParseJSON(r.alokasiBahan,[]).some(function (a) { return a.stokId === id; })) reserved = true; });
@@ -2929,7 +2953,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, arsipPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
@@ -5573,7 +5597,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.9';
+var UI_VERSION = '1.5.10';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -8861,14 +8885,16 @@ VIEWS.stok = function () {
 C.stokFilter = function (el) { S.f.stokFilter = el.value; paintList(); };
 /* Rol yang tercatat untuk satu bahan, dan sisa stok yang belum dirinci per rol. Stok dari data lama hanya punya
    total kg, jadi rolnya baru muncul setelah owner mengisi berat tiap rol lewat "Rinci rol". */
+function rolRinciBebas(r) { return !!r && !!r.rinci && !coreNum(r.pakai) && !coreNum(r.koreksi) && !coreNum(r.dicadangkan) && !r.correctionRevision; }
 function stokRolBahan(nama) { var k = coreNormBahan(nama); return ((S.state && S.state.stokRol) || []).filter(function (r) { return coreNormBahan(r.bahan) === k; }); }
 function stokRolRingkas(b) {
   if (b.satuan !== 'kg') return '';
   var rolls = stokRolBahan(b.nama).filter(function (r) { return coreNum(r.saldo) > 0.0005; }), lama = coreNum(b.legacySaldo);
   if (!rolls.length && !(lama > 0.0005)) return '';
+  var pemilik = rolls.length ? me().divisi === 'owner' : false;
   return '<div class="stok-rol">' +
-    (rolls.length ? '<div class="xs muted">' + nf(rolls.length) + ' rol tercatat</div><div class="chips">' + rolls.slice(0, 12).map(function (r) { return '<span class="chip' + (coreNum(r.dicadangkan) > 0 ? ' warn' : '') + '" title="' + esc((r.invoice || '') + (coreNum(r.dicadangkan) > 0 ? ' · dicadangkan ' + nfQty(r.dicadangkan) + ' kg' : '')) + '">' + esc(r.rollLabel || 'Rol') + ' · ' + nfQty(r.saldo) + ' kg</span>'; }).join('') + (rolls.length > 12 ? '<span class="chip">+' + (rolls.length - 12) + ' rol</span>' : '') + '</div>' : '') +
-    (lama > 0.0005 ? '<div class="row wrap gap-s"><span class="grow xs muted">' + (rolls.length ? 'Belum dirinci per rol: ' : 'Belum ada rincian berat tiap rol: ') + '<b>' + nfQty(lama) + ' kg</b></span>' + (me().divisi === 'owner' ? '<button class="btn sm" data-a="rinciRolOpen" data-b="' + esc(b.nama) + '">Rinci rol</button>' : '') + '</div>' : '') + '</div>';
+    (rolls.length ? '<div class="rol-jumlah"><span class="rol-pil">' + nf(rolls.length) + ' rol tercatat</span>' + nfQty(rolls.reduce(function (n, r) { return n + coreNum(r.saldo); }, 0)) + ' kg</div><div class="chips">' + rolls.slice(0, 12).map(function (r) { if (pemilik && rolRinciBebas(r)) return '<button type="button" class="chip info" data-a="rinciRolEdit" data-id="' + esc(r.id) + '" title="Ubah berat atau hapus rol ini">' + esc(r.rollLabel || 'Rol') + ' · ' + nfQty(r.saldo) + ' kg ' + ic('edit', 's') + '</button>'; return '<span class="chip' + (coreNum(r.dicadangkan) > 0 ? ' warn' : ' info') + '" title="' + esc((r.invoice || '') + (coreNum(r.dicadangkan) > 0 ? ' · dicadangkan ' + nfQty(r.dicadangkan) + ' kg' : '')) + '">' + esc(r.rollLabel || 'Rol') + ' · ' + nfQty(r.saldo) + ' kg</span>'; }).join('') + (rolls.length > 12 ? '<span class="chip">+' + (rolls.length - 12) + ' rol</span>' : '') + '</div>' + (pemilik && rolls.some(rolRinciBebas) ? '<div class="xs muted">Ketuk rol untuk mengubah berat atau menghapusnya.</div>' : '') : '') +
+    (lama > 0.0005 ? '<div class="row wrap gap-s"><span class="grow xs muted rol-belum">' + (rolls.length ? 'Belum dirinci per rol: ' : 'Belum ada rincian berat tiap rol: ') + '<b>' + nfQty(lama) + ' kg</b></span>' + (me().divisi === 'owner' ? '<button class="btn sm" data-a="rinciRolOpen" data-b="' + esc(b.nama) + '">Rinci rol</button>' : '') + '</div>' : '') + '</div>';
 }
 function stokKartu(b) {
   var ss = STATUS_STOK[b.status]; var u = satuanPendek(b.satuan);
@@ -9125,11 +9151,34 @@ A.rinciRolSave = function (el) {
     .then(function () { f._rinciBusy = false; dropForm(f); toast(nf(list.length) + ' rol tersimpan. Sekarang bisa dipilih saat membuat PO atau mencatat potong.'); rollPilihanSegarkan(); })
     .catch(function (error) { f._rinciBusy = false; quiet(error); });
 };
+/* salah ketik berat: ketuk rol di kartu stok, lalu betulkan beratnya atau hapus rolnya (selama belum dipakai atau dicadangkan) */
+A.rinciRolEdit = function (el) {
+  var id = el.getAttribute('data-id');
+  if (me().divisi !== 'owner') return toast('Rincian rol diubah oleh owner.', true);
+  if (!stokRolById(id)) return toast('Rol ini sudah berubah. Muat data terbaru.', true);
+  openSheet(function () {
+    var r = stokRolById(id); if (!r) return sheetHtml('Ubah rol', emptyBox('Rol ini sudah tidak ada.'));
+    if (!rolRinciBebas(r)) return sheetHtml('Ubah rol', '<div class="note warn">Rol ini sudah dipakai, dicadangkan, atau pernah dikoreksi, jadi beratnya tidak bisa diubah di sini. Untuk menyesuaikan sisa fisiknya pakai Cocokkan fisik.</div>', '<button class="btn" data-a="close">Tutup</button>');
+    var info = bahanInfo(r.bahan), sisa = info ? Math.max(0, coreNum(info.legacyTersedia)) : 0;
+    return sheetHtml('Ubah rol', '<div class="col" data-form="rinciEdit">' + hid('id', r.id) + hid('lama', r.qty) + '<h3>' + esc(r.bahan) + ' · ' + esc(r.rollLabel || 'Rol') + '</h3>' +
+      fNum('Berat rol (kg)', 'qty', r.qty, 'step="0.001"', 'Paling banyak ' + nfQty(coreNum(r.qty) + sisa) + ' kg (stok yang belum dirinci ' + nfQty(sisa) + ' kg).') +
+      '<p class="small muted">Total stok tidak berubah. Selisihnya kembali ke, atau diambil dari, stok yang belum dirinci per rol.</p></div>',
+      '<button class="btn ghost" style="color:var(--bad);margin-right:auto" data-a="rinciRolHapus" data-id="' + esc(r.id) + '">' + ic('trash', 's') + 'Hapus rol ini</button>' + footSave('rinciEditSave', 'Simpan'));
+  }, { cls: 'dialog' });
+};
+A.rinciEditSave = function (el) {
+  var f = topForm(), v = formVals(f), q = Number(v.qty); if (f._rinciBusy) return;
+  if (v.qty === '' || !Number.isFinite(q) || q <= 0 || Math.abs(q * 1000 - Math.round(q * 1000)) > 0.000001) return toast('Berat rol harus lebih dari nol, maksimal 3 angka di belakang koma.', true);
+  f._rinciBusy = true;
+  return act(el, req('ubahRinciRol', { id: v.id, qty: q, expectedQty: Number(v.lama) }))
+    .then(function () { f._rinciBusy = false; dropForm(f); toast('Berat rol diperbarui.'); rollPilihanSegarkan(); })
+    .catch(function (error) { f._rinciBusy = false; quiet(error); });
+};
 /* salah ketik berat: rincian yang belum dipakai atau dicadangkan bisa dihapus; kilonya kembali ke stok tanpa rincian rol */
 A.rinciRolHapus = function (el) {
   var id = el.getAttribute('data-id');
   confirmBox({ title: 'Hapus rincian rol ini?', text: 'Rol ini kembali menjadi stok tanpa rincian rol. Total stok tidak berubah. Hanya rol yang belum dipakai atau dicadangkan yang bisa dihapus.', ok: 'Hapus rincian', danger: true }, function (btn) {
-    return act(btn, req('deleteRecord', { sheet: 'StokBahan', id: id })).then(function () { toast('Rincian rol dihapus. Kilonya kembali ke stok tanpa rincian rol.'); });
+    return act(btn, req('deleteRecord', { sheet: 'StokBahan', id: id })).then(function () { for (var i = sheets.length - 2; i >= 0; i--) if ($('[data-form="rinciEdit"]', sheets[i].node)) dropSheet(i); toast('Rincian rol dihapus. Kilonya kembali ke stok tanpa rincian rol.'); });
   });
 };
 /* setelah merinci dari dalam formulir PO / Catat potong, pilihan rol bahan itu langsung muncul di formulir yang masih terbuka */
