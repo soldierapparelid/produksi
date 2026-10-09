@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.4';
+var APP_VERSION = '1.5.6';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -2462,7 +2462,7 @@ function createCore(store, env) {
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
     saveStok: 1, saveInvoiceBahan: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
-  var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
+  var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
 
   function handle(action, payload) {
@@ -4811,8 +4811,19 @@ function coreCommerceSlipModel(module,record,context) {
   var note=nota?record.notes:record.catatan;if(note)sections.push({title:'Catatan',columns:[{label:'Keterangan'}],rows:[[note]]});
   return {layout:'weekly-a4',title:nota?'Nota Penjualan':'Pesanan Pembelian Produk',reference:record.noNota||record.id,recipient:nota?(record.customer||{}).name||'':record.supplierName||'',recipientLabel:nota?'Pelanggan':'Supplier',period:nota?String(record.date||'').slice(0,10):record.tanggalOrder||'',columns:(nota?['Barang','Ukuran / Warna','Qty','Harga','Diskon','Subtotal']:['Barang','Varian','Qty','Harga','Subtotal']).map(function(label){return {label:label};}),rows:rows,summary:summary,sections:sections,signatures:[]};
 }
-function coreInstallCommerceActions(actions,ctx) {
-  var store=ctx.store, tables=['CommerceRecord','CommerceEvent','CommerceSource','CommerceImport'];
+/* One amount paid to a supplier for several orders, as the earlier application
+   did it: divided by each order's remaining balance. Whole rupiah only, the
+   parts always add up to the amount, and no part exceeds its order's balance. */
+function coreCommerceSplit(amount, balances) {
+  var total=balances.reduce(function(n,b){return n+b;},0),n=balances.length;
+  if(!Number.isSafeInteger(amount)||amount<=0||!n||amount>total||balances.some(function(b){return !Number.isSafeInteger(b)||b<0;}))return null;
+  var exact=balances.map(function(b){return amount*b/total;}),shares=exact.map(function(x,i){return Math.min(balances[i],Math.max(0,Math.floor(x)));}),left=amount-shares.reduce(function(a,s){return a+s;},0);
+  var order=exact.map(function(x,i){return {i:i,frac:x-Math.floor(x)};}).sort(function(a,b){return b.frac-a.frac||a.i-b.i;});
+  for(var guard=0;left!==0&&guard<n*4;guard++){var k=order[left>0?guard%n:n-1-guard%n].i;if(left>0&&shares[k]<balances[k]){shares[k]++;left--;}else if(left<0&&shares[k]>0){shares[k]--;left++;}}
+  if(left!==0||shares.some(function(s,i){return s<0||s>balances[i];}))return null;
+  return shares;
+}
+function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=['CommerceRecord','CommerceEvent','CommerceSource','CommerceImport'];
   function fail(s){ctx.fail(s);}
   /* Writes and imports recheck the physical account row. Lists, photos and PDF
      (reading=true) use the same account check as the rest of the application,
@@ -4889,6 +4900,24 @@ function coreInstallCommerceActions(actions,ctx) {
     var stored={id:key,module:module,parentId:parent,kind:kind,data:JSON.stringify(d),dibuat:now(),dibuatOleh:me.id,sourceHash:''};checkRows('CommerceEvent',[stored]);store.append('CommerceEvent',stored);return reply(module,row,p,me);
   }
   actions.appendCommercePayment=function(p){return event(p,'payment');};actions.appendCommerceReceipt=function(p){return event(p,'receipt');};actions.voidCommerceEvent=function(p){return event(p,'void');};
+  /* Bayar grup: one payment event per order, written together, all carrying the same groupId. */
+  actions.appendCommerceGroupPayment=function(p){
+    var me=writable(p),key=id(p.id),ids=p.orderIds,seen={};if(!(ids instanceof Array)||ids.length<2||ids.length>40)fail('Pilih 2 sampai 40 order untuk pembayaran grup.');
+    var rows=ids.map(function(k){k=id(k);if(seen[k])fail('Order ganda dalam pembayaran grup.');seen[k]=true;var row=find('pembelian','order',k);if(!row)fail('Catatan tidak ditemukan.');return row;});
+    var d={tanggal:date(p.tanggal||String(ctx.env.now().toISOString()).slice(0,10)),catatan:text(p.catatan,500),metode:text(p.metode||'transfer',40,true)},amount=num(p.jumlah,1e15,true,true);
+    function eventId(orderId){return 'gp_'+coreCommerceHash([key,orderId]).slice(0,40);}
+    function answer(){var out={groupId:key};if(p.withState===true)out.commerce=stateOf('pembelian',me);return out;}
+    var prior=store.read('CommerceEvent').filter(function(e){return e.module==='pembelian'&&e.kind==='payment'&&coreCommerceData(e).groupId===key;});
+    if(prior.length){
+      var same=prior.every(function(e){var x=coreCommerceData(e);return e.dibuatOleh===me.id&&seen[e.parentId]&&e.id===eventId(e.parentId)&&x.tanggal===d.tanggal&&x.metode===d.metode&&x.catatan===d.catatan;})&&prior.reduce(function(n,e){return n+coreNum(coreCommerceData(e).jumlah);},0)===amount;
+      if(!same)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return answer();
+    }
+    var views=rows.map(view);
+    views.forEach(function(v){if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa. Keluarkan order itu dari pembayaran grup.');if(d.tanggal<String(v.tanggalOrder||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');});
+    var shares=coreCommerceSplit(amount,views.map(function(v){return v.balance;}));if(!shares)fail('Pembayaran grup harus lebih dari nol dan tidak melebihi sisa tagihan grup.');
+    var stamp=now(),stored=[];views.forEach(function(v,i){if(shares[i])stored.push({id:eventId(v.id),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
+    checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
+  };
   actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return reply(module,row,p,me);fail('Catatan sudah dibatalkan.');}expected(row,p);if(v.paymentReview||v.receipts.some(function(e){return !e.voided&&e.sourceReview;}))fail('Periksa bukti nominal atau jumlah historis sebelum membatalkan catatan.');if(v.totalPaid||v.totalReceived)fail('Batalkan transaksi pembayaran/penerimaan yang masih berlaku terlebih dahulu.');var data=coreCommerceData(row);data.cancelled=true;data.cancelReason=reason;data.cancelledBy=me.id;data.cancelledAt=now();row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash(data),diubah:now()});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return reply(module,row,p,me);};
   function hppInput(config){
     var source=store.read('CommerceSource'),legacy={production:[],stock:{pembelian:[],rolInfo:{}},meta:{},cuttingPlans:[]};

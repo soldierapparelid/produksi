@@ -21,6 +21,7 @@ function harness(){
     function signOutLocal(){clearSessionLoad();S.token='';S.state=null;signedOut++;}function hapusSnap(){snapshotRemoved++;}
     function bacaBoot(){return cachedBoot;}function simpanBoot(b){bootSaved.push(b);}function pilihTerakhir(){}function gateDepan(){return false;}function sync(){return Promise.resolve();}function seedDemo(){}
     var warmed=0;function panaskan(){warmed++;}
+    var KUNCI_TUNGGU=20000,lockedCopy=null,lockMade=[],lockRemoved=[],forcedSyncs=0;function kunciBuka(){return Promise.resolve(lockedCopy);}function kunciSiapkan(id,pin){lockMade.push(id);return Promise.resolve(null);}function kunciHapus(id){lockRemoved.push(id);}
   `,c);
   vm.runInContext(part('function clearSessionLoad()','A.setup = function'),c);
   vm.runInContext(part('var bootKe = 0;','/* Data contoh'),c);
@@ -120,6 +121,45 @@ test('production request is rejected locally while the authenticated state is st
   const error=await h.run("req('createPotong',{}).catch(function(e){return e;})");assert.match(error.message,/Data akun masih dimuat/);assert.equal(h.requests.length,2);
 });
 
+/* ---- langsung terbuka setelah PIN (salinan terkunci di perangkat) ---- */
+const tick=()=>new Promise(r=>setImmediate(r));
+function unlocked(){const h=harness();h.run(`lockedCopy={at:777,state:${JSON.stringify(state())}};sync=function(){forcedSyncs++;return Promise.resolve();};`);return h;}
+const lockTimer=h=>[...h.timers.values()].find(t=>t.ms===20000);
+test('a PIN that opens the locked device copy shows the last data at once, read-only, while the server still decides',async()=>{
+  const h=unlocked(),done=h.run('A.pinGo()');await tick();
+  assert.equal(h.run('renders.at(-1)'),'DATA');assert.equal(h.run('S.token'),'','no session exists yet');assert.equal(h.run('!!S.buka'),true);assert.equal(h.run('applied.length'),1);assert.ok(lockTimer(h),'the unconfirmed view has a time limit');assert.ok(h.run('marks').includes('pk-pin-lokal'));
+  vm.runInContext(part('function req(', 'function signOutLocal('),h.c);const blocked=await h.run("req('createPotong',{}).catch(function(e){return e;})");assert.match(blocked.message,/PIN masih diperiksa/);assert.equal(h.requests.length,1,'nothing but the PIN check is sent');
+  h.requests[0].resolve(deferred());await done;
+  assert.equal(h.run('S.token'),'verified-token');assert.equal(h.run('S.buka'),null);assert.equal(h.run('S.sessionLoad'),null,'no waiting screen replaces the data already shown');assert.equal(h.run('forcedSyncs'),1,'fresh data is fetched behind the screen');assert.equal(h.run('synced'),1);assert.deepEqual(JSON.parse(h.run('JSON.stringify(lockMade)')),['worker']);assert.equal(lockTimer(h),undefined);
+});
+test('a server that already has the data replaces the device copy in the same answer',async()=>{
+  const h=unlocked(),done=h.run('A.pinGo()');await tick();const fresh=state();fresh.ver=9;h.requests[0].resolve({token:'verified-token',state:fresh});await done;
+  assert.equal(h.run('applied.length'),2);assert.equal(h.run('S.state.ver'),9);assert.equal(h.run('S.token'),'verified-token');assert.equal(h.run('S.buka'),null);
+});
+test('whatever the device copy showed is closed and removed the moment the server refuses the PIN or the account',async()=>{
+  for(const answer of [{salah:true,pesan:'PIN salah.'},{token:'x',deferredState:true,me:{id:'someone-else',divisi:'jahit'}},{deferredState:true,me:{id:'worker',divisi:'jahit'}}]){
+    const h=unlocked(),done=h.run('A.pinGo()');await tick();assert.equal(h.run('renders.at(-1)'),'DATA');h.requests[0].resolve(answer);await done;
+    assert.equal(h.run('S.state'),null);assert.equal(h.run('S.buka'),null);assert.equal(h.run('S.token'),'');assert.equal(h.run('renders.at(-1)'),'GATE');assert.deepEqual(JSON.parse(h.run('JSON.stringify(lockRemoved)')),['worker']);assert.equal(h.run('S.gate.pin'),'');assert.ok(h.run('S.gate.err'));assert.ok(h.run('closed')>=1);assert.equal(h.run('Object.keys(D.po).length'),0);
+  }
+  const refused=unlocked(),p=refused.run('A.pinGo()');await tick();refused.requests[0].reject(new Error('Akun dinonaktifkan.'));await p;assert.equal(refused.run('S.state'),null);assert.deepEqual(JSON.parse(refused.run('JSON.stringify(lockRemoved)')),['worker']);
+});
+test('a lost connection hides the unconfirmed data but keeps the locked copy; no answer at all hides it after the limit',async()=>{
+  const h=unlocked(),done=h.run('A.pinGo()');await tick();h.requests[0].reject(Object.assign(new Error('Server tidak bisa dihubungi.'),{net:true}));await done;
+  assert.equal(h.run('S.state'),null);assert.equal(h.run('renders.at(-1)'),'GATE');assert.equal(h.run('lockRemoved.length'),0);assert.match(h.run('S.gate.err'),/tidak bisa dihubungi/);
+  const slow=unlocked();slow.run('A.pinGo()');await tick();assert.equal(slow.run('renders.at(-1)'),'DATA');lockTimer(slow).fn();
+  assert.equal(slow.run('S.state'),null);assert.equal(slow.run('S.buka'),null);assert.equal(slow.run('renders.at(-1)'),'GATE');assert.equal(slow.run('S.gate.sending'),true,'the PIN check itself is still pending');assert.equal(slow.run('lockRemoved.length'),0);
+});
+test('a mistyped PIN removes nothing; a refused PIN that later proves to open the copy removes it',async()=>{
+  const typo=harness(),a=typo.run('A.pinGo()');await tick();typo.requests[0].resolve({salah:true,pesan:'PIN salah.'});await a;assert.equal(typo.run('lockRemoved.length'),0);assert.equal(typo.run('S.gate.err'),'PIN salah.');
+  const busy=harness(),b=busy.run('A.pinGo()');await tick();busy.requests[0].reject(new Error('Server sedang sibuk.'));await b;assert.equal(busy.run('lockRemoved.length'),0);
+  const stale=harness();stale.run(`var release;kunciBuka=function(){return new Promise(function(ok){release=function(){ok({at:5,state:${JSON.stringify(state())}});};});};`);const c=stale.run('A.pinGo()');stale.requests[0].resolve({salah:true,pesan:'PIN salah.'});await c;stale.run('release()');await tick();
+  assert.deepEqual(JSON.parse(stale.run('JSON.stringify(lockRemoved)')),['worker']);assert.equal(stale.run('S.state'),null,'the old data is never shown after the refusal');
+});
+test('without a locked copy, or when the server answers first, the sign-in behaves exactly as before',async()=>{
+  const none=harness(),a=none.run('A.pinGo()');await tick();assert.equal(none.run('renders.at(-1)'),'GATE');none.requests[0].resolve(deferred());await a;assert.ok(none.run('S.sessionLoad'));assert.deepEqual(JSON.parse(none.run('JSON.stringify(lockMade)')),['worker']);
+  const late=harness();late.run(`var release;kunciBuka=function(){return new Promise(function(ok){release=function(){ok({at:5,state:${JSON.stringify(state())}});};});};`);const b=late.run('A.pinGo()');late.requests[0].resolve(deferred());await b;const applied=late.run('applied.length');late.run('release()');await tick();
+  assert.equal(late.run('applied.length'),applied,'a copy opened after the server answered is ignored');assert.equal(late.run('S.buka'),undefined);
+});
 test('the sign-in screen warms the server without credentials, at most once per four minutes, and asks for a one-trip answer',async()=>{
   const h=harness();
   /* use the real warm-up function instead of the counting stub */

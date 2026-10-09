@@ -142,7 +142,36 @@ test('many orders reuse one product and supplier index and keep the names the pe
  const listed=f.state().orders,single=f.good('saveCommerceOrder',{record:f.order({id:'order00'})}).record;
  assert.equal(listed.length,6);assert.deepEqual(listed.find(o=>o.id==='order00'),single);assert.ok(listed.every(o=>o.productName==='Product Fixture'&&o.supplierName==='Supplier Fixture'));
 });
-test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
+test('a group payment is divided by remaining balance in whole rupiah, written once, and replays without paying twice',()=>{
+ const f=fixture();f.masters();const a=f.good('saveCommerceOrder',{record:f.order()}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02',items:[{id:'only',nama:'M',jumlah:1}]})}).record;
+ assert.equal(a.balance,50000);assert.equal(b.balance,10000);
+ const request={id:'group-pay-01',module:'pembelian',orderIds:['order01','order02'],expectedRevisions:{order01:a.revision,order02:b.revision},tanggal:'2026-10-09',jumlah:30001,metode:'transfer',catatan:'DP gabungan',withState:true};
+ const paid=f.good('appendCommerceGroupPayment',request),after=id=>paid.commerce.orders.find(o=>o.id===id);
+ assert.equal(after('order01').totalPaid,25001);assert.equal(after('order02').totalPaid,5000);assert.equal(after('order01').totalPaid+after('order02').totalPaid,30001);
+ assert.equal(after('order01').payments[0].groupId,'group-pay-01');assert.equal(after('order01').payments[0].catatan,'DP gabungan');assert.equal(f.raw('CommerceEvent').length,2);
+ /* the same request again: same answer, nothing new written */
+ const again=f.good('appendCommerceGroupPayment',request);assert.equal(again.commerce.orders.find(o=>o.id==='order01').totalPaid,25001);assert.equal(f.raw('CommerceEvent').length,2);
+ f.bad('appendCommerceGroupPayment',{...request,jumlah:30002},/sudah digunakan/);f.bad('appendCommerceGroupPayment',{...request,orderIds:['order01']},/2 sampai 40/);
+ /* a new group payment must carry the current revisions and cannot exceed what is left */
+ f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02'},/berubah/);
+ const now={order01:after('order01').revision,order02:after('order02').revision};
+ f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,jumlah:30000},/melebihi sisa/);f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,tanggal:'2026-10-01'},/sebelum/);
+ f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now},/owner|admin/,'fixture-cutter-token-001');f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,orderIds:['order01','order01']},/ganda/);
+ const rest=f.good('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,jumlah:29999,withState:true});
+ assert.ok(rest.commerce.orders.every(o=>o.balance===0&&o.totalPaid===o.totalHarga));assert.equal(f.raw('CommerceEvent').length,4);
+ /* each share stays an ordinary payment: the owner can correct one without touching the other */
+ const one=rest.commerce.orders.find(o=>o.id==='order02'),share=one.payments.find(e=>e.groupId==='group-pay-02');
+ const fixed=f.good('voidCommerceEvent',{id:'void-share',module:'pembelian',parentId:'order02',eventId:share.id,expectedRevision:one.revision,tanggal:'2026-10-09',catatan:'salah catat',withState:true});
+ assert.equal(fixed.commerce.orders.find(o=>o.id==='order02').balance,5000);assert.equal(fixed.commerce.orders.find(o=>o.id==='order01').balance,0);
+});
+test('the split never invents or loses a rupiah and never pays an order beyond its balance',()=>{
+ const f=fixture(),split=(amount,balances)=>JSON.parse(f.h.run(`JSON.stringify(coreCommerceSplit(${amount},${JSON.stringify(balances)}))`));
+ assert.deepEqual(split(60000,[50000,10000]),[50000,10000]);assert.deepEqual(split(1,[50000,10000]),[1,0]);assert.deepEqual(split(10,[3,3,3,1]),[3,3,3,1]);
+ for(const [amount,balances] of [[9999,[3333,3333,3334]],[7,[1,1,1,1,1,1,1,0]],[1000001,[999999,1,1,1]],[22580000,[10000000,4637288,382744,3042712,4517256]],[123456789,[987654321,123456789,5]]]){
+  const shares=split(amount,balances);assert.equal(shares.reduce((n,s)=>n+s,0),amount);assert.ok(shares.every((s,i)=>Number.isInteger(s)&&s>=0&&s<=balances[i]),JSON.stringify(shares));
+ }
+ for(const [amount,balances] of [[0,[5,5]],[11,[5,5]],[-1,[5,5]],[1.5,[5,5]],[5,[]],[5,[5,-1]]])assert.equal(split(amount,balances),null);
+});test('group PDF preserves separate order ledgers and requires matching immutable supplier and selected revisions',()=>{
  const f=fixture();f.masters();let a=f.good('saveCommerceOrder',{record:f.order({catatan:'Print fixture'})}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02'})}).record;
  f.h.run(`var originalCommerceEnv=pkEnv_,lastCommercePdf='';pkEnv_=function(){var e=originalCommerceEnv();e.makePdf=function(html){lastCommercePdf=html;return 'fixture-pdf';};return e;};void 0;`);
  const proof={[a.id]:a.revision,[b.id]:b.revision};const pdf=f.good('makeCommercePdf',{module:'pembelian',ids:[a.id,b.id],expectedRevisions:proof});assert.equal(pdf.base64,'fixture-pdf');assert.equal(f.h.run('(lastCommercePdf.match(/<article>/g)||[]).length'),2);assert.equal(f.h.run('lastCommercePdf.includes("Print fixture")'),true);

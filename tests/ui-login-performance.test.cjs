@@ -52,7 +52,8 @@ function login(){
     function tokenKey(){return 'token';}function lastKey(){return 'last';}function render(){renders++;}
     function applyState(){applied++;}function startSync(){synced++;}
     function setTimeout(fn,ms){var id=++timerId;waitTimers[id]={fn:fn,ms:ms};return id;}function clearTimeout(id){delete waitTimers[id];}
-    function tanda(name){marks.push(name);}`,c);
+    function tanda(name){marks.push(name);}
+    var KUNCI_TUNGGU=20000,lockMade=[],lockRemoved=[];function kunciBuka(){return Promise.resolve(null);}function kunciSiapkan(id){lockMade.push(id);return Promise.resolve(null);}function kunciHapus(id){lockRemoved.push(id);}`,c);
   vm.runInContext(part('A.pinGo = function','A.setup = function'),c);return c;
 }
 test('PIN submit starts visible loading immediately, rejects duplicate taps and opens only after server success',async()=>{
