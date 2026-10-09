@@ -109,6 +109,8 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.12 (hanya tampilan): tab **Aktif** hanya berisi PO aktif; barang yang belum di-PO tampil di "Semua barang" saja. Kartu dan rincian PO menulis **"Harus dipotong"** untuk ukuran aktif yang belum ada hasil potongnya dan "Sudah dipotong" untuk sisanya, dan tabel per ukuran memberi tanda "harus dipotong". Ukuran aktif kini dibaca dari proyeksi potong server (`po.cutting`), sehingga PO yang ukurannya berasal dari data lama ikut terbaca; 1.5.11 hanya membaca `ukuranAktif` dan target.
+
 Mulai 1.5.11:
 
 - **Ukuran aktif terlihat:** kartu PO dan rincian PO menampilkan "Ukuran aktif" (ukuran yang dicentang saat PO dibuat; PO lama memakai ukuran yang punya target), dan baris ukuran itu diberi tanda "aktif" di tabel per ukuran.
