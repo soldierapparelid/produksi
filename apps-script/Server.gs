@@ -31,7 +31,19 @@ function pkStore_() {
   var readCacheBatch = 0; var readCacheQueue = {};
   var sc = null; var scMati = false;
   function versiTab(name) { return String(pkProps_()['v_' + name] || '0'); }
-  function kunciCache(name, v) { return 'pk3|' + pkSchema_() + '|' + String(pkProps_().ve || '0') + '|' + name + '|' + v; }
+  /* Petunjuk status pemulihan riwayat (properti "mig"), supaya permintaan biasa tidak perlu membuka spreadsheet
+     hanya untuk memastikan "tidak ada pemulihan yang tertunda":
+       '0' = pemeriksaan terakhir DARI SHEET, di dalam kunci, menyatakan tidak ada yang tertunda, dan sejak itu
+             tab Pengaturan belum ditulis lagi;
+       selain itu = belum pasti, sheet dibaca seperti sebelumnya.
+     Setiap penulisan ke tab Pengaturan mengubahnya menjadi '1' SEBELUM menulis (kalau gagal, penulisan dibatalkan).
+     Hanya permintaan yang memegang kunci yang boleh menurunkannya ke '0': permintaan tanpa kunci bisa membaca sheet
+     sebelum penulis lain selesai menyimpan. Pengeditan langsung di sheet menaikkannya lewat onEdit. */
+  function migHint() { return String(pkProps_().mig || ''); }
+  function migBelumPasti() { if (migHint() === '1') return; props.setProperty('mig', '1'); pkProps_().mig = '1'; }
+  function migAman() { if (depth <= 0 || migHint() === '0') return; try { props.setProperty('mig', '0'); pkProps_().mig = '0'; } catch (e) {} }
+  var skema = null;      /* sidik skema dipakai di setiap kunci cache: dihitung sekali per eksekusi */
+  function kunciCache(name, v) { if (!skema) skema = pkSchema_(); return 'pk3|' + skema + '|' + String(pkProps_().ve || '0') + '|' + name + '|' + v; }
   function lemari() {
     if (scMati) return null;
     if (!sc) { try { sc = CacheService.getScriptCache(); } catch (e) { scMati = true; return null; } }
@@ -173,6 +185,7 @@ function pkStore_() {
     return out;
   }
   function writeRows(name, list) {
+    if (name === 'Pengaturan') migBelumPasti();
     var t = load(name, true); var k = keyOf(name);
     var data = list.map(function (row) {
       var o = {}; SCHEMA[name].forEach(function (c) { o[c] = fromCell(c, toCell(c, row[c])); });
@@ -257,6 +270,7 @@ function pkStore_() {
     appendMany: function (name, rows) { writeRows(name, rows); },
     prefetch: function (names) { dariCache(names); },
     update: function (name, id, patch) {
+      if (name === 'Pengaturan') migBelumPasti();
       var t = load(name, true); var k = keyOf(name); var r = t.rowNo[id]; if (!r) return;
       var obj = null; for (var i = 0; i < t.rows.length; i++) if (t.rows[i][k] === id) { obj = t.rows[i]; break; }
       if (!obj) return;
@@ -275,6 +289,7 @@ function pkStore_() {
       changed(name, name === 'Pegawai' && patchKeys.length > 0 && patchKeys.every(function (key) { return ['token','gagal','kunci'].indexOf(key) >= 0; }));
     },
     remove: function (name, id) {
+      if (name === 'Pengaturan') migBelumPasti();
       var t = load(name, true); var k = keyOf(name); var r = t.rowNo[id]; if (!r) return;
       t.sh.deleteRow(r);
       t.rows = t.rows.filter(function (x) { return x[k] !== id; });
@@ -283,6 +298,7 @@ function pkStore_() {
       t.last--; if (t.max !== undefined) t.max--; changed(name);
     },
     replaceAll: function (name, list) {
+      if (name === 'Pengaturan') migBelumPasti();
       var t = load(name, true); var k = keyOf(name);
       var data = list.map(function (row) { var o = {}; SCHEMA[name].forEach(function (c) { o[c] = fromCell(c, toCell(c, row[c])); }); return o; });
       var lastRow = t.sh.getLastRow(); var lebar = t.head.length; var lamaById = {};
@@ -312,13 +328,21 @@ function pkStore_() {
        read is reusable until a settings mutation. Unlocked requests always read
        Sheets again. Durable migration checkpoints retain their separate contract. */
     getMigrationStatusFresh: function () {
+      /* Jalur biasa: petunjuk '0' berarti tidak ada pemulihan yang tertunda, tanpa membuka spreadsheet.
+         Kalau tab Pengaturan kebetulan sudah dibaca fisik pada eksekusi ini (mis. oleh checkpoint), isinya tetap dipakai. */
+      if (migHint() === '0' && !settingsNeedsFlush) {
+        var sudah = cache.Pengaturan;
+        return (sudah && !sudah.ringan) ? PK_STORE_.getSettings().legacyMigrationStatus : undefined;
+      }
       if (!(depth > 0 && settingsReadInLock)) {
         if (settingsNeedsFlush) { SpreadsheetApp.flush(); settingsNeedsFlush = false; }
         delete cache.Pengaturan;
         load('Pengaturan', true);
         settingsReadInLock = depth > 0;
       }
-      return PK_STORE_.getSettings().legacyMigrationStatus;
+      var status = PK_STORE_.getSettings().legacyMigrationStatus;
+      if (!status) migAman();
+      return status;
     },
     setSettings: function (obj) {
       PK_STORE_.validateRows('Pengaturan', Object.keys(obj).map(function (k) { return { key: k, value: JSON.stringify(obj[k]) }; }));
@@ -362,6 +386,19 @@ function pkStore_() {
     },
     version: version,
     fresh: function (name) { load(name, true); },
+    /* benar kalau semua tabel itu sudah ada di cache (atau sudah dibaca pada eksekusi ini), tanpa membuka spreadsheet */
+    cached: function (names) { dariCache(names); return names.every(function (n) { return !!cache[n]; }); },
+    /* Sesi masuk tiap orang dicatat di catatan kecil milik script (kunci s_<id pegawai>), bukan di Google Sheets:
+       menulisnya jauh lebih cepat daripada membuka spreadsheet, dan tidak mengubah nomor versi data.
+       Isinya hanya token acak, bukan PIN. */
+    sesi: {
+      get: function (id) { return String(pkProps_()['s_' + id] || '').split(',').filter(Boolean); },
+      set: function (id, list) {
+        var k = 's_' + id; var v = (list || []).filter(Boolean).join(',');
+        if (v) { props.setProperty(k, v); pkProps_()[k] = v; }
+        else if (pkProps_()[k] !== undefined) { props.deleteProperty(k); delete pkProps_()[k]; }
+      }
+    },
     ensureAll: function () { Object.keys(SCHEMA).forEach(ensure); cache = {}; cacheMiss = {}; readCacheQueue = {}; settingsReadInLock = false; },
     imgGet: function (ids) {
       var c = lemari(); var out = {}; if (!c || !ids.length) return out;
@@ -431,6 +468,8 @@ function onEdit(e) {
     var nama = ''; try { nama = (e && e.range) ? e.range.getSheet().getName() : ''; } catch (x) {}
     if (nama && SCHEMA[nama]) naik['v_' + nama] = String(Number(props.getProperty('v_' + nama) || 0) + 1);
     else naik.ve = String(Number(props.getProperty('ve') || 0) + 1);
+    /* tab Pengaturan (atau tab yang tidak dikenali) diedit langsung: status pemulihan diperiksa lagi dari sheet */
+    if (nama === 'Pengaturan' || !SCHEMA[nama]) naik.mig = '1';
     props.setProperties(naik, false);
   } catch (err) {}
 }
@@ -438,13 +477,26 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Aplikasi Produksi')
     .addItem('Siapkan tab data', 'menuSiapkan')
     .addItem('Buka kunci semua akun', 'menuBukaKunci')
+    .addItem('Keluarkan semua perangkat', 'menuKeluarkanSemua')
     .addToUi();
+}
+/* Menghapus semua sesi masuk: setiap perangkat harus memasukkan PIN lagi. PIN tidak berubah. */
+function menuKeluarkanSemua() {
+  var ui = SpreadsheetApp.getUi();
+  var p = PropertiesService.getScriptProperties(); var semua = p.getProperties() || {}; var n = 0;
+  for (var k in semua) if (k.indexOf('s_') === 0) { p.deleteProperty(k); n++; }
+  PK_PROPS_ = null;
+  var store = pkStore_();
+  /* menulis kolom token (walau sudah kosong) menaikkan versi tabel akun, sehingga cache akun lama tidak dipakai lagi */
+  store.lock(function () { store.read('Pegawai').slice().forEach(function (u) { if (u.token) n++; store.update('Pegawai', u.id, { token: '' }); }); });
+  p.setProperty('ver', String(Number(p.getProperty('ver') || 0) + 1)); PK_PROPS_ = null;
+  ui.alert(n ? 'Semua perangkat sudah dikeluarkan. Tiap orang masuk lagi dengan PIN-nya.' : 'Tidak ada perangkat yang sedang masuk.');
 }
 function menuSiapkan() {
   var ui = SpreadsheetApp.getUi();
   var p = PropertiesService.getScriptProperties();
   p.deleteProperty('schema');
-  p.setProperties({ ve: String(Number(p.getProperty('ve') || 0) + 1), ver: String(Number(p.getProperty('ver') || 0) + 1) }, false);
+  p.setProperties({ ve: String(Number(p.getProperty('ve') || 0) + 1), ver: String(Number(p.getProperty('ver') || 0) + 1), mig: '1' }, false);
   PK_PROPS_ = null;
   pkSetup_();
   ui.alert('Tab data sudah siap. Lanjutkan dengan Deploy > New deployment > Web app.');
