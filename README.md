@@ -109,6 +109,12 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.13:
+
+- **Hitung fisik bertahap untuk laporan jahit lama:** laporan jahit dari aplikasi lama yang belum dihitung (baris "Sisa laporan jahit belum dihitung") boleh dihitung sebagian. Yang dihitung diterima dan slipnya terbit; sisanya otomatis menjadi baris menunggu baru (id asal + `s`, `imporSumber.sisaDari` menunjuk laporan asal) dengan tanggal laporan semula. Jumlah per ukuran tetap utuh: diterima + reject + sisa = laporan semula; hitungan yang melebihi laporan tetap ditolak. Sisa mewarisi ikatan pembayaran lama (`sourceInLegacySettlement`, tanda tahan di `corePayroll`), jadi perlakuan upahnya sama persis dengan sebelum perubahan ini. Laporan baru dari maklon tidak berubah: kalau dihitung lebih sedikit, tidak ada baris sisa.
+- **Tanggal hitung:** formulir "Hitung & terima" punya isian tanggal (bawaan hari ini) dan `prosesSetor` menerima `tanggal`; tanpa isian itu tanggal laporan dipertahankan seperti sebelumnya.
+- **PO baru untuk barang yang sama:** di rincian PO aktif, owner melihat tombol "PO baru untuk barang ini" untuk kasus satu ukuran sudah habis terjual sementara ukuran lain masih berjalan. PO lama tidak perlu diarsipkan; dua PO aktif untuk satu barang memang diperbolehkan server.
+
 Mulai 1.5.12 (hanya tampilan): tab **Aktif** hanya berisi PO aktif; barang yang belum di-PO tampil di "Semua barang" saja. Kartu dan rincian PO menulis **"Harus dipotong"** untuk ukuran aktif yang belum ada hasil potongnya dan "Sudah dipotong" untuk sisanya, dan tabel per ukuran memberi tanda "harus dipotong". Ukuran aktif kini dibaca dari proyeksi potong server (`po.cutting`), sehingga PO yang ukurannya berasal dari data lama ikut terbaca; 1.5.11 hanya membaca `ukuranAktif` dan target.
 
 Mulai 1.5.11:
