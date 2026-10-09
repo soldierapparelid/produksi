@@ -109,6 +109,13 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.7:
+
+- **Order pembelian bisa dikoreksi dan dihapus dari daftar.** Order yang dibuat di aplikasi ini boleh diedit walau sudah ada pembayaran atau penerimaan, dengan penjagaan di server: produk tidak boleh diganti, varian yang sudah diterima tidak boleh dihapus atau dikurangi di bawah jumlah yang diterima, total tidak boleh di bawah yang sudah dibayar, dan tanggal order tidak boleh sesudah transaksi pertama. Identitas produk dan supplier yang dibekukan saat order terbit dipertahankan. **Hapus** (owner) adalah pembatalan: dengan `voidAll: true` server mengoreksi semua pembayaran dan penerimaan yang masih berlaku dengan alasan yang sama (termasuk DP awal), lalu membatalkan order dalam satu kunci. Tidak ada baris yang dihapus dari Sheets; order yang dibatalkan hanya tampil lewat saringan status "Dibatalkan". Order dari data lama atau yang masih perlu diperiksa tetap tidak bisa diedit, dan hanya bisa dihapus selama belum ada pembayaran dan penerimaan. Nota penjualan tidak berubah.
+- **Stok bahan:** kartu bahan yang habis ditaruh paling bawah; yang perlu diperiksa, kritis, dan menipis tetap di atas yang tersedia.
+- **Slip upah:** bahan yang sama dari beberapa rol ditulis satu kali dengan jumlah total dan banyaknya rol; ukuran dan bahan menjadi rincian kecil di bawah nama barang (layar, cetak, dan PDF); lebar kolom disesuaikan. Angka tidak berubah.
+- **Penugasan jahit:** tombol "Tugaskan hanya ukuran" mengisi satu ukuran dan mengosongkan ukuran lain, supaya tiap ukuran bisa diberikan ke penjahit yang berbeda. Aksi server tidak berubah.
+
 Mulai 1.5.6, aplikasi **langsung terbuka setelah PIN** pada perangkat yang pernah dipakai akun itu. Perubahan ini hanya di tampilan; server tetap satu-satunya penentu sah-tidaknya PIN.
 
 - **Salinan terkunci.** Selain salinan biasa (yang tetap dihapus saat keluar), data terakhir tiap akun disimpan terenkripsi di IndexedDB dengan kunci `pkl_<divisi>_<id pegawai>`. Isinya dienkripsi AES-GCM dengan kunci acak; kunci acak itu dibungkus kunci publik RSA-OAEP 2048 milik gembok; kunci pribadi gembok dibungkus kunci AES yang diturunkan dari PIN (PBKDF2-SHA256, 150.000 putaran, salt acak). PIN tidak disimpan. Gembok dibuat ulang setiap kali server menerima PIN (termasuk setelah ganti PIN di perangkat itu), dan salinan diperbarui setiap kali salinan biasa ditulis, cukup dengan kunci publik.
