@@ -256,6 +256,8 @@ button.po:hover { border-color: var(--accent); }
 .sz-aktif { padding: 1px 8px; border-radius: 6px; font-size: 12.5px; font-weight: 800; background: var(--accent); color: var(--bg); }
 .po-ukuran.kecil .sz-aktif { font-size: 11px; padding: 0 6px; }
 .sz-tanda { margin-left: 6px; padding: 0 6px; border-radius: 99px; font-size: 10.5px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
+.sz-aktif.potong { background: var(--s-potong); }
+.sz-tanda.potong { background: var(--warn-soft); color: var(--warn); }
 .po-seri { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .po-seri-h { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
 .po-seri-h h3 { font-family: var(--f-display); font-size: 18px; letter-spacing: .04em; text-transform: uppercase; }
@@ -368,7 +370,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261009-ukuran-hapus-1511';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261009-harus-potong-1512';</script>
 <script>
 (function () {
 'use strict';
@@ -390,7 +392,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.11';
+var APP_VERSION = '1.5.12';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -5630,7 +5632,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.11';
+var UI_VERSION = '1.5.12';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -6961,12 +6963,25 @@ var PO_PITA = { potong: 'Belum potong', kirim: 'Sudah potong', maklon: 'Di penja
 function poWarna(po, th) { var k = (th || poTahap(po)).k; return k === 'lengkap' ? 'cek' : k === 'tuntas' ? 'selesai' : k; }
 /* Ukuran yang diaktifkan untuk PO ini (dicentang saat PO dibuat). PO lama tanpa pilihan itu memakai ukuran yang punya target. */
 function poUkuranAktif(po) {
-  var a = coreParseJSON(po.ukuranAktif, []); if (!Array.isArray(a) || !a.length) a = Object.keys(po.ukuran || {}).filter(function (s) { return coreNum((po.ukuran || {})[s]) > 0; });
+  var a = po.cutting && po.cutting.verified && (po.cutting.ukuran || []).length ? po.cutting.ukuran.slice() : coreParseJSON(po.ukuranAktif, []);
+  if (!Array.isArray(a) || !a.length) a = Object.keys(po.ukuran || {}).filter(function (s) { return coreNum((po.ukuran || {})[s]) > 0; });
   return coreSizeOrder(a.slice(), ((S.state || {}).settings || {}).ukuran || []);
+}
+/* Ukuran aktif yang belum ada hasil potongnya: inilah yang harus dipotong. */
+function poUkuranPotong(po) {
+  if (po.status !== 'aktif') return [];
+  var urut = ((S.state || {}).settings || {}).ukuran || [];
+  if (po.cutting && po.cutting.verified) return coreSizeOrder((po.cutting.pendingUkuran || []).slice(), urut);
+  var au = (po.agg && po.agg.ukuran) || {};
+  return poUkuranAktif(po).filter(function (s) { return !(coreNum((au[s] || {}).potong) > 0); });
 }
 function poUkuranAktifHtml(po, kecil) {
   var a = poUkuranAktif(po); if (!a.length) return '';
-  return '<div class="po-ukuran' + (kecil ? ' kecil' : '') + '"><span class="xs muted">Ukuran aktif</span>' + a.map(function (s) { return '<span class="sz-aktif">' + esc(s) + '</span>'; }).join('') + '</div>';
+  var perlu = poUkuranPotong(po), set = {}; perlu.forEach(function (s) { set[s] = 1; });
+  var sudah = a.filter(function (s) { return !set[s]; });
+  function pil(list, cls) { return list.map(function (s) { return '<span class="sz-aktif' + cls + '">' + esc(s) + '</span>'; }).join(''); }
+  if (!perlu.length) return '<div class="po-ukuran' + (kecil ? ' kecil' : '') + '"><span class="xs muted">Ukuran aktif</span>' + pil(a, '') + '</div>';
+  return '<div class="po-ukuran' + (kecil ? ' kecil' : '') + '"><span class="xs muted">Harus dipotong</span>' + pil(perlu, ' potong') + (sudah.length ? '<span class="xs muted">Sudah dipotong</span>' + pil(sudah, '') : '') + '</div>';
 }
 function poCard(po, extra) {
   var th = poTahap(po);
@@ -7399,12 +7414,12 @@ function poDaftar() {
     return (lihatBuang ? dibuang(p) : !dibuang(p) && (tabArsip ? hilang(p) : (semua || p.status === f.poStatus) && !hilang(p))) && (!f.poJenis || p.jenis === f.poJenis) && (f.poStatus !== 'aktif' || !f.poTahap || poMasukTahap(p, f.poTahap)) && cocok(f.q, [p.nama, p.noPO, p.series, p.pelanggan, p.catatan]);
   });
   rows.sort(function (a, b) { return String(b.diubah || b.dibuat) < String(a.diubah || a.dibuat) ? -1 : 1; });
-  /* barang di daftar produk yang sedang tidak punya PO aktif ikut tampil, supaya terlihat apa yang belum di-PO */
+  /* barang di daftar produk yang sedang tidak punya PO aktif tampil di "Semua barang" saja; tab Aktif hanya PO aktif */
   var kosong = [], jalan = {}, jalanNama = {};
   st.po.forEach(function (p) { if (p.status !== 'aktif') return; if (p.produkId) jalan[p.produkId] = 1; jalanNama[String(p.nama || '').trim().toLowerCase()] = 1; });
   var belum = (st.produk || []).filter(function (pr) { return pr.aktif && !jalan[pr.id] && !jalanNama[String(pr.nama || '').trim().toLowerCase()]; });
   n.semua = n.aktif + n.selesai + n.batal + belum.length;
-  if ((semua || (f.poStatus === 'aktif' && !f.poTahap)) && f.poJenis !== 'pesanan') {
+  if (semua && f.poJenis !== 'pesanan') {
     kosong = belum.filter(function (pr) { return cocok(f.q, [pr.nama, pr.series]); });
     kosong.sort(function (a, b) { return String(a.nama).toLowerCase() < String(b.nama).toLowerCase() ? -1 : 1; });
   }
@@ -7542,12 +7557,13 @@ function poSheet(id) {
   /* per ukuran */
   var sizes = poSizes(po); var au = (po.agg && po.agg.ukuran) || {}; if (au['?']) sizes = sizes.concat(['?']);
   var aktifSet = {}; poUkuranAktif(po).forEach(function (s) { aktifSet[s] = 1; });
+  var potongSet = {}; poUkuranPotong(po).forEach(function (s) { potongSet[s] = 1; });
   var cols = [['Target', function (s) { return (po.ukuran || {})[s] || 0; }, po.total], ['Potong', 'potong', t.potong], ['Tugas', 'kirim', t.kirim], ['Setor', 'terima', t.terima], ['OK QC', 'qcOk', t.qcOk]];
   if (po.jenis !== 'pesanan') cols.push(['BigSeller', 'bigseller', t.bigseller]);
   if (!po.total) cols.shift();
   var cell = function (n) { return '<td' + (n ? '' : ' class="z"') + '>' + (n ? nf(n) : '–') + '</td>'; };
   h += '<div class="col gap-s"><div class="label">Per ukuran</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ukuran</th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' +
-    sizes.map(function (s) { var u = au[s] || {}; return '<tr><td class="b">' + (s === '?' ? 'Tanpa ukuran' : esc(s)) + (aktifSet[s] ? '<span class="sz-tanda">aktif</span>' : '') + '</td>' + cols.map(function (c) { return cell(typeof c[1] === 'function' ? c[1](s) : (u[c[1]] || 0)); }).join('') + '</tr>'; }).join('') +
+    sizes.map(function (s) { var u = au[s] || {}; return '<tr><td class="b">' + (s === '?' ? 'Tanpa ukuran' : esc(s)) + (potongSet[s] ? '<span class="sz-tanda potong">harus dipotong</span>' : aktifSet[s] ? '<span class="sz-tanda">aktif</span>' : '') + '</td>' + cols.map(function (c) { return cell(typeof c[1] === 'function' ? c[1](s) : (u[c[1]] || 0)); }).join('') + '</tr>'; }).join('') +
     '</tbody><tfoot><tr><td>Total</td>' + cols.map(function (c) { return '<td>' + nf(c[2] || 0) + '</td>'; }).join('') + '</tr></tfoot></table></div>' +
     ((t.reject || t.qcReject || t.qcOffline || t.qcPerbaikan) ? '<div class="chips">' + (t.reject ? '<span class="chip bad">Reject jahit ' + nf(t.reject) + '</span>' : '') + (t.qcReject ? '<span class="chip bad">Reject QC ' + nf(t.qcReject) + '</span>' : '') + (t.qcPerbaikan > 0 ? '<span class="chip warn">Diperbaiki ' + nf(t.qcPerbaikan) + '</span>' : '') + (t.qcOffline ? '<span class="chip">Offline ' + nf(t.qcOffline) + '</span>' : '') + '</div>' : '') + '</div>';
 
