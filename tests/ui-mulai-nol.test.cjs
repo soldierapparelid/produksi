@@ -29,15 +29,17 @@ test('the stock settings page offers the reset to the owner only, and the sheet 
   assert.match(html, /data-a="stokAturSave">Simpan<\/button><\/div><\/div>' \+ \(me\(\)\.divisi === 'owner' \? nolKartu\(\) : ''\) \+/);
   const c = context('owner');
   assert.match(vm.runInContext('nolKartu()', c), /class="btn danger" data-a="nolOpen">Lihat yang akan berubah/);
-  vm.runInContext(`jawaban.push({pratinjau:true,rencana:2,rol:7,bahan:5,po:3,daftarBahan:[{nama:'Scuba',saldo:12.5,satuan:'kg',rol:2}],daftarPO:[{id:'p1',noPO:'PO-1',nama:'Kaos'}]});A.nolOpen({});`, c);
+  vm.runInContext(`jawaban.push({pratinjau:true,rencana:2,rol:7,bahan:5,po:3,lepas:4,daftarBahan:[{nama:'Scuba',saldo:12.5,satuan:'kg',rol:2}],daftarPO:[{id:'p1',noPO:'PO-1',nama:'Kaos'}],daftarLepas:[{id:'p7',noPO:'PO-7',nama:'Celana',ukuran:['L','XL']},{id:'p8',noPO:'PO-8',nama:'Polo',ukuran:['M','XXL']}]});A.nolOpen({});`, c);
   await tick();
   assert.deepEqual(get(c, 'log.req'), [['getPratinjauNol', {}]]);
   const lembar = get(c, 'log.lembar');
-  assert.match(lembar, /^Mulai dari nol\|/); assert.match(lembar, /5 bahan · 7 rol/); assert.match(lembar, /Persiapan potong dibatalkan<\/dt><dd class="b">2</); assert.match(lembar, /3 PO yang belum dipotong/);
+  assert.match(lembar, /^Mulai dari nol\|/); assert.match(lembar, /5 bahan · 7 rol/); assert.match(lembar, /Persiapan potong dibatalkan<\/dt><dd class="b">2</); assert.match(lembar, /3 PO yang belum dipotong/); assert.match(lembar, /Ukuran belum dipotong dilepas<\/dt><dd class="b">4 ukuran di 2 PO/); assert.match(lembar, /Celana<\/span><br><span class="d">PO-7<\/span><\/span><span class="b">L · XL/);
   assert.match(lembar, /Scuba<\/span><span class="xs muted">2 rol<\/span><span class="n">12.5/); assert.match(lembar, /Kaos<\/span><br><span class="d">PO-1/);
   assert.match(lembar, /name="yakin" data-label="Ketik MULAI DARI NOL untuk melanjutkan"/); assert.match(lembar, /class="btn danger" data-a="nolJalankan">Kosongkan sekarang/);
   assert.match(lembar, /data-a="cadanganUnduh"/); assert.match(lembar, /tidak bisa dibatalkan dengan satu tombol/);
-  vm.runInContext('S.nol={pratinjau:true,rencana:0,rol:0,bahan:0,po:0,daftarBahan:[],daftarPO:[]};', c);
+  vm.runInContext('S.nol={pratinjau:true,rencana:0,rol:0,bahan:0,po:0,lepas:1,daftarBahan:[],daftarPO:[],daftarLepas:[{id:"p7",noPO:"PO-7",nama:"Celana",ukuran:["L"]}]};', c);
+  assert.match(vm.runInContext('nolSheet()', c), /nolJalankan/, 'a size still waiting for the cutter is enough to offer the run');
+  vm.runInContext('S.nol={pratinjau:true,rencana:0,rol:0,bahan:0,po:0,lepas:0,daftarBahan:[],daftarPO:[],daftarLepas:[]};', c);
   const kosong = vm.runInContext('nolSheet()', c);
   assert.match(kosong, /Stok sudah kosong/); assert.doesNotMatch(kosong, /nolJalankan|name="yakin"/);
 });
@@ -49,7 +51,7 @@ test('nothing is sent until the words are typed; then the server is called again
   vm.runInContext("isian.yakin=' mulai dari nol ';jawaban.push({selesai:false},{selesai:false},{selesai:true});A.nolJalankan({});", c);
   for (let i = 0; i < 6; i++) await tick();
   assert.deepEqual(get(c, 'log.req'), [['mulaiDariNol', { yakin: 'MULAI DARI NOL' }], ['mulaiDariNol', { yakin: 'MULAI DARI NOL' }], ['mulaiDariNol', { yakin: 'MULAI DARI NOL' }]]);
-  assert.equal(get(c, 'log.tutup'), 1); assert.match(get(c, 'log.toast').pop(), /^Stok sudah nol/);
+  assert.equal(get(c, 'log.tutup'), 1); assert.match(get(c, 'log.toast').pop(), /^Selesai\. Stok nol/);
 });
 
 test('an account that is not the owner cannot open the reset', async () => {

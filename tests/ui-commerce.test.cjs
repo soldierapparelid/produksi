@@ -260,13 +260,32 @@ test('group print and PDF preserve individual order models and the revisions sel
 
 test('the combined supplier picture starts from the unfinished orders of the supplier and opens the picture for the chosen ones',()=>{
   const h=harness();h.form({},'pembelian');
-  h.run("currentForm._commerceGroupRows=[{id:'a',revision:'ra',status:'dp',supplierSnapshot:{id:'s'}},{id:'b',revision:'rb',status:'selesai',supplierSnapshot:{id:'s'}},{id:'c',revision:'rc',status:'batal',supplierSnapshot:{id:'s'}},{id:'d',revision:'rd',status:'pending',supplierSnapshot:{id:'s'}},{id:'e',revision:'re',status:'pending',supplierSnapshot:{id:'lain'}}];");
-  assert.deepEqual(h.json("commerceGroupAwal(currentForm,'s')"),['a','d'],'finished, cancelled and other suppliers are not ticked');
+  h.run("currentForm._commerceGroupRows=[{id:'a',revision:'ra',status:'dp',balance:5,supplierSnapshot:{id:'s'}},{id:'b',revision:'rb',status:'selesai',balance:0,supplierSnapshot:{id:'s'}},{id:'c',revision:'rc',status:'batal',balance:9,supplierSnapshot:{id:'s'}},{id:'d',revision:'rd',status:'pending',balance:7,supplierSnapshot:{id:'s'}},{id:'e',revision:'re',status:'pending',balance:7,supplierSnapshot:{id:'lain'}},{id:'f',revision:'rf',status:'lunas',balance:0,supplierSnapshot:{id:'s'}},{id:'g',revision:'rg',status:'review',balance:4,needsReview:true,supplierSnapshot:{id:'s'}},{id:'h',revision:'rh',status:'dp',balance:4,paymentReview:true,supplierSnapshot:{id:'s'}}];");
+  assert.deepEqual(h.json("commerceGroupAwal(currentForm,'s')"),['a','d'],'only orders that still have something to pay and need no review are ticked');
   h.run("var shown=[];commerceShareShow=function(ids,fresh){shown.push([ids,fresh]);};currentForm._commerceGroupIds=['d','a'];A.commerceGroupShare(null);");
   assert.deepEqual(h.json('shown'),[[['d','a'],false]]);assert.equal(h.requests.length,0,'making the picture records nothing');
   h.run("currentForm._commerceGroupIds=[];A.commerceGroupShare(null);");assert.equal(h.json('shown').length,1);assert.match(h.json('messages').at(-1).text,/Pilih 1 sampai 20 order/);
   assert.match(html,/data-a="commerceGroupOpen">' \+ ic\('img'\) \+ 'Gambar gabungan<\/button>/);assert.match(html,/class="tools" style="align-items:flex-end">' \+ fSelect\('Status order'/);
   assert.match(html,/\['DP \/ sudah dibayar', uang\(m\.dibayar\), HIJAU\]/);assert.doesNotMatch(html,/Cetak gabungan/);
+});
+test('a combined down payment is recorded for the ticked orders and the supplier picture follows with the new figures',async()=>{
+  const h=harness();h.seed('pembelian',{suppliers:[{id:'s1',nama:'Supplier A'}],products:[],orders:shopOrders()});h.form({},'pembelian');
+  h.run("var shown=[],closed=0;commerceShareShow=function(ids,fresh){shown.push([ids,fresh]);};function closeSheet(){closed++;}");
+  h.run("currentForm._commerceGroupRows=[{id:'o1',revision:'r1',supplierSnapshot:{id:'s1'}},{id:'o2',revision:'r2',supplierSnapshot:{id:'s1'}}];currentForm._commerceGroupIds=['o1','o2'];A.commerceGroupBayar(null);");
+  assert.equal(h.run('closed'),1,'the picker closes before the payment form opens');assert.match(h.run('lastSheet'),/Bayar grup — /);assert.match(h.run('lastSheet'),/2 order/);assert.deepEqual(h.json('currentForm._commerceGabungIds'),['o1','o2']);
+  h.run("currentForm.values={id:'gp9',tanggal:'2026-10-09',jumlah:'5000',metode:'transfer',catatan:'DP'};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();currentForm._commerceIntent=null;A.commerceGroupPaySave(null)");
+  assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'appendCommerceGroupPayment');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload.orderIds)),['o1','o2']);assert.equal(h.requests[0].payload.jumlah,5000);
+  h.requests[0].resolve({groupId:'gp9',commerce:reply('pembelian',{suppliers:[{id:'s1',nama:'Supplier A'}],products:[],orders:shopOrders()},11)});await turn();await turn();
+  assert.deepEqual(h.json('shown'),[[['o1','o2'],false]],'the picture opens for the same selection');assert.equal(h.run('S.gabungSesudahBayar'),null);
+  /* a group payment started from a group card does not open the picture */
+  const k=harness();k.seed('pembelian',{suppliers:[{id:'s1',nama:'Supplier A'}],products:[],orders:shopOrders()});k.form({},'pembelian');
+  k.run("var shown=[];commerceShareShow=function(ids,fresh){shown.push([ids,fresh]);};A.commerceGroupPayOpen({getAttribute:function(a){return a==='data-ids'?'o1,o2':'Supplier A';}});currentForm.values={id:'gp8',tanggal:'2026-10-09',jumlah:'5000',metode:'transfer',catatan:''};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();A.commerceGroupPaySave(null)");
+  k.requests[0].resolve({groupId:'gp8',commerce:reply('pembelian',{suppliers:[{id:'s1',nama:'Supplier A'}],products:[],orders:shopOrders()},11)});await turn();await turn();assert.deepEqual(k.json('shown'),[]);
+  /* nothing to pay among the ticked orders */
+  const n=harness();n.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});n.form({},'pembelian');
+  n.run("function closeSheet(){}currentForm._commerceGroupRows=[{id:'o3',revision:'r3',supplierSnapshot:{id:'s1'}}];currentForm._commerceGroupIds=['o3'];A.commerceGroupBayar(null);");
+  assert.match(n.json('messages').at(-1).text,/sudah lunas atau belum bisa dibayar/);assert.equal(n.requests.length,0);
+  assert.match(html,/data-a="commerceGroupBayar">' \+ ic\('wallet'\) \+ 'Bayar DP<\/button>/);
 });
 test('an open group-print selection cannot export after the actor or session changes',async()=>{
   for(const change of ["S.token='new-session'","S.state.me={id:'other',divisi:'owner'}","S.state.me.divisi='potong'"]){

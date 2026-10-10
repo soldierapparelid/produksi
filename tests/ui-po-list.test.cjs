@@ -120,3 +120,18 @@ test('an archived PO can be deleted from the app: it leaves the archive too, and
   h.run("S.f.poStatus='semua'");view=h.run('VIEWS.po()');assert.ok(!view.includes('data-id="s3"'));assert.match(view,/data-v="semua" class="on">Semua barang 1</);
   h.run("actor.divisi='qc';S.f.poStatus='arsip'");view=h.run('VIEWS.po()');assert.ok(!view.includes('data-a="poBuang"')&&!view.includes('poBuangLihat'));
 });
+
+test('sizes the owner released are shown as not to be cut; the release is asked for and taken back from the PO',async()=>{
+  const h=ui();h.c.fixture=[po('r1',{cutting:{verified:true,ukuran:['M','L','XL'],pendingUkuran:[],lepasUkuran:['L','XL']},agg:{ukuran:{M:{potong:5}},total:{}}}),po('r2',{cutting:{verified:true,ukuran:['M','L'],pendingUkuran:['L'],lepasUkuran:[]},agg:{ukuran:{M:{potong:5}},total:{}}})];
+  h.run("S.state.settings.ukuran=['S','M','L','XL','XXL'];seed(fixture,[]);S.f.poStatus='semua'");const view=h.run('VIEWS.po()');
+  const card=id=>{const a=view.indexOf('data-id="'+id+'"');assert.ok(a>=0,id);return view.slice(a,view.indexOf('</button>',a));};
+  assert.match(card('r1'),/Ukuran aktif<\/span><span class="sz-aktif">M<\/span><span class="xs muted">Tidak jadi dipotong<\/span><span class="sz-aktif lepas">L<\/span><span class="sz-aktif lepas">XL<\/span><\/div>/);assert.ok(!card('r1').includes('Harus dipotong'));
+  assert.match(card('r2'),/Harus dipotong<\/span><span class="sz-aktif potong">L<\/span>/);
+  vm.runInContext(part('A.lepasUkuran = function','A.poStatusSet = function'),h.c);
+  h.run("A.lepasUkuran({getAttribute:function(k){return k==='data-id'?'r2':'1';}})");assert.match(h.run('confirmText'),/Ukuran L dilepas dari Barang r2/);await h.run('confirmFn(null)');
+  assert.deepEqual(h.json('requests[0]'),{action:'lepasUkuranPotong',payload:{poId:'r2',lepas:true}});
+  h.run("A.lepasUkuran({getAttribute:function(k){return k==='data-id'?'r1':'0';}})");assert.match(h.run('confirmText'),/Ukuran L, XL kembali menunggu dipotong di Barang r1/);await h.run('confirmFn(null)');
+  assert.deepEqual(h.json('requests[1]'),{action:'lepasUkuranPotong',payload:{poId:'r1',lepas:false}});
+  assert.match(html,/data-a="lepasUkuran"' \+ d \+ ' data-v="1">Tidak jadi dipotong: /);
+  assert.match(html,/if \(\(c\.lepasUkuran \|\| \[\]\)\.length && !\(c\.pendingUkuran \|\| \[\]\)\.length\) return false;/,'the cutter no longer waits for a PO whose remaining sizes were released');
+});
