@@ -155,7 +155,7 @@ test('a group payment is divided by remaining balance in whole rupiah, written o
  /* a new group payment must carry the current revisions and cannot exceed what is left */
  f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02'},/berubah/);
  const now={order01:after('order01').revision,order02:after('order02').revision};
- f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,jumlah:30000},/melebihi sisa/);f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,tanggal:'2026-10-01'},/sebelum/);
+ f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,jumlah:30000},/melebihi sisa/);
  f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now},/owner|admin/,'fixture-cutter-token-001');f.bad('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,orderIds:['order01','order01']},/ganda/);
  const rest=f.good('appendCommerceGroupPayment',{...request,id:'group-pay-02',expectedRevisions:now,jumlah:29999,withState:true});
  assert.ok(rest.commerce.orders.every(o=>o.balance===0&&o.totalPaid===o.totalHarga));assert.equal(f.raw('CommerceEvent').length,4);
@@ -181,7 +181,7 @@ test('the split never invents or loses a rupiah and never pays an order beyond i
  assert.equal(fixed.totalHarga,63000);assert.equal(fixed.totalPaid,20000);assert.equal(fixed.balance,43000);assert.equal(fixed.totalReceived,2);assert.equal(fixed.payments.length,1);assert.equal(fixed.receipts.length,1);assert.equal(fixed.productName,'Product Fixture');
  o=fixed;
  f.bad('saveCommerceOrder',edit({items:[{id:'size02',nama:'L',jumlah:5}]}),/sudah diterima/);f.bad('saveCommerceOrder',edit({items:[{id:'size01',nama:'M',jumlah:1},{id:'size02',nama:'L',jumlah:9}]}),/sudah diterima/);
- f.bad('saveCommerceOrder',edit({hargaSatuan:1000}),/sudah dibayar/);f.bad('saveCommerceOrder',edit({tanggalOrder:'2026-10-09'}),/pembayaran atau penerimaan pertama/);
+ f.bad('saveCommerceOrder',edit({hargaSatuan:1000}),/sudah dibayar/);
  f.good('saveCommerceProduct',{record:{id:'product02',nama:'Other Product',supplierId:'supplier01'}});f.bad('saveCommerceOrder',edit({produkId:'product02'}),/Produk tidak dapat diganti/);
  f.bad('saveCommerceOrder',edit({catatan:'stale'},'old-revision'),/berubah/);
  /* a renamed master does not rewrite the identity frozen when the order was issued */
@@ -243,4 +243,35 @@ test('purchase PDF identifies each frozen product independently of its variant a
  assert.equal(articles.length,2);assert.match(articles[0],/Product Fixture/);assert.match(articles[0],/Hitam/);assert.match(articles[1],/Second product/);assert.doesNotMatch(html,/Later master rename/);
  const unknown=f.h.run(`coreCommerceSlipModel('pembelian',{id:'legacy-missing',productSnapshot:{},productName:'Unproven current name',items:[{nama:'Hitam',jumlah:1}],hargaSatuan:10},{})`);
  assert.equal(unknown.rows[0][0],'Nama produk tidak tersedia');assert.equal(unknown.rows[0][1],'Hitam');
+});
+
+test('a purchase can be paid before its order date, alone or as a group, while a sales note still cannot be paid before its date',()=>{
+ const f=fixture();f.masters();const a=f.good('saveCommerceOrder',{record:f.order({tanggalOrder:'2026-10-12'})}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02',tanggalOrder:'2026-10-09',items:[{id:'only',nama:'M',jumlah:1}]})}).record;
+ const satu=f.good('appendCommercePayment',{id:'early-pay-01',module:'pembelian',parentId:'order01',expectedRevision:a.revision,tanggal:'2026-10-10',jumlah:10000,metode:'transfer',catatan:'DP'}).record;
+ assert.equal(satu.totalPaid,10000);assert.equal(satu.balance,40000);
+ const grup=f.good('appendCommerceGroupPayment',{id:'early-group-01',module:'pembelian',orderIds:['order01','order02'],expectedRevisions:{order01:satu.revision,order02:b.revision},tanggal:'2026-10-08',jumlah:25000,metode:'transfer',catatan:'DP gabungan',withState:true});
+ const o1=grup.commerce.orders.find(o=>o.id==='order01'),o2=grup.commerce.orders.find(o=>o.id==='order02');assert.equal(o1.totalPaid+o2.totalPaid,35000);
+ f.good('appendCommerceReceipt',{id:'early-recv-01',orderId:'order01',expectedRevision:o1.revision,tanggal:'2026-10-10',itemId:'size01',jumlah:1,kondisi:'ok'});
+ /* the order itself can still be corrected, also to a later date than its first payment */
+ const kini=f.state().orders.find(o=>o.id==='order01');f.good('saveCommerceOrder',{record:f.order({tanggalOrder:'2026-10-13'}),expectedRevision:kini.revision});
+ const nota=f.good('saveCommerceNota',{record:{id:'nota-early-1',date:'2026-10-12',customer:{name:'Fixture'},items:[{id:'n1',name:'Shirt',qty:1,price:50000}]}}).record;
+ f.bad('appendCommercePayment',{id:'early-pay-02',module:'nota',parentId:'nota-early-1',expectedRevision:nota.revision,tanggal:'2026-10-10',jumlah:10000,metode:'cash'},/sebelum/);
+});
+
+test('a recorded payment or receipt is changed in one step: the old entry stays as corrected history and the new one counts',()=>{
+ const f=fixture();f.masters();let o=f.good('saveCommerceOrder',{record:f.order()}).record;
+ o=f.good('appendCommercePayment',{id:'pay-edit-01',module:'pembelian',parentId:'order01',expectedRevision:o.revision,tanggal:'2026-10-09',jumlah:20000,metode:'transfer',catatan:'DP'}).record;
+ o=f.good('appendCommerceReceipt',{id:'recv-edit-01',orderId:'order01',expectedRevision:o.revision,tanggal:'2026-10-10',itemId:'size01',jumlah:3,kondisi:'ok'}).record;
+ const ubah={id:'pay-edit-02',module:'pembelian',parentId:'order01',eventId:'pay-edit-01',expectedRevision:o.revision,tanggal:'2026-10-07',jumlah:35000,metode:'cash',catatan:'DP dikoreksi'};
+ f.bad('gantiCommerceEvent',ubah,/owner/,'fixture-admin-token-001');f.bad('gantiCommerceEvent',{...ubah,jumlah:50001},/melebihi sisa/);f.bad('gantiCommerceEvent',{...ubah,eventId:'missing-event'},/tidak ditemukan/);f.bad('gantiCommerceEvent',{...ubah,expectedRevision:'old'},/berubah/);
+ let s=f.good('gantiCommerceEvent',ubah).record;assert.equal(s.totalPaid,35000);assert.equal(s.balance,15000);
+ assert.deepEqual(s.payments.map(e=>[e.id,e.jumlah,e.tanggal,e.metode,!!e.voided]),[['pay-edit-01',20000,'2026-10-09','transfer',true],['pay-edit-02',35000,'2026-10-07','cash',false]]);
+ assert.equal(f.raw('CommerceEvent').length,4,'two entries, one correction and the replacement');
+ assert.equal(f.good('gantiCommerceEvent',ubah).record.totalPaid,35000,'the same request again changes nothing');assert.equal(f.raw('CommerceEvent').length,4);
+ f.bad('gantiCommerceEvent',{...ubah,id:'pay-edit-03',expectedRevision:s.revision},/tidak ditemukan atau telah dibatalkan/);
+ /* a receipt: fewer pieces than first written, and never more than the variant ordered */
+ const terima={id:'recv-edit-02',module:'pembelian',parentId:'order01',eventId:'recv-edit-01',expectedRevision:s.revision,tanggal:'2026-10-10',jumlah:2,itemId:'size01',kondisi:'ok',catatan:''};
+ f.bad('gantiCommerceEvent',{...terima,jumlah:4},/melebihi sisa varian/);
+ s=f.good('gantiCommerceEvent',terima).record;assert.equal(s.totalReceived,2);assert.deepEqual(s.receivedByItem,{size01:2});
+ assert.deepEqual(s.receipts.map(e=>[e.id,e.jumlah,!!e.voided]),[['recv-edit-01',3,true],['recv-edit-02',2,false]]);
 });

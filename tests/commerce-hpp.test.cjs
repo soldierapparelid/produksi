@@ -88,3 +88,18 @@ test('unsafe automatic sewing total and unrecognized stored mode cannot unlock a
  let m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,false);assert.equal(m.hppTotal,null);assert.match(m.warnings.join(' '),/batas/);
  input.tables.SlipKirim[0].upah=1000;input.config.modelConfigs[id()].jahitMode='guess';m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,false);assert.match(m.warnings.join(' '),/tidak valid/);
 });
+
+test('when the model has XL-only cuts its cost per piece comes from those cuts alone, for every size of the model',()=>{
+ const input=nativeFixture();
+ input.tables.Potong.push({id:'cutXL',poId:'po1',tanggal:'2026-10-09',total:20,ukuran:{XL:20},tarif:700,bahanList:[{nama:'Cotton',qty:8}],alokasiBahan:[{stokId:'buyA',qty:8}]});
+ input.tables.Potong.push({id:'cutMix',poId:'po1',tanggal:'2026-10-09',total:10,ukuran:{XL:5,XXL:5},tarif:900,bahanList:[{nama:'Cotton',qty:1}]});
+ const m=run('coreCommerceHpp',input).models[0];
+ assert.equal(m.kain.totalPcs,20,'only the XL-only cut is the reference; a cut that mixes sizes cannot be split');assert.equal(m.kain.totalCost,80000);approx(m.kain.perPcs,4000);approx(m.potong.perPcs,700);
+ assert.equal(m.basis.ukuran,'XL');assert.equal(m.basis.includedPcs,20);assert.deepEqual(m.basis.origins,{legacy:0,native:20});assert.match(m.kain.source,/potongan ukuran XL/);
+ assert.deepEqual(m.sizes,['L','M','XL','XXL']);approx(m.hppTotal,4000+700+1000+100);
+ /* without an XL-only cut every cut counts, as before */
+ const semua=run('coreCommerceHpp',nativeFixture()).models[0];assert.equal(semua.basis.ukuran,undefined);assert.equal(semua.kain.totalPcs,10);
+ /* an old reference is not mixed in once XL cuts exist */
+ const lama=legacyFixture();lama.tables={PO:[{id:'po1',series:'Fixture',nama:'Shirt',ukuran:{},total:0}],Potong:[{id:'cutXL',poId:'po1',tanggal:'2026-10-09',total:10,ukuran:{XL:10},tarif:600,bahanList:[{nama:'Cotton',qty:4}]}],StokBahan:[{id:'newBuy',jenis:'beli',bahan:'Cotton',qty:5,satuan:'kg',harga:10000,total:50000}],SlipKirim:[],RencanaPotong:[]};
+ const campur=run('coreCommerceHpp',lama).models[0];assert.equal(campur.kain.totalPcs,10);approx(campur.kain.perPcs,4000);approx(campur.potong.perPcs,600);assert.deepEqual(campur.basis.origins,{legacy:0,native:10});assert.equal(campur.basis.excludedPcs,0);
+});

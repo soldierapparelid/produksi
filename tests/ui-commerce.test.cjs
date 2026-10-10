@@ -206,7 +206,7 @@ test('print and PDF use the same module and stable record ID; customer text is e
   const h=harness();h.seed('nota',{notes:[{id:'n',customer:{name:'<script>oops</script>'},items:[{id:'i',name:'<img onerror=x>',qty:1,price:5}],payments:[],total:5,totalPaid:0,balance:5}]});const el="{getAttribute:function(k){return k==='data-m'?'nota':'n';}}";await h.run('A.commercePrint('+el+')');await h.run('A.commercePdf('+el+')');assert.equal(h.run('prints[0][0].reference'),'n');assert.deepEqual(h.json('pdfs[0]'),{action:'makeCommercePdf',payload:{module:'nota',id:'n'}});const markup=h.run("commerceDetail('nota','n')");assert.ok(!markup.includes('<script>oops'));assert.match(markup,/&lt;script&gt;/);
 });
 test('incomplete HPP can show evidence but cannot start a pricing simulation',()=>{
-  const h=harness();h.seed('hpp',{models:[{id:'m',nama:'Model',series:'Series',sizes:['M'],configured:false,hppTotal:100,config:{value:{}},warnings:['Missing price']}],config:{},revision:'r'});h.run("A.commerceHppSim({getAttribute:function(){return 'm';}})");assert.match(h.json('messages').at(-1).text,/Lengkapi/);const body=h.run('VIEWS.hpp()');assert.match(body,/Periksa biaya/);assert.ok(!body.includes('Rp100 / pcs'));
+  const h=harness();h.seed('hpp',{models:[{id:'m',nama:'Model',series:'Series',sizes:['M'],poIds:['p1'],configured:false,hppTotal:100,config:{value:{}},warnings:['Missing price']}],config:{},revision:'r'});h.run("A.commerceHppSim({getAttribute:function(){return 'm';}})");assert.match(h.json('messages').at(-1).text,/Lengkapi/);const body=h.run('VIEWS.hpp()');assert.match(body,/Periksa biaya/);assert.ok(!body.includes('Rp100 / pcs'));
 });
 test('HPP explicit review is required and settings use the captured revision',()=>{
   const h=harness();h.form({modelId:'m',revision:'hpp-before',reviewed:false},'hpp');h.run('currentForm._commerceModel={id:"m",kain:{complete:true,perPcs:10},potong:{complete:true,perPcs:2}};A.commerceHppSave(null)');assert.equal(h.requests.length,0);h.run("currentForm.values={modelId:'m',revision:'hpp-before',reviewed:true,jahitMode:'manual',hargaJahit:'5',biayaLain:'2',ketLain:'Packing',targetMargin:'30'};A.commerceHppSave(null)");assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.expectedRevision,'hpp-before');assert.equal(h.requests[0].payload.config.costSchema,2);assert.equal(h.requests[0].payload.config.costsReviewed,true);
@@ -286,6 +286,33 @@ test('a combined down payment is recorded for the ticked orders and the supplier
   n.run("function closeSheet(){}currentForm._commerceGroupRows=[{id:'o3',revision:'r3',supplierSnapshot:{id:'s1'}}];currentForm._commerceGroupIds=['o3'];A.commerceGroupBayar(null);");
   assert.match(n.json('messages').at(-1).text,/sudah lunas atau belum bisa dibayar/);assert.equal(n.requests.length,0);
   assert.match(html,/data-a="commerceGroupBayar">' \+ ic\('wallet'\) \+ 'Bayar DP<\/button>/);
+});
+test('the HPP list leaves out models whose PO was deleted and shows the automatic cost before it is reviewed',()=>{
+  const h=harness(),lengkap={complete:true,perPcs:4000,totalPcs:20},potong={complete:true,perPcs:700,totalPcs:20};
+  h.seed('hpp',{models:[{id:'a',nama:'Ada',series:'S',sizes:['XL'],poIds:['p1'],kain:lengkap,potong:potong,hargaJahit:9000,biayaLain:100,configured:false,config:{value:{}},warnings:[]},
+    {id:'b',nama:'Dihapus',series:'S',sizes:['M'],poIds:['p2'],kain:lengkap,potong:potong,hargaJahit:9000,configured:false,config:{value:{}},warnings:[]},
+    {id:'c',nama:'TanpaPO',series:'S',sizes:['M'],poIds:[],configured:false,config:{value:{}},warnings:[]},
+    {id:'d',nama:'ArsipKosong',series:'S',sizes:['M'],poIds:['p3'],kain:{complete:false,perPcs:null,totalPcs:0},configured:false,config:{value:{}},warnings:[]},
+    {id:'e',nama:'ArsipAdaPotong',series:'S',sizes:['M'],poIds:['p4'],kain:lengkap,potong:potong,hargaJahit:null,configured:false,config:{value:{}},warnings:[]}],config:{},revision:'r'});
+  h.run("S.state.settings={poBuang:['p2'],poSembunyi:['p3','p4']};");
+  let body=h.run('VIEWS.hpp()');
+  assert.match(body,/<b>Ada<\/b>/);assert.match(body,/<b>ArsipAdaPotong<\/b>/);assert.ok(!body.includes('<b>Dihapus</b>')&&!body.includes('<b>TanpaPO</b>')&&!body.includes('<b>ArsipKosong</b>'));
+  assert.match(body,/3 model dari PO yang sudah dihapus atau diarsipkan tidak ditampilkan/);assert.match(body,/<b>± Rp13800 \/ pcs<\/b><br><span class="chip warn">Periksa biaya/,'cloth + cutting + sewing + other costs, before the review');
+  h.run("S.sub.hppSemua='1';");body=h.run('VIEWS.hpp()');assert.match(body,/<b>Dihapus<\/b>/);assert.match(body,/Sembunyikan lagi/);
+  assert.match(html,/dihitung dari potongan ukuran '\+esc\(basis\.ukuran\)\+' saja/);
+});
+test('a recorded payment or receipt opens prefilled for a change and is sent as one replacement',()=>{
+  const h=harness();h.seed('pembelian',{suppliers:[],products:[],orders:[{id:'o9',revision:'r9',status:'dp',items:[{id:'i1',nama:'Hitam',jumlah:10}],balance:5000,totalHarga:9000,events:[{id:'pay1',kind:'payment',tanggal:'2026-10-09',jumlah:4000,metode:'cash',catatan:'DP'},{id:'rec1',kind:'receipt',tanggal:'2026-10-10',jumlah:6,itemId:'i1',kondisi:'ok'},{id:'pay0',kind:'payment',tanggal:'2026-10-01',jumlah:100,voided:true}]}]});
+  const el=id=>`{getAttribute:function(k){return k==='data-m'?'pembelian':k==='data-id'?'o9':'${id}';}}`;
+  h.run(`A.commerceEventEdit(${el('pay1')})`);assert.match(h.run('lastSheet'),/Ubah pembayaran/);assert.match(h.run('lastSheet'),/name="eventId" value="pay1"/);assert.match(h.run('lastSheet'),/Catatan lama <b>Rp4000<\/b>/);
+  h.run("currentForm.values={id:'new1',parentId:'o9',eventId:'pay1',revision:'r9',jenis:'payment',tanggal:'2026-10-07',jumlah:'4500',metode:'transfer',catatan:' DP baru '};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();currentForm._commerceIntent=null;A.commerceEventEditSave(null)");
+  assert.equal(h.requests[0].action,'gantiCommerceEvent');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{id:'new1',module:'pembelian',parentId:'o9',eventId:'pay1',expectedRevision:'r9',tanggal:'2026-10-07',jumlah:4500,catatan:'DP baru',metode:'transfer',withState:true});
+  const k=harness();k.seed('pembelian',{suppliers:[],products:[],orders:[{id:'o9',revision:'r9',items:[{id:'i1',nama:'Hitam',jumlah:10}],events:[{id:'rec1',kind:'receipt',tanggal:'2026-10-10',jumlah:6,itemId:'i1',kondisi:'ok'}]}]});
+  k.run(`A.commerceEventEdit(${el('rec1')})`);assert.match(k.run('lastSheet'),/Ubah penerimaan/);assert.match(k.run('lastSheet'),/Catatan lama <b>6 pcs<\/b>/);
+  k.run("currentForm.values={id:'new2',parentId:'o9',eventId:'rec1',revision:'r9',jenis:'receipt',tanggal:'2026-10-10',jumlah:'4',itemId:'i1',kondisi:'ok',catatan:''};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();currentForm._commerceIntent=null;A.commerceEventEditSave(null)");
+  assert.deepEqual(JSON.parse(JSON.stringify(k.requests[0].payload)),{id:'new2',module:'pembelian',parentId:'o9',eventId:'rec1',expectedRevision:'r9',tanggal:'2026-10-10',jumlah:4,catatan:'',itemId:'i1',kondisi:'ok',withState:true});
+  h.run(`S.state.me.divisi='admin';A.commerceEventEdit(${el('pay1')})`);assert.match(h.json('messages').at(-1).text,/Hanya owner/);
+  assert.match(html,/data-a="commerceEventEdit"'\+attrs\+'>Ubah<\/button>/);
 });
 test('an open group-print selection cannot export after the actor or session changes',async()=>{
   for(const change of ["S.token='new-session'","S.state.me={id:'other',divisi:'owner'}","S.state.me.divisi='potong'"]){
