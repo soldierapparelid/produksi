@@ -96,6 +96,19 @@ test('a PO card says which sizes must still be cut, also when the sizes come fro
   assert.match(card('u6'),/Harus dipotong<\/span><span class="sz-aktif potong">L<\/span><span class="xs muted">Sudah dipotong<\/span><span class="sz-aktif">M<\/span>/);
 });
 
+test('a size whose production is finished and checked by QC is no longer shown as active',()=>{
+  const done={complete:true},busy={complete:false};
+  const h=ui();h.c.fixture=[po('q1',{ukuranAktif:'["M","L","XL"]',agg:{ukuran:{M:{potong:174},L:{potong:168},XL:{potong:165}},total:{}},workflow:{ukuran:{M:busy,L:done,XL:busy},issues:[]}}),
+    po('q2',{ukuranAktif:'["M","L"]',agg:{ukuran:{M:{potong:10}},total:{}},workflow:{ukuran:{M:done,L:busy},issues:[]}}),
+    po('q3',{ukuranAktif:'["M","L"]',agg:{ukuran:{M:{potong:10},L:{potong:10}},total:{}},workflow:{ukuran:{M:done,L:done},issues:[]}})];
+  h.run("S.state.settings.ukuran=['S','M','L','XL','XXL'];seed(fixture,[]);S.f.poStatus='semua'");const view=h.run('VIEWS.po()');
+  const card=id=>{const a=view.indexOf('data-id="'+id+'"');assert.ok(a>=0,id);return view.slice(a,view.indexOf('</button>',a));};
+  assert.match(card('q1'),/Ukuran aktif<\/span><span class="sz-aktif">M<\/span><span class="sz-aktif">XL<\/span><span class="xs muted">Selesai QC<\/span><span class="sz-aktif selesai">L<\/span><\/div>/);
+  assert.match(card('q2'),/Harus dipotong<\/span><span class="sz-aktif potong">L<\/span><span class="xs muted">Selesai QC<\/span><span class="sz-aktif selesai">M<\/span><\/div>/,'nothing in between: one size waits for cutting, the other is finished');
+  assert.match(card('q3'),/<div class="po-ukuran kecil"><span class="xs muted">Selesai QC<\/span><span class="sz-aktif selesai">M<\/span><span class="sz-aktif selesai">L<\/span><\/div>/);
+  assert.ok(!view.includes('PO baru untuk barang ini'));
+});
+
 test('an archived PO can be deleted from the app: it leaves the archive too, and can still be brought back',async()=>{
   const h=ui();h.c.fixture=[po('s1',{status:'selesai'}),po('s2',{status:'batal'}),po('s3',{status:'selesai'}),po('a1')];
   h.run("seed(fixture,[],['s1','s2','s3']);S.state.settings.poBuang=['s3','not-loaded'];S.f.poStatus='arsip'");let view=h.run('VIEWS.po()');
