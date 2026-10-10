@@ -18,7 +18,7 @@ function fixture(){
  return {h,owner,cutter,other,call,good,raw,mutate};
 }
 test('verified missing-size projection reads every worker cut and never exposes raw source evidence to worker',()=>{
- const f=fixture(),before=f.raw('Potong'),state=f.good('getState',{},f.other),po=state.po[0];assert.deepEqual(po.cutting,{verified:true,ukuran:['M','XL','XXL'],pendingUkuran:['XL','XXL'],needsReview:false});assert.equal(state.potong.length,0);assert.equal(po.agg.total.potong,10);assert.equal(po.imporSumber,undefined);assert.doesNotMatch(JSON.stringify(po),/KEEP OFF WORKER|verified-batch|sku0|snapshotHash|proofHash/);assert.deepEqual(f.raw('Potong'),before);assert.ok(f.good('getState').po[0].imporSumber);
+ const f=fixture(),before=f.raw('Potong'),state=f.good('getState',{},f.other),po=state.po[0];assert.deepEqual(po.cutting,{verified:true,ukuran:['M','XL','XXL'],pendingUkuran:['XL','XXL'],lepasUkuran:[],needsReview:false});assert.equal(state.potong.length,0);assert.equal(po.agg.total.potong,10);assert.equal(po.imporSumber,undefined);assert.doesNotMatch(JSON.stringify(po),/KEEP OFF WORKER|verified-batch|sku0|snapshotHash|proofHash/);assert.deepEqual(f.raw('Potong'),before);assert.ok(f.good('getState').po[0].imporSumber);
 });
 test('new actual cut clears only its size and trusted overlay permits it without rewriting targets',()=>{
  const f=fixture();let r=f.call('createPotong',{potong:{id:'cutbad01',poId:'mixedpo1',userId:'cutter2',ukuran:{S:1}}});assert.equal(r.ok,false);assert.match(r.error,/tidak terdaftar/);

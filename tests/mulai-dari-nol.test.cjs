@@ -35,16 +35,19 @@ function fixture() {
   }
   function raw(table) { h.cold(); return h.run(`pkStore_().fresh(${JSON.stringify(table)});pkStore_().read(${JSON.stringify(table)})`); }
   const material = name => good('getState').stokRingkas.find(m => m.kunci === name);
-  /* two itemised rolls and one bought roll; PO A is cut from a roll, PO B only has fabric set aside, PO C has nothing yet */
+  /* two itemised rolls and one bought roll; PO A is cut from a roll for M while L still waits, PO B only has fabric set aside,
+     PO C has nothing yet, PO F has nothing but a BigSeller input row */
   const rolls = good('rinciStokRol', { id: 'nol-rinci-0001', bahan: 'Scuba Hitam', rolls: [{ qty: 25 }, { qty: 24 }] }).rows;
   good('saveInvoiceBahan', { invoice: { id: 'nol-invoice-001', invoice: 'FIXTURE-BON-1', tanggal: '2026-10-01', supplier: 'Fixture Store', items: [{ bahan: 'Katun Putih', satuan: 'kg', harga: 60000, rolls: [{ qty: 20, rollLabel: 'K1' }, { qty: 18.5, rollLabel: 'K2' }] }] } });
-  good('savePOWithRencana', { po: { newId: 'nol-po-a-0001', nama: 'Fixture Dipotong', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M'] }, rencana: { id: 'nol-plan-a-001', alokasiBahan: [{ stokId: rolls[0].id, qty: 25 }], catatan: '' } });
+  good('savePOWithRencana', { po: { newId: 'nol-po-a-0001', nama: 'Fixture Dipotong', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M', 'L'] }, rencana: { id: 'nol-plan-a-001', alokasiBahan: [{ stokId: rolls[0].id, qty: 25 }], catatan: '' } });
   const planA = good('getState').rencanaPotong.find(r => r.id === 'nol-plan-a-001');
   good('createPotong', { potong: { id: 'nol-cut-a-0001', rencanaId: planA.id, expectedRencanaRevision: planA.revision, ukuran: { M: 40 }, tanggal: '2026-10-09' } });
   good('savePOWithRencana', { po: { newId: 'nol-po-b-0001', nama: 'Fixture Siap Potong', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['L'] }, rencana: { id: 'nol-plan-b-001', alokasiBahan: [{ stokId: rolls[1].id, qty: 10 }], catatan: 'jatah' } });
   h.run(`pkStore_().lock(function(){
     pkStore_().append('PO',{id:'nol-po-c-0001',noPO:'PO-C',jenis:'stok',nama:'Fixture Belum Apa-apa',ukuran:'{"M":10}',total:10,status:'aktif',dibuat:'2026-10-01T00:00:00.000Z'});
     pkStore_().append('PO',{id:'nol-po-d-0001',noPO:'PO-D',jenis:'stok',nama:'Fixture Sudah Selesai',ukuran:'{"M":10}',total:10,status:'selesai',dibuat:'2026-09-01T00:00:00.000Z'});
+    pkStore_().append('PO',{id:'nol-po-f-0001',noPO:'PO-F',jenis:'stok',nama:'Fixture Hanya BigSeller',ukuran:'{"M":10}',total:10,status:'aktif',dibuat:'2026-09-15T00:00:00.000Z'});
+    pkStore_().append('Gudang',{id:'nol-gudang-001',poId:'nol-po-f-0001',tanggal:'2026-09-20',ukuran:'{"M":5}',total:5,dibuat:'2026-09-20T00:00:00.000Z'});
     pkStore_().append('Potong',{id:'nol-cut-old-01',poId:'nol-po-a-0001',userId:'nolcutter0001',tanggal:'2026-09-10',ukuran:'{"M":30}',total:30,bahan:'Scuba Hitam',kg:30,tarif:1000,dibuat:'2026-09-10T00:00:00.000Z',asal:'lama'});
   });`);
   return { h, owner, cutter, admin, call, good, bad, raw, material, rolls };
@@ -56,22 +59,27 @@ test('the preview counts what would change and writes nothing; only the owner ma
   f.bad('mulaiDariNol', {}, /Ketik MULAI DARI NOL/); f.bad('mulaiDariNol', { yakin: 'mulai dari nol' }, /Ketik MULAI DARI NOL/);
   const lihat = f.good('getPratinjauNol');
   assert.equal(lihat.pratinjau, true); assert.equal(lihat.rencana, 1, 'the fabric set aside for PO B'); assert.equal(lihat.rol, 3, 'one Scuba roll is already used up'); assert.equal(lihat.bahan, 3);
-  assert.deepEqual(lihat.daftarPO.map(r => r.id).sort(), ['nol-po-b-0001', 'nol-po-c-0001']); assert.equal(lihat.po, 2);
+  assert.deepEqual(lihat.daftarPO.map(r => r.id).sort(), ['nol-po-b-0001', 'nol-po-c-0001', 'nol-po-f-0001']); assert.equal(lihat.po, 3, 'a PO with nothing but a BigSeller row was never cut either');
+  assert.equal(lihat.lepas, 1); assert.deepEqual(lihat.daftarLepas, [{ id: 'nol-po-a-0001', noPO: lihat.daftarLepas[0].noPO, nama: 'FIXTURE DIPOTONG', ukuran: ['L'] }]);
   assert.deepEqual(lihat.daftarBahan.map(b => [b.nama, b.satuan, b.rol]).sort(), [['Furing', 'meter', 0], ['Katun Putih', 'kg', 2], ['Scuba Hitam', 'kg', 1]]);
   assert.equal(f.raw('StokBahan').length, stok); assert.equal(f.raw('RencanaPotong').find(r => r.id === 'nol-plan-b-001').status, 'siap');
-  assert.equal(f.raw('PO').filter(r => r.status === 'aktif').length, 3); assert.equal(f.good('getState').settings.stokMulai, '');
+  assert.equal(f.raw('PO').filter(r => r.status === 'aktif').length, 4); assert.equal(f.good('getState').settings.stokMulai, ''); assert.deepEqual(f.good('getState').settings.poUkuranLepas, {});
 });
 
 test('every material and roll becomes zero, the list is clean, uncut POs leave the active list, and no history row is lost', () => {
   const f = fixture(), sebelum = { stok: f.raw('StokBahan'), potong: f.raw('Potong'), po: f.raw('PO').length, rencana: f.raw('RencanaPotong').length };
   const hasil = f.good('mulaiDariNol', { yakin: KATA });
-  assert.equal(hasil.selesai, true); assert.equal(hasil.pratinjau, false); assert.equal(hasil.rencana, 1); assert.equal(hasil.rol, 3); assert.equal(hasil.bahan, 3); assert.equal(hasil.po, 2);
+  assert.equal(hasil.selesai, true); assert.equal(hasil.pratinjau, false); assert.equal(hasil.rencana, 1); assert.equal(hasil.rol, 3); assert.equal(hasil.bahan, 3); assert.equal(hasil.po, 3); assert.equal(hasil.lepas, 1);
   const state = f.good('getState');
   assert.deepEqual(state.stokRingkas.map(m => [m.nama, m.saldo, m.sembunyi]).sort(), [['Furing', 0, true], ['Katun Putih', 0, true], ['Scuba Hitam', 0, true]]);
   assert.ok(state.stokRol.every(r => r.saldo === 0 && r.dicadangkan === 0), 'every roll is empty and nothing is set aside');
-  assert.match(state.settings.stokMulai, /^\d{4}-\d{2}-\d{2}$/); assert.deepEqual(state.settings.poSembunyi.slice().sort(), ['nol-po-b-0001', 'nol-po-c-0001']);
+  assert.match(state.settings.stokMulai, /^\d{4}-\d{2}-\d{2}$/); assert.deepEqual(state.settings.poSembunyi.slice().sort(), ['nol-po-b-0001', 'nol-po-c-0001', 'nol-po-f-0001']);
+  /* the PO that is in production stays active, but its size that was never cut no longer waits for the cutter */
+  const berjalan = state.po.find(p => p.id === 'nol-po-a-0001'); assert.deepEqual(state.settings.poUkuranLepas, { 'nol-po-a-0001': ['L'] });
+  assert.deepEqual([berjalan.status, berjalan.cutting.pendingUkuran, berjalan.cutting.lepasUkuran], ['aktif', [], ['L']]); assert.deepEqual(berjalan.workflow.pendingCutSizes, []);
+  assert.deepEqual(f.raw('Gudang').map(r => [r.id, r.poId, r.total]), [['nol-gudang-001', 'nol-po-f-0001', 5]], 'the BigSeller row of the archived PO is kept');
   const po = f.raw('PO'); assert.equal(po.length, sebelum.po);
-  assert.deepEqual(po.map(r => [r.id, r.status]).sort(), [['nol-po-a-0001', 'aktif'], ['nol-po-b-0001', 'batal'], ['nol-po-c-0001', 'batal'], ['nol-po-d-0001', 'selesai']]);
+  assert.deepEqual(po.map(r => [r.id, r.status]).sort(), [['nol-po-a-0001', 'aktif'], ['nol-po-b-0001', 'batal'], ['nol-po-c-0001', 'batal'], ['nol-po-d-0001', 'selesai'], ['nol-po-f-0001', 'batal']]);
   const rencana = f.raw('RencanaPotong'); assert.equal(rencana.length, sebelum.rencana);
   assert.equal(rencana.find(r => r.id === 'nol-plan-b-001').status, 'batal'); assert.equal(rencana.find(r => r.id === 'nol-plan-b-001').catatan, 'jatah'); assert.equal(rencana.find(r => r.id === 'nol-plan-a-001').status, 'siap', 'a used preparation is left as it is');
   /* purchases, itemised rolls and cut records are exactly as before; only correction rows were added */
@@ -83,7 +91,7 @@ test('every material and roll becomes zero, the list is clean, uncut POs leave t
   assert.equal(baru.find(r => r.bahan === 'Furing').qty, 5, 'a minus balance is brought up to zero');
   /* running it again finds nothing left to do */
   const lagi = f.good('mulaiDariNol', { yakin: KATA });
-  assert.deepEqual([lagi.selesai, lagi.rencana, lagi.rol, lagi.bahan, lagi.po], [true, 0, 0, 0, 0]); assert.equal(f.raw('StokBahan').length, stok.length);
+  assert.deepEqual([lagi.selesai, lagi.rencana, lagi.rol, lagi.bahan, lagi.po, lagi.lepas], [true, 0, 0, 0, 0, 0]); assert.equal(f.raw('StokBahan').length, stok.length);
 });
 
 test('after the reset new stock shows its name again and can be set aside, and a backdated old cut does not pull the stock below zero', () => {
@@ -102,9 +110,24 @@ test('after the reset new stock shows its name again and can be set aside, and a
 test('a long list of uncut POs is finished over several calls', () => {
   const f = fixture();
   f.h.run(`pkStore_().lock(function(){ for (var i = 0; i < 30; i++) pkStore_().append('PO',{id:'nol-banyak-'+(100+i),noPO:'PO-B'+i,jenis:'stok',nama:'Fixture Banyak '+i,ukuran:'{"M":1}',total:1,status:'aktif',dibuat:'2026-10-02T00:00:00.000Z'}); });`);
-  assert.equal(f.good('getPratinjauNol').po, 32);
+  assert.equal(f.good('getPratinjauNol').po, 33);
   const satu = f.good('mulaiDariNol', { yakin: KATA }); assert.equal(satu.selesai, false);
   assert.equal(f.raw('PO').filter(r => r.status === 'batal').length, 25); assert.ok(f.good('getState').stokRingkas.every(m => m.saldo === 0), 'the stock is already empty after the first call');
-  const dua = f.good('mulaiDariNol', { yakin: KATA }); assert.equal(dua.selesai, true); assert.equal(dua.po, 7);
-  assert.equal(f.raw('PO').filter(r => r.status === 'aktif').length, 1); assert.equal(f.good('getState').settings.poSembunyi.length, 32);
+  const dua = f.good('mulaiDariNol', { yakin: KATA }); assert.equal(dua.selesai, true); assert.equal(dua.po, 8);
+  assert.equal(f.raw('PO').filter(r => r.status === 'aktif').length, 1); assert.equal(f.good('getState').settings.poSembunyi.length, 33);
+});
+
+test('a size that was never cut can be released from a running PO and taken back; the PO then no longer waits for the cutter', () => {
+  const f = fixture(), cari = () => f.good('getState').po.find(p => p.id === 'nol-po-a-0001');
+  assert.deepEqual([cari().cutting.pendingUkuran, cari().cutting.lepasUkuran, cari().workflow.pendingCutSizes], [['L'], [], ['L']]);
+  f.bad('lepasUkuranPotong', { poId: 'nol-po-a-0001' }, /owner\/admin/, f.cutter); f.bad('lepasUkuranPotong', { poId: 'missing-po-0001' }, /PO tidak ditemukan/);
+  f.bad('lepasUkuranPotong', { poId: 'nol-po-a-0001', ukuran: ['M'] }, /Ukuran M tidak sedang menunggu dipotong/); f.bad('lepasUkuranPotong', { poId: 'nol-po-d-0001' }, /Hanya PO aktif/);
+  f.bad('lepasUkuranPotong', { poId: 'nol-po-b-0001' }, /Masih ada bahan potong yang disiapkan/, f.admin);
+  const rows = { po: f.raw('PO'), potong: f.raw('Potong'), rencana: f.raw('RencanaPotong') };
+  assert.deepEqual(f.good('lepasUkuranPotong', { poId: 'nol-po-a-0001' }, f.admin), { ok: true, ukuran: ['L'] });
+  assert.deepEqual([cari().cutting.pendingUkuran, cari().cutting.lepasUkuran, cari().workflow.pendingCutSizes], [[], ['L'], []]);
+  assert.deepEqual({ po: f.raw('PO'), potong: f.raw('Potong'), rencana: f.raw('RencanaPotong') }, rows, 'no PO, cut or preparation row is touched');
+  f.bad('lepasUkuranPotong', { poId: 'nol-po-a-0001' }, /Tidak ada ukuran yang menunggu dipotong/);
+  assert.deepEqual(f.good('lepasUkuranPotong', { poId: 'nol-po-a-0001', lepas: false }), { ok: true, ukuran: [] });
+  assert.deepEqual([cari().cutting.pendingUkuran, cari().cutting.lepasUkuran], [['L'], []]); assert.deepEqual(f.good('getState').settings.poUkuranLepas, {});
 });
