@@ -64,6 +64,46 @@ test('daily salary model uses saved amounts and period repayments, never current
   assert.ok(model.summary.some(r=>r.value==='Rp 250.000'));
 });
 
+test('a repayment recorded under a week name still reduces the salary slip whose date range holds it',()=>{
+  const custom='custom-2026-10-05-2026-10-10';
+  const st={settings:{},gaji:[{karyawanId:'daily01',periode:custom,tanggal:'2026-10-05',status:'full',gaji:132000},{karyawanId:'daily01',periode:custom,tanggal:'2026-10-06',status:'full',gaji:132000}],
+    kasbon:[{id:'loan01',tipe:'kasbon',jenis:'harian',orangId:'daily01',jumlah:1600000,tanggal:'2026-07-25'},{id:'old',tipe:'cicilan',kasbonId:'loan01',periode:'2026-W40',tanggal:'2026-10-03',jumlah:100000,asal:'lama'},{id:'repay',tipe:'cicilan',kasbonId:'loan01',periode:'2026-W41',tanggal:'2026-10-10',jumlah:200000}]};
+  const model=call('coreGajiSlipModel',st,{id:'daily01',nama:'Harian'},custom);
+  assert.deepEqual(model.summary.map(r=>[r.label,r.value]),[['Total gaji harian','Rp 264.000'],['Pendapatan bruto','Rp 264.000'],['Potongan cicilan kasbon periode ini','− Rp 200.000'],['Total diterima','Rp 64.000'],['Sisa kasbon aktif (informasi, tidak dipotong lagi)','Rp 1.300.000']]);
+  assert.equal(model.sections[0].rows.length,1);assert.equal(model.sections[0].rows[0][3],'Rp 1.300.000');
+  /* the week it was named after is used when that week really has salary rows for the person */
+  st.gaji.push({karyawanId:'daily01',periode:'2026-W41',tanggal:'2026-10-07',status:'full',gaji:132000});
+  assert.equal(call('coreGajiSlipModel',st,{id:'daily01'},custom).summary.find(r=>r.label==='Total diterima').value,'Rp 264.000');
+  assert.equal(call('coreGajiSlipModel',st,{id:'daily01'},'2026-W41').summary.find(r=>r.label==='Potongan cicilan kasbon periode ini').value,'− Rp 200.000');
+});
+
+test('which salary slip carries a repayment: its own period, else the period holding its date; old-app rows and adjustments never move',()=>{
+  const p=['custom-2026-10-05-2026-10-10','custom-2026-10-01-2026-10-31','2026-W40'];
+  assert.equal(call('coreCicilanPeriode',{periode:'2026-W40',tanggal:'2026-10-07'},p),'2026-W40');
+  assert.equal(call('coreCicilanPeriode',{periode:'2026-W41',tanggal:'2026-10-07'},p),'custom-2026-10-05-2026-10-10','the range that starts last wins when two ranges hold the date');
+  assert.equal(call('coreCicilanPeriode',{periode:'2026-W41',tanggal:'2026-10-20'},p),'custom-2026-10-01-2026-10-31');
+  assert.equal(call('coreCicilanPeriode',{periode:'2026-W41',tanggal:'2026-11-20'},p),'2026-W41');
+  assert.equal(call('coreCicilanPeriode',{periode:'2026-W41',tanggal:'2026-10-07',asal:'lama'},p),'2026-W41');
+  assert.equal(call('coreCicilanPeriode',{periode:'penyesuaian',tanggal:'2026-10-07'},p),'');
+  assert.equal(call('coreCicilanPeriode',{periode:'',tanggal:'2026-10-07'},[]),'');
+});
+
+test('the weekly wage slip writes the loan like the old app: this week\'s deduction, the net wage and what is still owed at the end of the week',()=>{
+  const st=state([earning()]);
+  st.kasbon=[{id:'loan01',tipe:'kasbon',jenis:'maklon',orangId:worker.id,jumlah:1000,tanggal:'2026-09-01'},{id:'r1',tipe:'cicilan',kasbonId:'loan01',tanggal:'2026-09-30',jumlah:100},{id:'r2',tipe:'cicilan',kasbonId:'loan01',tanggal:'2026-10-06',jumlah:300},{id:'r3',tipe:'cicilan',kasbonId:'loan01',tanggal:'2026-10-13',jumlah:200},
+    {id:'other',tipe:'kasbon',jenis:'maklon',orangId:'someone',jumlah:5000,tanggal:'2026-09-01'},{id:'later',tipe:'kasbon',jenis:'maklon',orangId:worker.id,jumlah:700,tanggal:'2026-10-20'}];
+  const week=call('coreWeeklySlipModel',st,worker,'2026-10-05','2026-10-11');
+  const line=l=>(week.model.summary.find(r=>r.label===l)||{}).value;
+  assert.equal(line('Potongan kasbon periode ini'),'− Rp 300');assert.equal(line('Upah bersih setelah potongan kasbon'),'Rp 1.700');assert.equal(line('Sisa kasbon setelah potongan'),'Rp 600');
+  assert.equal(week.potonganKasbon,300);assert.equal(week.sisaKasbon,600);assert.equal(week.bersih,1700);
+  assert.equal(week.model.sections[0].title,'Rincian potongan kasbon periode ini');
+  const before=call('coreWeeklySlipModel',st,worker,'2026-09-21','2026-09-27');
+  assert.equal(before.model.summary.find(r=>/^Sisa kasbon/.test(r.label)).label,'Sisa kasbon (belum dipotong periode ini)');assert.equal(before.sisaKasbon,1000);
+  assert.ok(!before.model.summary.some(r=>r.label==='Potongan kasbon periode ini'));
+  const none=call('coreWeeklySlipModel',state([earning()]),worker,'2026-10-05','2026-10-11');
+  assert.ok(!none.model.summary.some(r=>/kasbon/i.test(r.label)),'a worker without a loan sees no loan line');
+});
+
 test('slip dates reject impossible calendar dates and invalid ISO weeks; PDF markup escapes source text',()=>{
   assert.throws(()=>call('coreWeeklySlipModel',state([]),worker,'2026-02-31','2026-03-03'),/Tanggal slip tidak valid/);
   assert.throws(()=>call('coreWeeklySlipModel',state([]),worker,'2026-01-01','2026-06-01'),/Rentang slip/);

@@ -258,6 +258,8 @@ button.po:hover { border-color: var(--accent); }
 .sz-tanda { margin-left: 6px; padding: 0 6px; border-radius: 99px; font-size: 10.5px; font-weight: 700; background: var(--accent-soft); color: var(--accent); }
 .sz-aktif.potong { background: var(--s-potong); }
 .sz-tanda.potong { background: var(--warn-soft); color: var(--warn); }
+.sz-aktif.selesai { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); font-weight: 700; }
+.sz-tanda.selesai { background: var(--surface-2); color: var(--muted); }
 .po-seri { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .po-seri-h { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
 .po-seri-h h3 { font-family: var(--f-display); font-size: 18px; letter-spacing: .04em; text-transform: uppercase; }
@@ -370,7 +372,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261009-hitung-sebagian-1513';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261010-kasbon-slip-1514';</script>
 <script>
 (function () {
 'use strict';
@@ -392,7 +394,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.13';
+var APP_VERSION = '1.5.14';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -685,13 +687,26 @@ function coreGajiHari(status, gajiHarian) {
 /* kasbon: sisa dihitung dari jumlah pinjaman dikurangi semua cicilannya */
 function coreKasbon(rows) {
   var list = []; var byId = {};
-  (rows || []).forEach(function (r) { if (r.tipe === 'kasbon') { var k = { id: r.id, jenis: r.jenis, orangId: r.orangId, nama: r.nama, tanggal: r.tanggal, jumlah: coreNum(r.jumlah), keterangan: r.keterangan || '', dibuat: r.dibuat || '', cicilan: [], dicicil: 0 }; byId[r.id] = k; list.push(k); } });
-  (rows || []).forEach(function (r) { if (r.tipe === 'cicilan' && byId[r.kasbonId]) { byId[r.kasbonId].cicilan.push({ id: r.id, tanggal: r.tanggal, periode: r.periode || '', jumlah: coreNum(r.jumlah), keterangan: r.keterangan || '', dibuat: r.dibuat || '' }); byId[r.kasbonId].dicicil += coreNum(r.jumlah); } });
+  (rows || []).forEach(function (r) { if (r.tipe === 'kasbon') { var k = { id: r.id, jenis: r.jenis, orangId: r.orangId, nama: r.nama, tanggal: r.tanggal, jumlah: coreNum(r.jumlah), keterangan: r.keterangan || '', dibuat: r.dibuat || '', asal: r.asal || '', cicilan: [], dicicil: 0 }; byId[r.id] = k; list.push(k); } });
+  (rows || []).forEach(function (r) { if (r.tipe === 'cicilan' && byId[r.kasbonId]) { byId[r.kasbonId].cicilan.push({ id: r.id, tanggal: r.tanggal, periode: r.periode || '', jumlah: coreNum(r.jumlah), keterangan: r.keterangan || '', dibuat: r.dibuat || '', asal: r.asal || '' }); byId[r.kasbonId].dicicil += coreNum(r.jumlah); } });
   list.forEach(function (k) {
     k.cicilan.sort(function (a, b) { return (String(a.tanggal) + String(a.dibuat)) < (String(b.tanggal) + String(b.dibuat)) ? -1 : 1; });
     k.sisa = Math.max(0, k.jumlah - k.dicicil); k.lunas = k.sisa <= 0;
   });
   return list;
+}
+/* Slip gaji mana yang memuat sebuah cicilan kasbon karyawan harian. Cicilan menyimpan nama periodenya sendiri; kalau
+   periode itu memang punya data gaji orangnya, itulah slipnya. Kalau tidak (mis. gaji dicatat dengan rentang 5–10 Okt
+   sementara cicilan tersimpan sebagai minggu "2026-W41"), dipakai periode gaji yang rentangnya memuat tanggal potong.
+   Cicilan dari aplikasi lama tetap di periode asalnya, supaya slip lama tidak berubah. */
+function coreCicilanPeriode(cicilan, periods) {
+  var own = String((cicilan && cicilan.periode) || '');
+  if (!cicilan || own === 'penyesuaian') return '';
+  periods = periods || [];
+  if (periods.indexOf(own) >= 0 || cicilan.asal === 'lama') return own;
+  var hit = '', mulai = '', tanggal = String(cicilan.tanggal || '');
+  periods.forEach(function (id) { var p = corePeriode(id); if (!p || tanggal < p.start || tanggal > p.end) return; if (!hit || p.start > mulai || (p.start === mulai && id < hit)) { hit = id; mulai = p.start; } });
+  return hit || own;
 }
 
 /* Workflow v2. All helpers accept stored JSON strings or parsed maps; no browser/server APIs.
@@ -2317,6 +2332,42 @@ function createCore(store, env) {
     store.append('Kasbon', rec);
     return rec;
   };
+  /* Slip gaji yang memuat cicilan ini sudah ditandai dibayar? Kalau ya, cicilannya tidak boleh diubah. */
+  function cicilanTerkunci(rec) {
+    if (rec.tipe !== 'cicilan' || rec.jenis !== 'harian') return false;
+    var rows = store.read('GajiHarian').filter(function (g) { return g.karyawanId === rec.orangId; }), periods = {};
+    rows.forEach(function (g) { if (g.periode) periods[g.periode] = 1; });
+    var pid = coreCicilanPeriode(rec, Object.keys(periods));
+    return !!pid && rows.some(function (g) { return g.periode === pid && (g.lunas === true || /^(true|ya|1)$/i.test(String(g.lunas))); });
+  }
+  /* Mengubah jumlah, tanggal, atau keterangan satu kasbon atau satu cicilan, tanpa harus menghapus dan mencatat ulang. */
+  actions.ubahKasbon = function (p) {
+    var me = auth(p); mustAdmin(me);
+    if (store.fresh) store.fresh('Kasbon');
+    var rec = findRow('Kasbon', String(p.id || '')); if (!rec) fail('Catatan kasbon tidak ditemukan.');
+    if (rec.periode === 'penyesuaian') fail('Baris penyesuaian dari aplikasi lama tidak bisa diubah.');
+    if (p.expectedJumlah !== undefined && p.expectedJumlah !== '' && Math.round(coreNum(p.expectedJumlah)) !== Math.round(coreNum(rec.jumlah))) fail('Catatan ini sudah berubah sejak formulir dibuka. Muat ulang lalu coba lagi.');
+    var jumlah = Math.round(coreNum(p.jumlah)); if (!(jumlah > 0)) fail('Isi jumlahnya.');
+    var tanggal = tglOk(p.tanggal); if (!tanggal || coreTambahHari(tanggal, 0) !== tanggal) fail('Isi tanggal yang benar.');
+    var patch = { jumlah: jumlah, tanggal: tanggal, keterangan: teks(p.keterangan, 200) };
+    var semua = coreKasbon(store.read('Kasbon'));
+    if (rec.tipe === 'kasbon') {
+      var info = semua.filter(function (x) { return x.id === rec.id; })[0];
+      if (info && jumlah < info.dicicil) fail('Jumlah kasbon tidak boleh kurang dari yang sudah dicicil (' + coreRupiah(info.dicicil) + ').');
+    } else if (rec.tipe === 'cicilan') {
+      var induk = semua.filter(function (x) { return x.id === rec.kasbonId; })[0]; if (!induk) fail('Kasbon induknya tidak ditemukan.');
+      var maks = induk.sisa + Math.round(coreNum(rec.jumlah));
+      if (jumlah > maks) fail('Cicilan melebihi sisa kasbon (' + coreRupiah(maks) + ').');
+      if (cicilanTerkunci(rec)) fail('Slip gaji minggu itu sudah ditandai dibayar. Batalkan tanda dibayarnya dulu.');
+      patch.periode = rec.jenis === 'harian' && corePeriode(p.periode) ? String(p.periode) : coreMingguId(tanggal);
+      var nanti = {}; Object.keys(rec).forEach(function (k) { nanti[k] = rec[k]; }); nanti.tanggal = tanggal; nanti.periode = patch.periode; nanti.asal = '';
+      if (cicilanTerkunci(nanti)) fail('Slip gaji minggu tujuan sudah ditandai dibayar. Pilih minggu lain atau batalkan tandanya dulu.');
+      /* cicilan yang diubah di aplikasi ini mengikuti aturan aplikasi ini (dicari slipnya lewat tanggal bila perlu) */
+      patch.asal = '';
+    } else fail('Catatan ini tidak bisa diubah.');
+    store.update('Kasbon', rec.id, patch);
+    return findRow('Kasbon', rec.id);
+  };
 
   actions.createKirim = function (p) {
     var me = auth(p); mustAdmin(me);
@@ -3021,7 +3072,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
@@ -4470,10 +4521,19 @@ function coreWeeklySlipModel(state, worker, start, end) {
     var sizes = coreMap(r.ukuran); Object.keys(sizes).forEach(function (size) { g.ukuran[size] = coreNum(g.ukuran[size]) + coreNum(sizes[size]); });
   });
   ordered.sort(function (a, b) { return String(a.tanggal).localeCompare(String(b.tanggal)) || String(a.title).localeCompare(String(b.title)) || String(a.ref).localeCompare(String(b.ref)); });
-  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0;
-  loans.forEach(function (loan) { if (loan.jenis === 'maklon' && loan.orangId === worker.id) loan.cicilan.forEach(function (r) { if (r.periode !== 'penyesuaian' && String(r.tanggal) >= per.start && String(r.tanggal) <= per.end) { deduction += r.jumlah; repayments.push([coreSlipDate(r.tanggal),r.keterangan || loan.keterangan || 'Cicilan kasbon',coreRupiah(r.jumlah)]); } }); });
+  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0, loanCount = 0, outstanding = 0;
+  /* Sisa kasbon ditulis menurut keadaan pada akhir periode slip, supaya slip minggu lalu tidak ikut berubah oleh cicilan minggu ini. */
+  loans.forEach(function (loan) {
+    if (loan.jenis !== 'maklon' || loan.orangId !== worker.id || (loan.tanggal && String(loan.tanggal) > per.end)) return;
+    var repaid = 0; loanCount++;
+    loan.cicilan.forEach(function (r) {
+      if (String(r.tanggal) <= per.end) repaid += r.jumlah;
+      if (r.periode !== 'penyesuaian' && String(r.tanggal) >= per.start && String(r.tanggal) <= per.end) { deduction += r.jumlah; repayments.push([coreSlipDate(r.tanggal),r.keterangan || loan.keterangan || 'Cicilan kasbon',coreRupiah(r.jumlah)]); }
+    });
+    outstanding += Math.max(0, loan.jumlah - repaid);
+  });
   var sections = [];
-  if (repayments.length) sections.push({ title:'Rincian cicilan kasbon periode ini',columns:[{label:'Tanggal'},{label:'Keterangan'},{label:'Jumlah',align:'right'}],rows:repayments });
+  if (repayments.length) sections.push({ title:'Rincian potongan kasbon periode ini',columns:[{label:'Tanggal'},{label:'Keterangan'},{label:'Jumlah',align:'right'}],rows:repayments });
   if (review.length) sections.push({ title:'Perlu ditinjau — tidak masuk jumlah tersedia untuk dibayar',columns:[{label:'Tanggal',width:15},{label:'Pekerjaan',width:35},{label:'Jumlah',width:12},{label:'Catatan',width:38}],rows:review });
   var materials = {}, materialByName = {};
   (st.stokRingkas || st.bahan || []).forEach(function (b) { materialByName[coreNormBahan(b.nama)] = b; });
@@ -4498,13 +4558,15 @@ function coreWeeklySlipModel(state, worker, start, end) {
   summary.push({label:'Upah pekerjaan periode ini',value:coreRupiah(totals.gross)});
   summary.push({label:'Alokasi pekerjaan sudah dibayar',value:coreRupiah(totals.paid)});
   summary.push({label:'Tersedia untuk dibayar',value:coreRupiah(totals.unpaid),emphasis:true});
-  if (deduction) { summary.push({label:'Cicilan kasbon tercatat pada periode ini',value:coreRupiah(deduction)}); summary.push({label:'Upah periode setelah cicilan (ringkasan)',value:coreRupiah(totals.gross - deduction)}); }
+  /* Kasbon seperti di aplikasi lama: potongan minggu ini mengurangi upah, dan sisa kasbonnya selalu tertulis. */
+  if (deduction) { summary.push({label:'Potongan kasbon periode ini',value:'− ' + coreRupiah(deduction)}); summary.push({label:'Upah bersih setelah potongan kasbon',value:coreRupiah(totals.gross - deduction),emphasis:true}); }
+  if (outstanding > 0 || deduction) summary.push({label:'Sisa kasbon' + (deduction ? ' setelah potongan' : ' (belum dipotong periode ini)'),value:coreRupiah(outstanding)});
   if (totals.review) summary.push({label:'Catatan yang perlu ditinjau',value:coreRibuan(totals.review)});
   if (totals.overpaid) summary.push({label:'Pembayaran melebihi hak setelah QC',value:coreRibuan(totals.overpaid) + ' pcs'});
   var business = settings.kopSlip || settings.namaUsaha || 'SOLDIER APPAREL';
   return { model:{layout:'weekly-a4',title:'Slip Upah ' + (sewing ? 'Jahit' : 'Potong'),reference:(sewing ? 'JHT' : 'PTG') + ' / ' + start.replace(/-/g,'') + '-' + end.replace(/-/g,'') + ' / ' + String(worker.id).slice(0,8),recipient:worker.nama || '-',recipientLabel:sewing ? 'Nama penjahit' : 'Tukang potong',period:coreSlipDate(start) + ' — ' + coreSlipDate(end),
     columns:[{label:'Tanggal',width:13},{label:'Rincian pekerjaan',width:45},{label:'Jumlah',align:'right',width:11},{label:'Tarif / pcs',align:'right',width:13},{label:'Upah',align:'right',width:18}],rows:rows,summary:summary,sections:sections,signatures:[{label:'Disiapkan oleh',name:business},{label:'Penerima',name:worker.nama || '-'}]},
-    n:ordered.length + review.length,belum:totals.pending,tanpaHarga:totals.missingRate,bersih:totals.gross - deduction,totalGross:totals.gross,paidAmount:totals.paid,unpaidAmount:totals.unpaid,reviewCount:totals.review,totalQty:totals.qty };
+    n:ordered.length + review.length,belum:totals.pending,tanpaHarga:totals.missingRate,bersih:totals.gross - deduction,totalGross:totals.gross,paidAmount:totals.paid,unpaidAmount:totals.unpaid,reviewCount:totals.review,totalQty:totals.qty,potonganKasbon:deduction,sisaKasbon:outstanding,jumlahKasbon:loanCount };
 }
 function coreGajiSlipModel(state, employee, period) {
   var st = state || {}, per = corePeriode(period);
@@ -4512,8 +4574,10 @@ function coreGajiSlipModel(state, employee, period) {
   coreSlipRange(per.start, per.end);
   var records = (st.gaji || []).filter(function (g) { return g.periode === period && g.karyawanId === employee.id; }), byDate = {}, salary = 0, overtime = 0, saturday = 0, hours = 0, saturdayHours = 0;
   records.forEach(function (g) { byDate[g.tanggal] = g; salary += coreNum(g.gaji); overtime += coreNum(g.lemburTotal); saturday += coreNum(g.sabtuTotal); hours += coreNum(g.lemburJam); saturdayHours += coreNum(g.sabtuJam); });
-  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0, outstanding = 0;
-  loans.forEach(function (loan) { if (loan.jenis !== 'harian' || loan.orangId !== employee.id) return; outstanding += loan.sisa; var running = 0; loan.cicilan.forEach(function (r) { running += r.jumlah; if (r.periode !== period) return; deduction += r.jumlah; repayments.push([coreSlipDate(loan.tanggal),(loan.keterangan || 'Kasbon') + ' · Pinjaman ' + coreRupiah(loan.jumlah) + (r.keterangan ? ' · ' + r.keterangan : ''),'− ' + coreRupiah(r.jumlah),coreRupiah(Math.max(0,loan.jumlah-running))]); }); });
+  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0, outstanding = 0, periods = {};
+  /* cicilan dipotong di slip periode gajinya; lihat coreCicilanPeriode untuk cicilan yang nama periodenya berbeda */
+  (st.gaji || []).forEach(function (g) { if (g.karyawanId === employee.id && g.periode) periods[g.periode] = 1; }); periods[period] = 1; periods = Object.keys(periods);
+  loans.forEach(function (loan) { if (loan.jenis !== 'harian' || loan.orangId !== employee.id) return; outstanding += loan.sisa; var running = 0; loan.cicilan.forEach(function (r) { running += r.jumlah; if (coreCicilanPeriode(r, periods) !== period) return; deduction += r.jumlah; repayments.push([coreSlipDate(loan.tanggal),(loan.keterangan || 'Kasbon') + ' · Pinjaman ' + coreRupiah(loan.jumlah) + (r.keterangan ? ' · ' + r.keterangan : ''),'− ' + coreRupiah(r.jumlah),coreRupiah(Math.max(0,loan.jumlah-running))]); }); });
   var gross = salary + overtime + saturday, summary = [{label:'Total gaji harian',value:coreRupiah(salary)}];
   if (overtime > 0) summary.push({label:'Lembur biasa (' + hours + ' jam)',value:coreRupiah(overtime)});
   if (saturday > 0) summary.push({label:'Lembur Sabtu (' + saturdayHours + ' jam)',value:coreRupiah(saturday)});
@@ -5665,7 +5729,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.13';
+var UI_VERSION = '1.5.14';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -7008,13 +7072,20 @@ function poUkuranPotong(po) {
   var au = (po.agg && po.agg.ukuran) || {};
   return poUkuranAktif(po).filter(function (s) { return !(coreNum((au[s] || {}).potong) > 0); });
 }
+/* Ukuran yang produksinya sudah beres: semua hasil jahitnya sudah dihitung dan di-QC, tidak ada perbaikan yang tertinggal.
+   Ukuran seperti ini tidak lagi ditandai aktif, supaya terlihat mana yang masih berjalan dan mana yang sudah selesai. */
+function poUkuranSelesai(po) {
+  var uk = workflowFor(po).ukuran || {};
+  return poUkuranAktif(po).filter(function (s) { return !!(uk[s] && uk[s].complete); });
+}
 function poUkuranAktifHtml(po, kecil) {
   var a = poUkuranAktif(po); if (!a.length) return '';
   var perlu = poUkuranPotong(po), set = {}; perlu.forEach(function (s) { set[s] = 1; });
-  var sudah = a.filter(function (s) { return !set[s]; });
+  var beresSet = {}; poUkuranSelesai(po).forEach(function (s) { if (!set[s]) beresSet[s] = 1; });
+  var beres = a.filter(function (s) { return beresSet[s]; }), jalan = a.filter(function (s) { return !set[s] && !beresSet[s]; });
   function pil(list, cls) { return list.map(function (s) { return '<span class="sz-aktif' + cls + '">' + esc(s) + '</span>'; }).join(''); }
-  if (!perlu.length) return '<div class="po-ukuran' + (kecil ? ' kecil' : '') + '"><span class="xs muted">Ukuran aktif</span>' + pil(a, '') + '</div>';
-  return '<div class="po-ukuran' + (kecil ? ' kecil' : '') + '"><span class="xs muted">Harus dipotong</span>' + pil(perlu, ' potong') + (sudah.length ? '<span class="xs muted">Sudah dipotong</span>' + pil(sudah, '') : '') + '</div>';
+  function bagian(label, list, cls) { return list.length ? '<span class="xs muted">' + label + '</span>' + pil(list, cls) : ''; }
+  return '<div class="po-ukuran' + (kecil ? ' kecil' : '') + '">' + bagian('Harus dipotong', perlu, ' potong') + bagian(perlu.length ? 'Sudah dipotong' : 'Ukuran aktif', jalan, '') + bagian('Selesai QC', beres, ' selesai') + '</div>';
 }
 function poCard(po, extra) {
   var th = poTahap(po);
@@ -7591,18 +7662,15 @@ function poSheet(id) {
   var sizes = poSizes(po); var au = (po.agg && po.agg.ukuran) || {}; if (au['?']) sizes = sizes.concat(['?']);
   var aktifSet = {}; poUkuranAktif(po).forEach(function (s) { aktifSet[s] = 1; });
   var potongSet = {}; poUkuranPotong(po).forEach(function (s) { potongSet[s] = 1; });
+  var selesaiSet = {}; poUkuranSelesai(po).forEach(function (s) { selesaiSet[s] = 1; });
   var cols = [['Target', function (s) { return (po.ukuran || {})[s] || 0; }, po.total], ['Potong', 'potong', t.potong], ['Tugas', 'kirim', t.kirim], ['Setor', 'terima', t.terima], ['OK QC', 'qcOk', t.qcOk]];
   if (po.jenis !== 'pesanan') cols.push(['BigSeller', 'bigseller', t.bigseller]);
   if (!po.total) cols.shift();
   var cell = function (n) { return '<td' + (n ? '' : ' class="z"') + '>' + (n ? nf(n) : '–') + '</td>'; };
   h += '<div class="col gap-s"><div class="label">Per ukuran</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ukuran</th>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' +
-    sizes.map(function (s) { var u = au[s] || {}; return '<tr><td class="b">' + (s === '?' ? 'Tanpa ukuran' : esc(s)) + (potongSet[s] ? '<span class="sz-tanda potong">harus dipotong</span>' : aktifSet[s] ? '<span class="sz-tanda">aktif</span>' : '') + '</td>' + cols.map(function (c) { return cell(typeof c[1] === 'function' ? c[1](s) : (u[c[1]] || 0)); }).join('') + '</tr>'; }).join('') +
+    sizes.map(function (s) { var u = au[s] || {}; return '<tr><td class="b">' + (s === '?' ? 'Tanpa ukuran' : esc(s)) + (potongSet[s] ? '<span class="sz-tanda potong">harus dipotong</span>' : selesaiSet[s] ? '<span class="sz-tanda selesai">selesai QC</span>' : aktifSet[s] ? '<span class="sz-tanda">aktif</span>' : '') + '</td>' + cols.map(function (c) { return cell(typeof c[1] === 'function' ? c[1](s) : (u[c[1]] || 0)); }).join('') + '</tr>'; }).join('') +
     '</tbody><tfoot><tr><td>Total</td>' + cols.map(function (c) { return '<td>' + nf(c[2] || 0) + '</td>'; }).join('') + '</tr></tfoot></table></div>' +
     ((t.reject || t.qcReject || t.qcOffline || t.qcPerbaikan) ? '<div class="chips">' + (t.reject ? '<span class="chip bad">Reject jahit ' + nf(t.reject) + '</span>' : '') + (t.qcReject ? '<span class="chip bad">Reject QC ' + nf(t.qcReject) + '</span>' : '') + (t.qcPerbaikan > 0 ? '<span class="chip warn">Diperbaiki ' + nf(t.qcPerbaikan) + '</span>' : '') + (t.qcOffline ? '<span class="chip">Offline ' + nf(t.qcOffline) + '</span>' : '') + '</div>' : '') + '</div>';
-
-  /* satu ukuran habis terjual sementara ukuran lain masih berjalan: PO baru untuk barang yang sama, PO ini tidak perlu diarsipkan */
-  if (rencanaPotongOwner() && po.status === 'aktif' && po.produkId && t.potong > 0 && (st.produk || []).some(function (p) { return p.id === po.produkId && p.aktif; }))
-    h += '<div class="note"><b>Ada ukuran yang sudah habis terjual?</b><p class="small muted">PO ini tidak perlu diarsipkan dulu. Buat PO baru untuk barang yang sama dan centang ukuran yang habis saja. Ukuran lain di PO ini tetap berjalan.</p><div><button class="btn sm" data-a="poBaruProduk" data-id="' + esc(po.produkId) + '">' + ic('plus', 's') + 'PO baru untuk barang ini</button></div></div>';
 
   /* per maklon */
   var mk = (po.agg && po.agg.maklon) || {}; var mids = Object.keys(mk);
@@ -9377,7 +9445,9 @@ function ringkasGaji(periode, karyawanId) {
   rows.forEach(function (g) { o.gaji += coreNum(g.gaji); o.lemburJam += coreNum(g.lemburJam); o.lembur += coreNum(g.lemburTotal); o.sabtuJam += coreNum(g.sabtuJam); o.sabtu += coreNum(g.sabtuTotal); if (!g.lunas) o.lunas = false; });
   o.bruto = o.gaji + o.lembur + o.sabtu;
   o.cicilan = [];
-  kasbonSemua().forEach(function (kb) { if (kb.jenis === 'harian' && kb.orangId === karyawanId) kb.cicilan.forEach(function (c) { if (c.periode === periode) o.cicilan.push({ kb: kb, c: c }); }); });
+  /* cicilan dipotong di slip periode gajinya; nama periode yang berbeda dicocokkan lewat tanggal potong (coreCicilanPeriode) */
+  var punya = {}; (S.state.gaji || []).forEach(function (g) { if (g.karyawanId === karyawanId && g.periode) punya[g.periode] = 1; }); punya[periode] = 1; punya = Object.keys(punya);
+  kasbonSemua().forEach(function (kb) { if (kb.jenis === 'harian' && kb.orangId === karyawanId) kb.cicilan.forEach(function (c) { if (coreCicilanPeriode(c, punya) === periode) o.cicilan.push({ kb: kb, c: c }); }); });
   o.potongan = 0; o.cicilan.forEach(function (x) { o.potongan += x.c.jumlah; });
   o.terima = o.bruto - o.potongan;
   return o;
@@ -9518,7 +9588,7 @@ function kasbonView() {
   function baris(k, selesai) {
     return '<div class="item" style="align-items:flex-start"><span class="grow"><span class="t">' + rp(k.jumlah) + (selesai ? ' <span class="chip ok">Lunas</span>' : ' · sisa <b>' + rp(k.sisa) + '</b>') + '</span><br><span class="d">' + tgl(k.tanggal) + (k.keterangan ? ' · ' + esc(k.keterangan) : '') + '</span>' +
       (k.cicilan.length ? '<br><span class="d">' + k.cicilan.map(function (c) { return tgl(c.tanggal) + ' ' + rp(c.jumlah) + (c.periode === 'penyesuaian' ? ' (penyesuaian)' : ''); }).join(' · ') + '</span>' : '') + '</span>' +
-      '<span class="row gap-s" style="flex:none">' + (selesai ? '' : '<button class="btn sm pri" data-a="cicilOpen" data-id="' + esc(k.id) + '">Cicil</button>') + '<button class="icon-btn" data-a="kasbonRinci" data-id="' + esc(k.id) + '" aria-label="Rincian kasbon">' + ic('list') + '</button></span></div>';
+      '<span class="row gap-s" style="flex:none">' + (selesai ? '' : '<button class="btn sm pri" data-a="cicilOpen" data-id="' + esc(k.id) + '">Potong</button>') + '<button class="btn sm" data-a="kasbonRinci" data-id="' + esc(k.id) + '">' + ic('edit', 's') + 'Ubah</button></span></div>';
   }
   return '<div class="card row"><span class="grow"><span class="label">Sisa kasbon yang belum lunas</span><br><span class="total-big">' + rp(totSisa) + '</span><br><span class="small muted">' + aktif.length + ' kasbon aktif</span></span><button class="btn pri" data-a="kasbonOpen">' + ic('plus') + 'Catat kasbon</button></div>' +
     '<div class="col gap-s"><div class="label">Kasbon aktif (belum lunas)</div>' + (aktif.length ? grup(aktif, function (g) {
@@ -9534,7 +9604,7 @@ A.kasbonOpen = function (el) {
     return sheetHtml('Catat kasbon baru', '<div class="col" data-form="kasbon">' + hid('id', fid) +
       '<label class="field"><span>Untuk siapa</span><select name="orang">' + orangKasbonOpsi().replace('value="' + pilih + '"', 'value="' + pilih + '" selected') + '</select></label>' +
       '<div class="f-row">' + fNum('Jumlah kasbon (Rp)', 'jumlah', '', 'step="10000"') + fTanggal('Tanggal', 'tanggal') + '</div>' + fText('Keterangan', 'keterangan', '', 'maxlength="200"') +
-      '<p class="xs muted">Kasbon tidak langsung memotong gaji. Potongan dicatat lewat tombol Cicil, lalu muncul di slip minggu itu.</p></div>', footSave('kasbonSave'));
+      '<p class="xs muted">Kasbon tidak langsung memotong gaji. Potongan dicatat lewat tombol Potong kasbon, lalu muncul di slip minggu itu dan mengurangi totalnya.</p></div>', footSave('kasbonSave'));
   });
 };
 A.kasbonSave = function (el) {
@@ -9544,23 +9614,22 @@ A.kasbonSave = function (el) {
   act(el, req('createKasbon', { kasbon: { id: v.id, jenis: p[0], orangId: p[1], jumlah: v.jumlah, tanggal: v.tanggal, keterangan: v.keterangan } })).then(function () { dropForm(f); toast('Kasbon dicatat.'); }).catch(quiet);
 };
 A.cicilOpen = function (el) {
-  var id = el.getAttribute('data-id'); var fid = newId();
+  var id = el.getAttribute('data-id'); var fid = newId(); var tglAwal = el.getAttribute('data-tgl') || todayYmd();
   openSheet(function () {
     var kb = null; kasbonSemua().forEach(function (k) { if (k.id === id) kb = k; });
     if (!kb) return sheetHtml('Cicilan kasbon', emptyBox('Kasbon tidak ditemukan.'));
-    var opsi = daftarPeriode(periodeGaji());
-    return sheetHtml('Cicilan kasbon ' + kb.nama, '<div class="col" data-form="cicil">' + hid('id', fid) + hid('kasbonId', kb.id) +
+    return sheetHtml('Potong kasbon ' + kb.nama, '<div class="col" data-form="cicil">' + hid('id', fid) + hid('kasbonId', kb.id) +
       '<div class="card row" style="background:var(--surface-2)"><span class="grow"><span class="small muted">Pinjaman ' + rp(kb.jumlah) + ' · ' + tgl(kb.tanggal) + '</span><br><span class="b">Sisa ' + rp(kb.sisa) + '</span></span><button type="button" class="btn sm" data-a="cicilLunas" data-v="' + kb.sisa + '">Lunasi sisanya</button></div>' +
-      '<div class="f-row">' + fNum('Jumlah cicilan (Rp)', 'jumlah', '', 'step="10000" max="' + kb.sisa + '"') + fTanggal('Tanggal potong', 'tanggal') + '</div>' +
-      (kb.jenis === 'harian' ? fSelect('Dipotong di slip gaji minggu', 'periode', opsi, coreMingguId(todayYmd())) : '<p class="xs muted">Muncul di slip upah mingguan yang rentangnya memuat tanggal potong.</p>') +
-      fText('Keterangan', 'keterangan', '', 'maxlength="200"') + '</div>', footSave('cicilSave', 'Simpan cicilan'));
+      '<div class="f-row">' + fNum('Jumlah potongan (Rp)', 'jumlah', '', 'step="10000" max="' + kb.sisa + '"') + fTanggal('Tanggal potong', 'tanggal', tglAwal) + '</div>' +
+      '<p class="xs muted">' + (kb.jenis === 'harian' ? 'Dipotong di slip gaji yang rentangnya memuat tanggal potong, dan total diterimanya ikut berkurang.' : 'Muncul di slip upah mingguan yang rentangnya memuat tanggal potong.') + '</p>' +
+      fText('Keterangan', 'keterangan', '', 'maxlength="200"') + '</div>', footSave('cicilSave', 'Simpan potongan'));
   });
 };
 A.cicilLunas = function (el) { var f = el.closest('[data-form]'); $('[name="jumlah"]', f).value = el.getAttribute('data-v'); };
 A.cicilSave = function (el) {
   var f = topForm(); var v = formVals(f);
   if (!(coreNum(v.jumlah) > 0)) return toast('Isi jumlah cicilan.', true);
-  act(el, req('createCicilan', { cicilan: { id: v.id, kasbonId: v.kasbonId, jumlah: v.jumlah, tanggal: v.tanggal, periode: v.periode, keterangan: v.keterangan } })).then(function () { dropForm(f); toast('Cicilan dicatat.'); }).catch(quiet);
+  act(el, req('createCicilan', { cicilan: { id: v.id, kasbonId: v.kasbonId, jumlah: v.jumlah, tanggal: v.tanggal, periode: v.periode, keterangan: v.keterangan } })).then(function () { dropForm(f); toast('Potongan kasbon dicatat. Slipnya ikut berubah.'); }).catch(quiet);
 };
 A.kasbonRinci = function (el) {
   var id = el.getAttribute('data-id');
@@ -9572,11 +9641,33 @@ A.kasbonRinci = function (el) {
       '<dt>Sudah dicicil</dt><dd>' + rp(kb.dicicil) + '</dd><dt>Sisa</dt><dd class="b">' + rp(kb.sisa) + (kb.lunas ? ' <span class="chip ok">Lunas</span>' : '') + '</dd></dl>' +
       '<div class="col gap-s"><div class="label">Riwayat cicilan</div><div class="card flush"><div class="list">' + (kb.cicilan.length ? kb.cicilan.map(function (c) {
         jalan += c.jumlah;
-        return '<div class="item"><span class="grow"><span class="t">' + rp(c.jumlah) + '</span><br><span class="d">' + tgl(c.tanggal) + (c.periode && c.periode !== 'penyesuaian' && kb.jenis === 'harian' ? ' · slip ' + esc(c.periode) : '') + (c.keterangan ? ' · ' + esc(c.keterangan) : '') + ' · sisa ' + rp(Math.max(0, kb.jumlah - jalan)) + '</span></span>' +
+        return '<div class="item"><span class="grow"><span class="t">' + rp(c.jumlah) + '</span><br><span class="d">' + tgl(c.tanggal) + (c.periode === 'penyesuaian' ? ' · penyesuaian dari aplikasi lama' : '') + (c.keterangan ? ' · ' + esc(c.keterangan) : '') + ' · sisa ' + rp(Math.max(0, kb.jumlah - jalan)) + '</span></span>' +
+          (c.periode === 'penyesuaian' ? '' : '<button class="icon-btn" data-a="kasbonUbah" data-id="' + esc(c.id) + '" aria-label="Ubah cicilan">' + ic('edit') + '</button>') +
           '<button class="icon-btn" data-a="kasbonDel" data-id="' + esc(c.id) + '" aria-label="Hapus cicilan">' + ic('trash') + '</button></div>';
       }).join('') : emptyBox('Belum ada cicilan.')) + '</div></div></div>' +
-      (kb.cicilan.length ? '' : '<button class="btn ghost sm" style="color:var(--bad)" data-a="kasbonDel" data-id="' + esc(kb.id) + '">' + ic('trash', 's') + 'Hapus kasbon ini</button>'));
+      '<div class="row wrap gap-s"><button class="btn sm" data-a="kasbonUbah" data-id="' + esc(kb.id) + '">' + ic('edit', 's') + 'Ubah kasbon</button>' +
+      (kb.lunas ? '' : '<button class="btn sm pri" data-a="cicilOpen" data-id="' + esc(kb.id) + '">Potong kasbon</button>') +
+      (kb.cicilan.length ? '' : '<button class="btn ghost sm" style="color:var(--bad)" data-a="kasbonDel" data-id="' + esc(kb.id) + '">' + ic('trash', 's') + 'Hapus kasbon ini</button>') + '</div>');
   }, { live: true });
+};
+/* Ubah satu kasbon atau satu cicilan: jumlah, tanggal, keterangan. Aturannya dijaga server (ubahKasbon). */
+A.kasbonUbah = function (el) {
+  var id = el.getAttribute('data-id');
+  openSheet(function () {
+    var kb = null, c = null; kasbonSemua().forEach(function (k) { if (k.id === id) kb = k; k.cicilan.forEach(function (x) { if (x.id === id) { kb = k; c = x; } }); });
+    if (!kb) return sheetHtml('Ubah kasbon', emptyBox('Catatan ini sudah tidak ada.'));
+    var rec = c || kb;
+    return sheetHtml((c ? 'Ubah potongan ' : 'Ubah kasbon ') + kb.nama, '<div class="col" data-form="kasbonUbah">' + hid('id', rec.id) + hid('expectedJumlah', rec.jumlah) +
+      '<p class="small muted">' + (c ? 'Potongan untuk pinjaman ' + rp(kb.jumlah) + ' · ' + tgl(kb.tanggal) + '. Paling banyak ' + rp(kb.sisa + c.jumlah) + '.' : (kb.dicicil ? 'Sudah dicicil ' + rp(kb.dicicil) + '. Jumlah kasbon tidak boleh kurang dari itu.' : 'Belum ada cicilan untuk kasbon ini.')) + '</p>' +
+      '<div class="f-row">' + fNum(c ? 'Jumlah potongan (Rp)' : 'Jumlah kasbon (Rp)', 'jumlah', rec.jumlah, 'step="10000"') + fTanggal(c ? 'Tanggal potong' : 'Tanggal', 'tanggal', rec.tanggal) + '</div>' + fText('Keterangan', 'keterangan', rec.keterangan, 'maxlength="200"') +
+      (c ? '<p class="xs muted">Potongan muncul di slip yang rentangnya memuat tanggal potong.</p>' : '') + '</div>', footSave('kasbonUbahSave'));
+  });
+};
+A.kasbonUbahSave = function (el) {
+  var f = topForm(); var v = formVals(f);
+  if (!(coreNum(v.jumlah) > 0)) return toast('Isi jumlahnya.', true);
+  if (!v.tanggal) return toast('Isi tanggalnya.', true);
+  act(el, req('ubahKasbon', { id: v.id, jumlah: v.jumlah, tanggal: v.tanggal, keterangan: v.keterangan, expectedJumlah: v.expectedJumlah })).then(function () { dropForm(f); toast('Perubahan disimpan. Slipnya ikut berubah.'); }).catch(quiet);
 };
 A.kasbonDel = function (el) {
   var id = el.getAttribute('data-id');
@@ -9732,6 +9823,15 @@ function slipUpahMingguan(u, start, end) {
     }), summary: summary, sections: seksi, signatures: [{ label: 'Disiapkan oleh', name: 'Owner' }, { label: 'Penerima', name: u.nama }] },
     n: items.length, belum: belum, tanpaHarga: tanpaHarga, bersih: totalUpah - potongan };
 }
+/* kasbon tukang (maklon jahit / tukang potong) yang belum lunas, yang paling lama lebih dulu */
+function kasbonAktifTukang(id) { return kasbonSemua().filter(function (k) { return k.jenis === 'maklon' && k.orangId === id && !k.lunas; }).sort(function (a, b) { return String(a.tanggal) < String(b.tanggal) ? -1 : 1; }); }
+/* cicilan kasbon tukang yang tercatat di minggu berjalan: diusulkan sebagai potongan saat membayar upah, supaya tidak diketik dua kali */
+function cicilanMingguIni(u) {
+  var per = corePeriode(coreMingguId(todayYmd())), n = 0; if (!per || !u) return 0;
+  kasbonSemua().forEach(function (kb) { if (kb.jenis === 'maklon' && kb.orangId === u.id) kb.cicilan.forEach(function (c) { if (c.periode !== 'penyesuaian' && String(c.tanggal) >= per.start && String(c.tanggal) <= per.end) n += c.jumlah; }); });
+  if (((S.state || {}).upah || []).some(function (s) { return s.pegawaiId === u.id && coreNum(s.potongan) > 0 && String(s.tanggal) >= per.start && String(s.tanggal) <= per.end; })) return 0;
+  return n;
+}
 function upahMingguView(division) {
   slipPasangCss();
   var st = S.state; var pekerja = st.users.filter(function (u) { return division ? u.divisi === division : u.divisi === 'jahit' || u.divisi === 'potong'; });
@@ -9753,9 +9853,12 @@ function upahMingguView(division) {
   S.slipPdfRequest = { action: 'makeWeeklyPdf', payload: { pegawaiId: u.id, start: per.start, end: per.end } };
   if (!hasil.n && !hasil.reviewCount) { S.slipDok = []; S.slipPdfRequest = null; return h + '<div class="card">' + emptyBox('Tidak ada pekerjaan ' + u.nama + ' pada ' + tglSlip(per.start) + ' — ' + tglSlip(per.end) + '.') + '</div>' + catatanDipangkas(); }
   S.slipDok = [hasil.model];
+  var kasbonAktif = kasbonAktifTukang(u.id), sisaKasbon = 0; kasbonAktif.forEach(function (k) { sisaKasbon += k.sisa; });
   h += '<div class="card row wrap"><span class="grow"><span class="label">' + esc(u.nama) + ' · ' + hasil.n + ' catatan</span><br><span class="total-big">' + rp(hasil.bersih) + '</span><br><span class="small muted">' +
-    (hasil.belum ? 'Masih ada alokasi upah belum dibayar.' : 'Tidak ada alokasi upah belum dibayar pada catatan terverifikasi.') + (hasil.reviewCount ? ' ' + hasil.reviewCount + ' catatan masih perlu diperiksa.' : '') + '</span></span>' +
+    (hasil.belum ? 'Masih ada alokasi upah belum dibayar.' : 'Tidak ada alokasi upah belum dibayar pada catatan terverifikasi.') + (hasil.reviewCount ? ' ' + hasil.reviewCount + ' catatan masih perlu diperiksa.' : '') +
+    (hasil.potonganKasbon ? ' Sudah dipotong kasbon ' + rp(hasil.potonganKasbon) + '.' : '') + (sisaKasbon > 0 ? ' Sisa kasbon ' + rp(sisaKasbon) + '.' : '') + '</span></span>' +
     '<span class="row wrap gap-s">' + (hasil.belum ? '<button class="btn" data-a="upahOpen" data-id="' + esc(u.id) + '">' + ic('wallet') + 'Bayar upah</button>' : '') +
+    (kasbonAktif.length ? '<button class="btn" data-a="cicilOpen" data-id="' + esc(kasbonAktif[0].id) + '" data-tgl="' + esc(todayYmd() >= per.start && todayYmd() <= per.end ? todayYmd() : per.end) + '">Potong kasbon</button>' : '') +
     '<button class="btn" data-a="kasbonOpen" data-v="maklon:' + esc(u.id) + '">Catat kasbon</button>' + slipDocumentActions(true) + '</span></div>';
   try { h += '<div class="slip-pratinjau">' + slipLembar([hasil.model]) + '</div>'; } catch (e) { h += '<div class="note bad">' + esc(e.message) + '</div>'; }
   return h + catatanDipangkas();
@@ -10534,13 +10637,15 @@ function openUpah(pid) {
     var u = D.user[pid]; if (!u) return sheetHtml('Bayar upah', emptyBox('Pegawai tidak ditemukan.'));
     var items = unpaidOf(u).sort(function (a, b) { return String(a.tanggal) < String(b.tanggal) ? -1 : 1; });
     if (!items.length) return sheetHtml('Bayar upah', payrollNotice(u) + emptyBox('Tidak ada upah yang belum dibayar untuk ' + u.nama + '.'));
+    var potAwal = cicilanMingguIni(u);
     return sheetHtml('Bayar upah ' + u.nama, '<div class="col" data-form="upah">' + hid('id', fid) + hid('pegawaiId', u.id) + payrollNotice(u) +
       '<p class="small muted">Dasar upah mengikuti hitung fisik; setelah QC mengikuti barang OK. Perbaikan masuk pada tanggal selesai dengan tarif asal.</p>' +
       '<div class="row"><span class="label grow">Pilih yang dibayar</span><button type="button" class="btn ghost sm" data-a="upahAll">Pilih / kosongkan semua</button></div>' +
       '<div class="card flush"><div class="list">' + items.map(function (i) {
         return '<label class="item"><input type="checkbox" checked data-upah="' + esc(i.id) + '" data-rp="' + (i.total * i.rate) + '" data-qty="' + i.total + '" style="width:20px;height:20px;accent-color:var(--accent);flex:none"><span class="grow"><span class="t">' + esc(poNama(i.poId)) + '</span><br><span class="d">' + esc(i.ref) + ' · ' + tgl(i.tanggal) + ' · ' + nf(i.total) + ' pcs × ' + rp(i.rate) + '</span></span><span class="b num">' + rp(i.total * i.rate) + '</span></label>';
       }).join('') + '</div></div>' +
-      '<div class="f-row">' + fNum('Potongan / kasbon (Rp)', 'potongan', '', 'step="1000"') + fTanggal('Tanggal bayar', 'tanggal') + '</div>' + fCatatan() +
+      '<div class="f-row">' + fNum('Potongan / kasbon (Rp)', 'potongan', potAwal || '', 'step="1000"') + fTanggal('Tanggal bayar', 'tanggal') + '</div>' +
+      (potAwal ? '<p class="xs muted">Potongan diisi dari potongan kasbon minggu ini (' + rp(potAwal) + '). Ubah kalau tidak sesuai.</p>' : '') + fCatatan() +
       '<div class="sum-line"><span><span data-upah-n>0</span> item · <span data-upah-qty>0</span> pcs</span><span>Dibayar <b data-upah-sum>Rp 0</b></span></div></div>', footSave('upahSave', 'Buat slip upah'));
   });
 }

@@ -39,10 +39,19 @@ function coreWeeklySlipModel(state, worker, start, end) {
     var sizes = coreMap(r.ukuran); Object.keys(sizes).forEach(function (size) { g.ukuran[size] = coreNum(g.ukuran[size]) + coreNum(sizes[size]); });
   });
   ordered.sort(function (a, b) { return String(a.tanggal).localeCompare(String(b.tanggal)) || String(a.title).localeCompare(String(b.title)) || String(a.ref).localeCompare(String(b.ref)); });
-  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0;
-  loans.forEach(function (loan) { if (loan.jenis === 'maklon' && loan.orangId === worker.id) loan.cicilan.forEach(function (r) { if (r.periode !== 'penyesuaian' && String(r.tanggal) >= per.start && String(r.tanggal) <= per.end) { deduction += r.jumlah; repayments.push([coreSlipDate(r.tanggal),r.keterangan || loan.keterangan || 'Cicilan kasbon',coreRupiah(r.jumlah)]); } }); });
+  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0, loanCount = 0, outstanding = 0;
+  /* Sisa kasbon ditulis menurut keadaan pada akhir periode slip, supaya slip minggu lalu tidak ikut berubah oleh cicilan minggu ini. */
+  loans.forEach(function (loan) {
+    if (loan.jenis !== 'maklon' || loan.orangId !== worker.id || (loan.tanggal && String(loan.tanggal) > per.end)) return;
+    var repaid = 0; loanCount++;
+    loan.cicilan.forEach(function (r) {
+      if (String(r.tanggal) <= per.end) repaid += r.jumlah;
+      if (r.periode !== 'penyesuaian' && String(r.tanggal) >= per.start && String(r.tanggal) <= per.end) { deduction += r.jumlah; repayments.push([coreSlipDate(r.tanggal),r.keterangan || loan.keterangan || 'Cicilan kasbon',coreRupiah(r.jumlah)]); }
+    });
+    outstanding += Math.max(0, loan.jumlah - repaid);
+  });
   var sections = [];
-  if (repayments.length) sections.push({ title:'Rincian cicilan kasbon periode ini',columns:[{label:'Tanggal'},{label:'Keterangan'},{label:'Jumlah',align:'right'}],rows:repayments });
+  if (repayments.length) sections.push({ title:'Rincian potongan kasbon periode ini',columns:[{label:'Tanggal'},{label:'Keterangan'},{label:'Jumlah',align:'right'}],rows:repayments });
   if (review.length) sections.push({ title:'Perlu ditinjau — tidak masuk jumlah tersedia untuk dibayar',columns:[{label:'Tanggal',width:15},{label:'Pekerjaan',width:35},{label:'Jumlah',width:12},{label:'Catatan',width:38}],rows:review });
   var materials = {}, materialByName = {};
   (st.stokRingkas || st.bahan || []).forEach(function (b) { materialByName[coreNormBahan(b.nama)] = b; });
@@ -67,13 +76,15 @@ function coreWeeklySlipModel(state, worker, start, end) {
   summary.push({label:'Upah pekerjaan periode ini',value:coreRupiah(totals.gross)});
   summary.push({label:'Alokasi pekerjaan sudah dibayar',value:coreRupiah(totals.paid)});
   summary.push({label:'Tersedia untuk dibayar',value:coreRupiah(totals.unpaid),emphasis:true});
-  if (deduction) { summary.push({label:'Cicilan kasbon tercatat pada periode ini',value:coreRupiah(deduction)}); summary.push({label:'Upah periode setelah cicilan (ringkasan)',value:coreRupiah(totals.gross - deduction)}); }
+  /* Kasbon seperti di aplikasi lama: potongan minggu ini mengurangi upah, dan sisa kasbonnya selalu tertulis. */
+  if (deduction) { summary.push({label:'Potongan kasbon periode ini',value:'− ' + coreRupiah(deduction)}); summary.push({label:'Upah bersih setelah potongan kasbon',value:coreRupiah(totals.gross - deduction),emphasis:true}); }
+  if (outstanding > 0 || deduction) summary.push({label:'Sisa kasbon' + (deduction ? ' setelah potongan' : ' (belum dipotong periode ini)'),value:coreRupiah(outstanding)});
   if (totals.review) summary.push({label:'Catatan yang perlu ditinjau',value:coreRibuan(totals.review)});
   if (totals.overpaid) summary.push({label:'Pembayaran melebihi hak setelah QC',value:coreRibuan(totals.overpaid) + ' pcs'});
   var business = settings.kopSlip || settings.namaUsaha || 'SOLDIER APPAREL';
   return { model:{layout:'weekly-a4',title:'Slip Upah ' + (sewing ? 'Jahit' : 'Potong'),reference:(sewing ? 'JHT' : 'PTG') + ' / ' + start.replace(/-/g,'') + '-' + end.replace(/-/g,'') + ' / ' + String(worker.id).slice(0,8),recipient:worker.nama || '-',recipientLabel:sewing ? 'Nama penjahit' : 'Tukang potong',period:coreSlipDate(start) + ' — ' + coreSlipDate(end),
     columns:[{label:'Tanggal',width:13},{label:'Rincian pekerjaan',width:45},{label:'Jumlah',align:'right',width:11},{label:'Tarif / pcs',align:'right',width:13},{label:'Upah',align:'right',width:18}],rows:rows,summary:summary,sections:sections,signatures:[{label:'Disiapkan oleh',name:business},{label:'Penerima',name:worker.nama || '-'}]},
-    n:ordered.length + review.length,belum:totals.pending,tanpaHarga:totals.missingRate,bersih:totals.gross - deduction,totalGross:totals.gross,paidAmount:totals.paid,unpaidAmount:totals.unpaid,reviewCount:totals.review,totalQty:totals.qty };
+    n:ordered.length + review.length,belum:totals.pending,tanpaHarga:totals.missingRate,bersih:totals.gross - deduction,totalGross:totals.gross,paidAmount:totals.paid,unpaidAmount:totals.unpaid,reviewCount:totals.review,totalQty:totals.qty,potonganKasbon:deduction,sisaKasbon:outstanding,jumlahKasbon:loanCount };
 }
 function coreGajiSlipModel(state, employee, period) {
   var st = state || {}, per = corePeriode(period);
@@ -81,8 +92,10 @@ function coreGajiSlipModel(state, employee, period) {
   coreSlipRange(per.start, per.end);
   var records = (st.gaji || []).filter(function (g) { return g.periode === period && g.karyawanId === employee.id; }), byDate = {}, salary = 0, overtime = 0, saturday = 0, hours = 0, saturdayHours = 0;
   records.forEach(function (g) { byDate[g.tanggal] = g; salary += coreNum(g.gaji); overtime += coreNum(g.lemburTotal); saturday += coreNum(g.sabtuTotal); hours += coreNum(g.lemburJam); saturdayHours += coreNum(g.sabtuJam); });
-  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0, outstanding = 0;
-  loans.forEach(function (loan) { if (loan.jenis !== 'harian' || loan.orangId !== employee.id) return; outstanding += loan.sisa; var running = 0; loan.cicilan.forEach(function (r) { running += r.jumlah; if (r.periode !== period) return; deduction += r.jumlah; repayments.push([coreSlipDate(loan.tanggal),(loan.keterangan || 'Kasbon') + ' · Pinjaman ' + coreRupiah(loan.jumlah) + (r.keterangan ? ' · ' + r.keterangan : ''),'− ' + coreRupiah(r.jumlah),coreRupiah(Math.max(0,loan.jumlah-running))]); }); });
+  var loans = coreKasbon(st.kasbon || []), repayments = [], deduction = 0, outstanding = 0, periods = {};
+  /* cicilan dipotong di slip periode gajinya; lihat coreCicilanPeriode untuk cicilan yang nama periodenya berbeda */
+  (st.gaji || []).forEach(function (g) { if (g.karyawanId === employee.id && g.periode) periods[g.periode] = 1; }); periods[period] = 1; periods = Object.keys(periods);
+  loans.forEach(function (loan) { if (loan.jenis !== 'harian' || loan.orangId !== employee.id) return; outstanding += loan.sisa; var running = 0; loan.cicilan.forEach(function (r) { running += r.jumlah; if (coreCicilanPeriode(r, periods) !== period) return; deduction += r.jumlah; repayments.push([coreSlipDate(loan.tanggal),(loan.keterangan || 'Kasbon') + ' · Pinjaman ' + coreRupiah(loan.jumlah) + (r.keterangan ? ' · ' + r.keterangan : ''),'− ' + coreRupiah(r.jumlah),coreRupiah(Math.max(0,loan.jumlah-running))]); }); });
   var gross = salary + overtime + saturday, summary = [{label:'Total gaji harian',value:coreRupiah(salary)}];
   if (overtime > 0) summary.push({label:'Lembur biasa (' + hours + ' jam)',value:coreRupiah(overtime)});
   if (saturday > 0) summary.push({label:'Lembur Sabtu (' + saturdayHours + ' jam)',value:coreRupiah(saturday)});
