@@ -258,6 +258,16 @@ test('group print and PDF preserve individual order models and the revisions sel
   assert.equal(h.requests.length,0,'printing does not create payment or receipt events');
 });
 
+test('the combined supplier picture starts from the unfinished orders of the supplier and opens the picture for the chosen ones',()=>{
+  const h=harness();h.form({},'pembelian');
+  h.run("currentForm._commerceGroupRows=[{id:'a',revision:'ra',status:'dp',supplierSnapshot:{id:'s'}},{id:'b',revision:'rb',status:'selesai',supplierSnapshot:{id:'s'}},{id:'c',revision:'rc',status:'batal',supplierSnapshot:{id:'s'}},{id:'d',revision:'rd',status:'pending',supplierSnapshot:{id:'s'}},{id:'e',revision:'re',status:'pending',supplierSnapshot:{id:'lain'}}];");
+  assert.deepEqual(h.json("commerceGroupAwal(currentForm,'s')"),['a','d'],'finished, cancelled and other suppliers are not ticked');
+  h.run("var shown=[];commerceShareShow=function(ids,fresh){shown.push([ids,fresh]);};currentForm._commerceGroupIds=['d','a'];A.commerceGroupShare(null);");
+  assert.deepEqual(h.json('shown'),[[['d','a'],false]]);assert.equal(h.requests.length,0,'making the picture records nothing');
+  h.run("currentForm._commerceGroupIds=[];A.commerceGroupShare(null);");assert.equal(h.json('shown').length,1);assert.match(h.json('messages').at(-1).text,/Pilih 1 sampai 20 order/);
+  assert.match(html,/data-a="commerceGroupOpen">' \+ ic\('img'\) \+ 'Gambar gabungan<\/button>/);assert.match(html,/class="tools" style="align-items:flex-end">' \+ fSelect\('Status order'/);
+  assert.match(html,/\['DP \/ sudah dibayar', uang\(m\.dibayar\), HIJAU\]/);assert.doesNotMatch(html,/Cetak gabungan/);
+});
 test('an open group-print selection cannot export after the actor or session changes',async()=>{
   for(const change of ["S.token='new-session'","S.state.me={id:'other',divisi:'owner'}","S.state.me.divisi='potong'"]){
     const h=harness();h.form({},'pembelian');h.run("currentForm._commerceGroupRows=[{id:'a',revision:'r',supplierSnapshot:{id:'s'}}];currentForm._commerceGroupIds=['a'];"+change);
