@@ -25,7 +25,7 @@ const turn=()=>new Promise(r=>setImmediate(r));
 
 test('dashboard cards do not fetch commerce or include commerce in login',()=>{
   const h=harness(),markup=h.run('commerceHomeCards()');assert.equal(h.requests.length,0);for(const title of ['HPP produk','Pembelian produk','Nota penjualan'])assert.match(markup,new RegExp(title));
-  assert.match(html,/evHtml[^\n]+commerceHomeCards\(\)/);assert.ok(!html.slice(html.indexOf('function beginSessionLoad'),html.indexOf('function beginSessionLoad')+2500).includes('getCommerceState'));
+  assert.match(html,/berandaCatatan\(\)[^\n]+commerceHomeCards\(\)/);assert.ok(!html.slice(html.indexOf('function beginSessionLoad'),html.indexOf('function beginSessionLoad')+2500).includes('getCommerceState'));
 });
 test('first view lazily requests only its module and coalesces concurrent taps',async()=>{
   const h=harness();const first=h.run("commerceFetch('pembelian',false)"),second=h.run("commerceFetch('pembelian',true)");assert.equal(first,second);assert.equal(h.requests.length,1);assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{module:'pembelian'});h.requests[0].resolve(reply('pembelian',{suppliers:[],products:[],orders:[]}));await first;assert.equal(h.run("commerceData('pembelian').orders.length"),0);assert.equal(h.run("commerceEntry('nota').tried"),false);
