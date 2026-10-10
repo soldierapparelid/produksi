@@ -372,7 +372,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261010-form-hitung-1515';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261010-qc-per-setoran-1516';</script>
 <script>
 (function () {
 'use strict';
@@ -394,7 +394,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.15';
+var APP_VERSION = '1.5.16';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -884,20 +884,22 @@ function coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras) {
       if (u.stokLedger < 0 && u.legacyBigseller > 0) p.ledgerIssues.push(s + ': input BigSeller lama melebihi bukti barang OK; periksa pencatatan, jumlah historis tetap disimpan.');
       Object.keys(u.maklon).forEach(function (w) { var m = u.maklon[w]; m.sisa = m.kirim - m.diterima - m.reject; if (m.sisa < 0 || m.diajukan > m.sisa) u.issues.push('Setoran melebihi penugasan pekerja ' + w + '.'); });
       if (u.kirim > u.target || u.diterima + u.rejectJahit > u.target || strictQcRemaining < 0 || u.qcPerbaikan < 0 || (u.stokLedger < 0 && !u.legacyBigseller)) u.issues.push('Jumlah produksi tidak seimbang.');
-      u.readyQC = u.targetBaik > 0 && u.diterima === u.targetBaik && u.sisaMaklon === 0 && u.diajukan === 0 && !u.issues.length && !p.issues.length;
-      u.complete = u.readyQC && u.siapQC === 0 && u.qcPerbaikan === 0 && !u.legacyUnlinkedQC;
+      /* countComplete: seluruh ukuran ini sudah kembali dari jahit dan dihitung. readyQC: hitungan yang sudah diterima
+         boleh diperiksa QC sekarang, per slip, tanpa menunggu sisa jahitan (penjahit menyetor bertahap). */
+      u.countComplete = u.targetBaik > 0 && u.diterima === u.targetBaik && u.sisaMaklon === 0 && u.diajukan === 0 && !u.issues.length && !p.issues.length;
+      u.readyQC = u.diterima > 0 && !u.issues.length && !p.issues.length;
+      u.complete = u.countComplete && u.siapQC === 0 && u.qcPerbaikan === 0 && !u.legacyUnlinkedQC;
       if (u.readyQC && u.siapQC > 0) p.readyQC = true;
       if (!u.complete) p.complete = false;
     });
     keys.forEach(function (s) { p.ukuran[s].issues.forEach(function (issue) { p.issues.push(s + ': ' + issue); }); });
-    if (p.issues.length) { p.readyQC = false; p.complete = false; keys.forEach(function (s) { p.ukuran[s].readyQC = false; p.ukuran[s].complete = false; }); }
+    if (p.issues.length) { p.readyQC = false; p.complete = false; keys.forEach(function (s) { p.ukuran[s].readyQC = false; p.ukuran[s].countComplete = false; p.ukuran[s].complete = false; }); }
     if (p.pendingCutSizes && p.pendingCutSizes.length) p.complete = false;
-    if (!corePoCountComplete(p)) p.readyQC = false;
   });
   return out;
 }
-/* QC starts only after the entire PO has returned from sewing and been counted.
-   Individual size balances remain available for precise inspection records. */
+/* True once the entire PO has returned from sewing and been counted. It no longer gates QC
+   (counted receipts are inspected per slip); it still tells the screens whether sewing is finished. */
 function corePoCountComplete(flow) {
   if (!flow || (flow.issues || []).length || flow.pendingCutPlans || (flow.pendingCutSizes || []).length) return false;
   var active = Object.keys(flow.ukuran || {}).filter(function (s) { return coreNum(flow.ukuran[s].target) > 0; });
@@ -1193,7 +1195,7 @@ function createCore(store, env) {
   function copy(r) { var o = {}; for (var k in r) o[k] = r[k]; return o; }
   function validateWorkers(wf) {
     store.read('SlipKirim').concat(store.read('SlipSetor')).forEach(function (r) { var worker = findUser(r.maklonId), p = wf[r.poId]; if (p && (!worker || worker.divisi !== 'jahit')) { p.issues.push('Pekerja asal ' + r.id + ' tidak dikenal.'); p.readyQC = false; p.complete = false; Object.keys(p.ukuran).forEach(function (s) { p.ukuran[s].readyQC = false; p.ukuran[s].complete = false; }); } });
-    if (typeof coreCutPlanRows === 'function') coreCutPlanRows(store.read('RencanaPotong'), store.read('Potong')).forEach(function (r) { var p = wf[r.poId]; if (p && r.status === 'siap') { p.pendingCutPlans = true; p.readyQC = false; p.complete = false; } });
+    if (typeof coreCutPlanRows === 'function') coreCutPlanRows(store.read('RencanaPotong'), store.read('Potong')).forEach(function (r) { var p = wf[r.poId]; if (p && r.status === 'siap') { p.pendingCutPlans = true; p.complete = false; } });
     return wf;
   }
   function legacyExtras() { return { gudangLama: store.read('GudangLama'), settlements: store.read('LegacySettlement'), historyCorrections: store.read('KoreksiRiwayat') }; }
@@ -2515,7 +2517,7 @@ function createCore(store, env) {
     var po = openPO(r.poId);
     var wf = poClean(po), setorId = String(r.setorId || ''), repairQcId = String(r.repairQcId || '');
     var base = repairQcId ? findRow('QC', repairQcId) : null;
-    if (!repairQcId && !corePoCountComplete(wf)) fail('PO belum lengkap: seluruh hasil potong harus selesai dijahit dan dihitung fisik sebelum masuk antrean QC.');
+    /* QC dicatat per slip yang sudah dihitung; sisa jahitan PO yang belum disetor tidak menahannya. */
     if (r.dariPerbaikan && !repairQcId) fail('Pilih catatan QC asal perbaikan.');
     if (repairQcId) { if (!base || base.repairQcId || base.poId !== po.id) fail('Asal perbaikan tidak sah.'); if (setorId && setorId !== base.setorId) fail('Hitungan asal perbaikan tidak cocok.'); setorId = base.setorId; }
     var slip = findRow('SlipSetor', setorId);
@@ -2539,7 +2541,7 @@ function createCore(store, env) {
       var previous = {};
       store.read('QC').forEach(function (q) { if (q.setorId !== setorId || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, slip, []); previous = sumMaps([previous, maps.ok, maps.offline, maps.perbaikan, maps.reject]); });
       Object.keys(inspected).forEach(function (s) {
-        var u = wf.ukuran[s]; if (!u || !u.readyQC) fail('Ukuran ' + s + ' belum lengkap dihitung atau masih ada penugasan/setoran tertunda.');
+        var u = wf.ukuran[s]; if (!u || !u.readyQC) fail('Ukuran ' + s + ' belum punya hitungan fisik yang bisa diperiksa.');
         if (coreLegacyQcBlocked(slip, store.read('QC'), s)) fail('Hitungan lama ini memiliki QC tanpa hubungan pasti. Cocokkan sumber historis sebelum memeriksa ulang.');
         if (previous[s]) fail('Hitungan ukuran ' + s + ' pada slip ini sudah di-QC.');
         if (inspected[s] !== coreNum(basis[s])) fail('OK + offline + perbaikan + reject ukuran ' + s + ' harus tepat seluruh hitungan slip (' + coreNum(basis[s]) + ').');
@@ -5729,7 +5731,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.15';
+var UI_VERSION = '1.5.16';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -6994,7 +6996,7 @@ function qcBalance(po) {
   var flow = workflowFor(po), out = { ready: 0, waiting: 0, readyUkuran: {}, waitingUkuran: {} };
   Object.keys(flow.ukuran).forEach(function (size) {
     var u = flow.ukuran[size], qty = pos(u.siapQC); if (!qty) return;
-    if (u.readyQC && corePoCountComplete(flow)) { out.ready += qty; out.readyUkuran[size] = qty; }
+    if (u.readyQC) { out.ready += qty; out.readyUkuran[size] = qty; }
     else { out.waiting += qty; out.waitingUkuran[size] = qty; }
   });
   /* Old-server snapshots are never advertised as ready before the contract is verified. */
@@ -7003,7 +7005,7 @@ function qcBalance(po) {
 }
 function qcEntryButton(po) {
   var ready = antreanQC().some(function (x) { return x.s.poId === po.id; }) || repairQueue(po.id).length > 0;
-  return '<button class="btn' + (ready ? ' pri' : '') + '" data-a="qcOpen" data-id="' + esc(po.id) + '"' + (ready ? '' : ' disabled title="Tunggu seluruh PO selesai dijahit dan dihitung fisik"') + '>' + ic('shield') + (ready ? 'Input QC' : 'QC belum siap') + '</button>';
+  return '<button class="btn' + (ready ? ' pri' : '') + '" data-a="qcOpen" data-id="' + esc(po.id) + '"' + (ready ? '' : ' disabled title="Belum ada setoran yang sudah dihitung dan menunggu QC"') + '>' + ic('shield') + (ready ? 'Input QC' : 'QC belum siap') + '</button>';
 }
 function poTahap(po) {
   var t = T(po), w = workflowFor(po);
@@ -7014,7 +7016,7 @@ function poTahap(po) {
   if (t.qcPerbaikan > 0) return { k: 'qc', label: 'Dalam perbaikan QC', cls: 'warn' };
   if (qcBalance(po).ready > 0) return { k: 'qc', label: 'Siap diperiksa QC', cls: 'info' };
   if (t.diajukan > 0) return { k: 'cek', label: 'Menunggu hitung fisik', cls: 'warn' };
-  if (qcBalance(po).waiting > 0) return { k: 'lengkap', label: 'Sebagian dihitung · menunggu jahit lengkap', cls: 'warn' };
+  if (qcBalance(po).waiting > 0) return { k: 'lengkap', label: 'Dihitung · QC tertahan', cls: 'warn' };
   if (t.sisaMaklon > 0) return { k: 'maklon', label: 'Di maklon', cls: 'info' };
   if (t.siapKirim > 0) return { k: 'kirim', label: 'Siap ditugaskan ke maklon', cls: 'warn' };
   return { k: 'potong', label: 'Belum dipotong', cls: '' };
@@ -7423,10 +7425,10 @@ VIEWS.beranda = function () {
     kpi('PO aktif', nf(aktif.length), 'sedang berjalan', 'po:') +
     kpi('Di maklon', nf(k.maklon), 'pcs belum disetor', 'po:maklon') +
     kpi('Menunggu dicek', nf(k.cekN), k.cekN ? nf(k.cekPcs) + ' pcs setoran' : 'tidak ada setoran baru', 'po:cek', k.cekN > 0) +
-    kpi('Siap QC', nf(k.qc), 'pcs pada PO lengkap', 'po:qc') +
+    kpi('Siap QC', nf(k.qc), 'pcs sudah dihitung', 'po:qc') +
     kpi('Belum BigSeller', nf(k.bs), 'pcs OK QC', 'po:jual') +
     kpi('Upah belum dibayar', rp(k.upah), 'potong + jahit', 'upah', false, true) + '</div>';
-  if (k.qcWait) kpis += '<div class="note row"><span class="grow"><b>' + nf(k.qcWait) + ' pcs menunggu seluruh PO lengkap.</b> Barang sudah dihitung; QC dimulai setelah seluruh PO selesai dijahit dan dihitung fisik.</span><button class="btn sm" data-a="kpiGo" data-id="po:lengkap">Lihat PO</button></div>';
+  if (k.qcWait) kpis += '<div class="note row"><span class="grow"><b>' + nf(k.qcWait) + ' pcs sudah dihitung tetapi QC-nya tertahan.</b> Ada catatan lama yang perlu diperiksa dulu.</span><button class="btn sm" data-a="kpiGo" data-id="po:lengkap">Lihat PO</button></div>';
 
   var todo = tindakan();
   var todoHtml = todo.length ? todo.slice(0, 8).map(function (x) {
@@ -7434,7 +7436,7 @@ VIEWS.beranda = function () {
       '<button class="btn sm" data-a="' + x.a + '" data-id="' + esc(x.id) + '"' + (x.s ? ' data-s="' + x.s + '" data-v="0"' : '') + '>' + x.btn + '</button></div>';
   }).join('') + (todo.length > 8 ? '<div class="item"><span class="d">' + (todo.length - 8) + ' hal lain ada di tab PO.</span></div>' : '') : emptyBox('Tidak ada yang menunggu tindakan.');
 
-  var flow = [['Belum dikirim', k.kirim, 'c-potong'], ['Di maklon', k.maklon, 'c-maklon'], ['Menunggu dicek', k.cekPcs, 'c-cek'], ['Sebagian dihitung · menunggu jahit lengkap', k.qcWait, 'c-qc-wait'], ['Siap QC', k.qc, 'c-qc'], ['Belum BigSeller', k.bs, 'c-jual']];
+  var flow = [['Belum dikirim', k.kirim, 'c-potong'], ['Di maklon', k.maklon, 'c-maklon'], ['Menunggu dicek', k.cekPcs, 'c-cek'], ['Dihitung · QC tertahan', k.qcWait, 'c-qc-wait'], ['Siap QC', k.qc, 'c-qc'], ['Belum BigSeller', k.bs, 'c-jual']];
   var tot = 0; flow.forEach(function (f) { tot += f[1]; });
   var flowHtml = tot ? '<div class="flow" role="img" aria-label="Sebaran barang per tahap">' + flow.map(function (f) { return f[1] ? '<b class="' + f[2] + '" style="width:' + (f[1] / tot * 100).toFixed(2) + '%" title="' + f[0] + ': ' + nf(f[1]) + '"></b>' : ''; }).join('') + '</div>' : '';
   flowHtml += '<div class="legend">' + flow.map(function (f) { return '<div class="' + f[2] + '"><i></i><span>' + f[0] + '</span><b>' + nf(f[1]) + '</b></div>'; }).join('') +
@@ -7489,7 +7491,7 @@ A.kpiGo = function (el) {
 };
 
 /* ---------- tab PO ---------- */
-var TAHAP_OPSI = [['', 'Semua tahap'], ['potong', 'Belum dipotong'], ['kirim', 'Siap ditugaskan ke maklon'], ['maklon', 'Di maklon'], ['cek', 'Setoran menunggu dicek'], ['lengkap', 'Sebagian dihitung · menunggu jahit lengkap'], ['qc', 'Siap QC'], ['jual', 'Belum input BigSeller'], ['tuntas', 'Tuntas']];
+var TAHAP_OPSI = [['', 'Semua tahap'], ['potong', 'Belum dipotong'], ['kirim', 'Siap ditugaskan ke maklon'], ['maklon', 'Di maklon'], ['cek', 'Setoran menunggu dicek'], ['lengkap', 'Dihitung · QC tertahan'], ['qc', 'Siap QC'], ['jual', 'Belum input BigSeller'], ['tuntas', 'Tuntas']];
 function poMasukTahap(po, k) {
   var t = T(po);
   if (k === 'potong') return !t.potong;
@@ -7640,8 +7642,8 @@ function poSheet(id) {
   if ((flow.ledgerIssues || []).length) h += '<div class="note warn">Periksa pencatatan gudang: ' + flow.ledgerIssues.map(esc).join(' · ') + '</div>';
   if (admin || me().divisi === 'potong') h += rencanaPotongPanel(po);
   var qc = qcBalance(po);
-  if (qc.waiting) h += '<div class="note warn"><b>' + nf(qc.waiting) + ' pcs menunggu seluruh PO lengkap.</b>' + (Object.keys(qc.waitingUkuran).length ? ' ' + esc(coreSizeText(qc.waitingUkuran)) + '.' : '') + ' Selesaikan seluruh jahit dan hitung fisik PO sebelum QC.</div>';
-  h += '<p class="small muted">Hitung fisik dan pemeriksaan QC adalah tahap terpisah. QC dimulai setelah seluruh PO selesai dijahit dan dihitung fisik; hasil pemeriksaan dicatat per slip dan ukuran. Hasil QC mencatat gudang otomatis; catatan BigSeller tidak menentukan selesai produksi.</p>';
+  if (qc.waiting) h += '<div class="note warn"><b>' + nf(qc.waiting) + ' pcs sudah dihitung tetapi QC-nya tertahan.</b>' + (Object.keys(qc.waitingUkuran).length ? ' ' + esc(coreSizeText(qc.waitingUkuran)) + '.' : '') + ' Ada catatan lama PO ini yang perlu diperiksa dulu.</div>';
+  h += '<p class="small muted">Hitung fisik dan pemeriksaan QC adalah tahap terpisah. Setoran yang sudah dihitung bisa langsung di-QC tanpa menunggu sisa jahitan; hasil pemeriksaan dicatat per slip dan ukuran. Hasil QC mencatat gudang otomatis; catatan BigSeller tidak menentukan selesai produksi.</p>';
 
   if (po.status === 'aktif') {
     var b = '';
@@ -10062,7 +10064,7 @@ VIEWS['q-cek'] = function () {
   var st = S.state;
   var tunggu = st.setor.filter(function (s) { return s.status === 'diajukan'; }).sort(function (a, b) { return String(a.dibuat) < String(b.dibuat) ? -1 : 1; });
   var baru = st.setor.filter(function (s) { return s.status === 'diterima' && s.diprosesOleh === me().id; }).sort(function (a, b) { return String(a.diprosesPada) < String(b.diprosesPada) ? 1 : -1; }).slice(0, 8);
-  return '<div class="head"><div class="grow"><h1>Hitung fisik</h1><div class="sub">Setiap setoran maklon muncul di sini. Hitung barangnya, lalu terima. Slip terbit setelah dihitung. PO masuk Antrean QC setelah seluruh jahit dan hitung fisiknya lengkap.</div></div><button class="btn" data-a="setorLangsung">' + ic('plus') + 'Catat langsung</button></div>' +
+  return '<div class="head"><div class="grow"><h1>Hitung fisik</h1><div class="sub">Setiap setoran maklon muncul di sini. Hitung barangnya, lalu terima. Slip terbit setelah dihitung. Setoran yang sudah dihitung langsung masuk Antrean QC.</div></div><button class="btn" data-a="setorLangsung">' + ic('plus') + 'Catat langsung</button></div>' +
     (tunggu.length ? '<div class="grid g-cards">' + tunggu.map(function (s) {
       var po = D.po[s.poId] || { nama: 'PO terhapus' };
       return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">Laporan setor · ' + esc(lalu(s.dibuat)) + '</div>' +
@@ -10073,12 +10075,13 @@ VIEWS['q-cek'] = function () {
     hitungFisikBelumLengkap() +
     (baru.length ? '<div class="card flush"><div class="sec-h"><h3>Baru Anda terima</h3></div><div class="list">' + baru.map(function (r) { return slipRow('setor', r); }).join('') + '</div></div>' : '');
 };
+/* PO aktif yang jahitannya belum kembali semua: berapa yang sudah dihitung dan berapa yang masih di penjahit. */
 function hitungFisikBelumLengkap() {
-  var rows = S.state.po.filter(function (po) { return po.status === 'aktif' && qcBalance(po).waiting > 0; });
+  var rows = S.state.po.filter(function (po) { var t = T(po); return po.status === 'aktif' && pos(t.sisaMaklon) > 0 && pos(t.terima) > 0; });
   if (!rows.length) return '';
-  return '<div class="card flush"><div class="sec-h"><h3>Sebagian dihitung · menunggu lengkap</h3></div><p class="small muted" style="padding:0 16px">Hasil hitung tersimpan. PO tetap di sini sampai semua jahitan selesai dan dihitung.</p><div class="list">' + rows.map(function (po) {
-    var q = qcBalance(po), t = T(po);
-    return '<div class="item">' + thumb(po) + '<span class="grow"><b>' + esc(po.nama) + '</b><br><span class="d">' + esc(po.noPO) + ' · ' + nf(q.waiting) + ' pcs sudah dihitung · ' + nf(pos(t.sisaMaklon)) + ' pcs sisa jahit</span><br><span class="chip warn">Menunggu seluruh PO</span></span><button class="btn sm" data-a="poOpen" data-id="' + esc(po.id) + '">Lihat progres</button></div>';
+  return '<div class="card flush"><div class="sec-h"><h3>Jahitan belum lengkap</h3></div><p class="small muted" style="padding:0 16px">Yang sudah dihitung bisa langsung di-QC dan dibayar. Sisanya dihitung saat penjahit menyetor lagi.</p><div class="list">' + rows.map(function (po) {
+    var t = T(po);
+    return '<div class="item">' + thumb(po) + '<span class="grow"><b>' + esc(po.nama) + '</b><br><span class="d">' + esc(po.noPO) + ' · ' + nf(pos(t.terima)) + ' pcs sudah dihitung · ' + nf(pos(t.sisaMaklon)) + ' pcs masih dijahit</span></span><button class="btn sm" data-a="poOpen" data-id="' + esc(po.id) + '">Lihat progres</button></div>';
   }).join('') + '</div></div>';
 }
 A.setorLangsung = function () {
@@ -10111,7 +10114,7 @@ function antreanQC() {
     Object.keys(r.ukuran || {}).forEach(function (size) {
       var remaining = coreNum(r.ukuran[size]) - coreNum((used[r.id] || {})[size]);
       var blocked = (flow.blockedQcSources && flow.blockedQcSources[r.id] || []).indexOf(size) >= 0;
-      if (remaining > 0) (flow.ukuran[size] && flow.ukuran[size].readyQC && corePoCountComplete(flow) && !blocked ? ready : waiting)[size] = remaining;
+      if (remaining > 0) (flow.ukuran[size] && flow.ukuran[size].readyQC && !blocked ? ready : waiting)[size] = remaining;
     });
     var total = coreSumSizes(ready);
     if (total) out.push({ s: r, sisa: total, uk: ready, waiting: waiting });
@@ -10136,7 +10139,7 @@ VIEWS['q-qc'] = function () {
   waiting.forEach(function (po) { waitingPcs += qcBalance(po).waiting; });
   S.listFn = function () {
     var rows = antre.filter(function (x) { var po = D.po[x.s.poId] || {}; return cocok(S.f.q, [po.nama, po.noPO, x.s.noSlip, namaUser(x.s.maklonId)]); });
-    if (!rows.length) return '<div class="card">' + emptyBox(antre.length ? 'Tidak ada yang cocok.' : 'Belum ada PO yang siap QC.' + (waitingPcs ? ' ' + nf(waitingPcs) + ' pcs sudah dihitung dan menunggu seluruh PO lengkap.' : '') + ' Selesaikan seluruh jahit dan hitung fisik PO terlebih dahulu.') + '</div>';
+    if (!rows.length) return '<div class="card">' + emptyBox(antre.length ? 'Tidak ada yang cocok.' : 'Belum ada setoran yang siap QC.' + (waitingPcs ? ' ' + nf(waitingPcs) + ' pcs sudah dihitung tetapi QC-nya tertahan.' : '') + ' Hitung fisik setorannya terlebih dahulu.') + '</div>';
     return '<div class="grid g-cards">' + rows.slice(0, 80).map(function (x, i) {
       var s = x.s; var po = D.po[s.poId] || { nama: 'PO terhapus' };
       return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + esc(s.noSlip) + ' · dihitung ' + tgl(String(s.diprosesPada || s.tanggal).slice(0, 10)) + '</div>' +
@@ -10149,10 +10152,10 @@ VIEWS['q-qc'] = function () {
   var siap = 0; antre.forEach(function (x) { siap += x.sisa; });
   var hari = 0; st.qc.forEach(function (r) { if (r.tanggal === todayYmd()) hari += r.total + coreNum(r.offline) + coreNum(r.reject) + pos(coreNum(r.perbaikan)); });
   var perbaikan = st.po.filter(function (p) { return p.status === 'aktif' && T(p).qcPerbaikan > 0; });
-  return '<div class="head"><div class="grow"><h1>Antrean QC</h1><div class="sub">PO yang seluruh jahitannya sudah selesai dan dihitung fisik. Pemeriksaan tetap dicatat per slip dan ukuran.</div></div></div>' +
-    miniKpi([['Antrean', nf(antre.length), 'slip · ' + nf(siap) + ' pcs', antre.length > 0], ['Menunggu lengkap', nf(waitingPcs), 'pcs sudah dihitung'], ['Hari ini', nf(hari), 'pcs diperiksa']]) +
+  return '<div class="head"><div class="grow"><h1>Antrean QC</h1><div class="sub">Setoran yang sudah dihitung fisik dan belum diperiksa, tanpa menunggu sisa jahitan. Pemeriksaan dicatat per slip dan ukuran.</div></div></div>' +
+    miniKpi([['Antrean', nf(antre.length), 'slip · ' + nf(siap) + ' pcs', antre.length > 0], ['QC tertahan', nf(waitingPcs), 'pcs perlu diperiksa'], ['Hari ini', nf(hari), 'pcs diperiksa']]) +
     '<div class="tools">' + searchBox('q', 'Cari barang, slip, atau nama maklon') + '</div><div id="list">' + S.listFn() + '</div>' +
-    (waiting.length ? '<div class="card flush"><div class="sec-h"><h3>Sebagian dihitung · menunggu jahit lengkap</h3></div><div class="list">' + waiting.map(function (po) {
+    (waiting.length ? '<div class="card flush"><div class="sec-h"><h3>Dihitung · QC tertahan</h3></div><div class="list">' + waiting.map(function (po) {
       var q = qcBalance(po); return '<div class="item">' + thumb(po) + '<span class="grow"><span class="t">' + esc(po.nama) + '</span><br><span class="d">' + nf(q.waiting) + ' pcs sudah dihitung · ' + esc(coreSizeText(q.waitingUkuran)) + '</span></span><button class="btn sm" data-a="poOpen" data-id="' + esc(po.id) + '">Lihat progres</button></div>';
     }).join('') + '</div></div>' : '') +
     (perbaikan.length ? '<div class="card flush"><div class="sec-h"><h3>Sedang diperbaiki maklon</h3></div><div class="list">' + perbaikan.map(function (po) {
@@ -10597,7 +10600,7 @@ function openQC(poId, setorId, repairQcId) {
       var waiting = qcBalance(D.po[poId]).waiting;
       var rows = choices.map(function (x) { return '<button class="btn" data-a="qcSlipOpen" data-id="' + esc(x.s.id) + '">' + esc(x.s.noSlip) + ' · ' + esc(coreSizeText(x.uk)) + ' · ' + esc(namaUser(x.s.maklonId)) + '</button>'; });
       repairs.forEach(function (x) { rows.push('<button class="btn" data-a="qcRepairOpen" data-id="' + esc(x.q.id) + '">Perbaikan ' + tgl(x.q.tanggal) + ' · ' + esc(coreSizeText(x.uk)) + ' · ' + esc(namaUser(x.q.maklonId)) + '</button>'); });
-      return sheetHtml('Pilih hitungan atau perbaikan', '<div class="col">' + (rows.length ? rows.join('') : emptyBox(waiting ? nf(waiting) + ' pcs menunggu seluruh PO lengkap. Selesaikan seluruh jahit dan hitung fisik PO dahulu.' : 'Tidak ada hitungan atau perbaikan yang menunggu QC.')) + '</div>');
+      return sheetHtml('Pilih hitungan atau perbaikan', '<div class="col">' + (rows.length ? rows.join('') : emptyBox(waiting ? nf(waiting) + ' pcs sudah dihitung tetapi QC-nya tertahan. Periksa catatan lama PO ini dahulu.' : 'Tidak ada hitungan atau perbaikan yang menunggu QC.')) + '</div>');
     }, { live: true });
     return;
   }
@@ -10612,7 +10615,7 @@ function openQC(poId, setorId, repairQcId) {
     var uk = repair ? repair.uk : queue.uk;
     return sheetHtml(repair ? 'Hasil perbaikan' : 'Periksa ' + slip.noSlip,
       '<div class="col" data-form="qc">' + hid('id',fid) + hid('poId',poId) + hid('setorId',slip.id) + hid('repairQcId',repairQcId || '') + poHead(po) +
-      '<div class="note">' + esc(namaUser(slip.maklonId)) + '. ' + (repair ? 'Pilih jumlah perbaikan yang sudah selesai. Tarif mengikuti hitungan asal; tanggal berikut menjadi tanggal upah perbaikan.' : 'Isi seluruh hasil untuk setiap ukuran yang ditampilkan. Hitung fisik sudah lengkap; OK + offline + perbaikan + reject harus tepat.') + '</div>' +
+      '<div class="note">' + esc(namaUser(slip.maklonId)) + '. ' + (repair ? 'Pilih jumlah perbaikan yang sudah selesai. Tarif mengikuti hitungan asal; tanggal berikut menjadi tanggal upah perbaikan.' : 'Isi seluruh hasil untuk setiap ukuran yang ditampilkan. OK + offline + perbaikan + reject harus tepat sejumlah hitungan slip ini; sisa jahitan yang belum disetor diperiksa nanti dengan slipnya sendiri.') + '</div>' +
       qcGrid(uk,!!repair) + sumLine('Total diperiksa') + fTanggal('Tanggal pemeriksaan', 'tanggal') + fCatatan() + '</div>', footSave('qcSave'));
   });
 }

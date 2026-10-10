@@ -32,24 +32,25 @@ test('sewing badges distinguish queued, reported, partially counted, fully count
   ];
   for(const [x,label,css]of cases){const result=run(c,`jahitProgressChip(${JSON.stringify(x)})`);assert.ok(result.includes(label));assert.ok(result.includes(`class="${css}"`));}
 });
-test('partially counted PO stays in physical-count panel until all sizes are counted',()=>{
+test('a partly sewn PO is listed with what is counted and what is still being sewn, and its counted pieces are ready for QC',()=>{
   const c=ui();run(c,`var po={id:'p',noPO:'PO-001',nama:'Kaos <biru>',status:'aktif',ukuran:{M:40,L:50}};
     var cuts=[{id:'cut',poId:'p',ukuran:{M:40,L:50},total:90}];
     var sends=[{id:'send',poId:'p',maklonId:'worker',ukuran:{M:40,L:50},total:90}];
     var counts=[{id:'count',poId:'p',maklonId:'worker',status:'diterima',ukuran:{M:40,L:20},total:60}];
     function recompute(){po.workflow=coreWorkflow([po],cuts,sends,counts,[],[]).p;po.agg=coreAggregate([po],cuts,sends,counts,[],[]).p;}recompute();S.state.po=[po];D.po.p=po;`);
-  const partial=run(c,'hitungFisikBelumLengkap()');assert.match(partial,/Sebagian dihitung/);assert.match(partial,/60 pcs sudah dihitung/);assert.match(partial,/30 pcs sisa jahit/);assert.match(partial,/Kaos &lt;biru>/);assert.match(partial,/Menunggu seluruh PO/);
-  assert.equal(run(c,'qcBalance(po).ready'),0);
+  const partial=run(c,'hitungFisikBelumLengkap()');assert.match(partial,/Jahitan belum lengkap/);assert.match(partial,/60 pcs sudah dihitung/);assert.match(partial,/30 pcs masih dijahit/);assert.match(partial,/Kaos &lt;biru>/);assert.doesNotMatch(partial,/Menunggu seluruh PO/);
+  assert.equal(run(c,'qcBalance(po).ready'),60);assert.equal(run(c,'qcBalance(po).waiting'),0);
   run(c,'counts[0].ukuran.L=50;counts[0].total=90;recompute()');
   assert.equal(run(c,'hitungFisikBelumLengkap()'),'');assert.equal(run(c,'qcBalance(po).ready'),90);
 });
-test('pending cutting material or unfinished assignment keeps counted work out of QC',()=>{
-  const c=ui();run(c,`var po={id:'p',nama:'Kaos',status:'aktif',agg:{total:{sisaMaklon:0}},workflow:{pendingCutPlans:true,issues:[],ukuran:{M:{target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0,siapQC:40,readyQC:true}}}};S.state.po=[po];`);
-  assert.equal(run(c,'qcBalance(po).ready'),0);assert.match(run(c,'hitungFisikBelumLengkap()'),/Menunggu seluruh PO/);
-  run(c,"po.status='selesai'");assert.equal(run(c,'hitungFisikBelumLengkap()'),'');
+test('counted work is ready for QC while another cut is still being prepared; only an unusable count is held',()=>{
+  const c=ui();run(c,`var po={id:'p',nama:'Kaos',status:'aktif',agg:{total:{sisaMaklon:0,terima:40}},workflow:{pendingCutPlans:true,issues:[],ukuran:{M:{target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0,siapQC:40,readyQC:true}}}};S.state.po=[po];`);
+  assert.equal(run(c,'qcBalance(po).ready'),40);assert.equal(run(c,'hitungFisikBelumLengkap()'),'');
+  run(c,"po.workflow.ukuran.M.readyQC=false");assert.equal(run(c,'qcBalance(po).ready'),0);assert.equal(run(c,'qcBalance(po).waiting'),40);
+  run(c,"po.agg.total.sisaMaklon=15;po.status='selesai'");assert.equal(run(c,'hitungFisikBelumLengkap()'),'');
 });
-test('PO and QC chooser instructions consistently require the whole PO, without per-size early-QC promise',()=>{
+test('PO and QC chooser instructions say a counted delivery is inspected without waiting for the whole PO',()=>{
   const detail=part('function poSheet(', 'A.poStatusSet =');const chooser=part('function openQC(', 'A.qcRepairOpen =');
-  assert.match(detail,/QC dimulai setelah seluruh PO selesai dijahit dan dihitung fisik/);
-  assert.doesNotMatch(detail+chooser,/Setiap ukuran dapat diperiksa setelah|sisa jahit ukuran yang sama dahulu|Hitung seluruh sisa jahit ukuran tersebut/);
+  assert.match(detail,/Setoran yang sudah dihitung bisa langsung di-QC tanpa menunggu sisa jahitan/);
+  assert.doesNotMatch(detail+chooser,/seluruh PO selesai dijahit|menunggu seluruh PO|Selesaikan seluruh jahit/);
 });

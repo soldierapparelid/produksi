@@ -33,12 +33,12 @@ test('missing size contract, unlisted sizes, quantities and direct no-material c
 test('customer PO also has selected sizes and no target pcs',()=>{
   const f=fixture();f.good('savePOWithRencana',f.bundle({jenis:'pesanan',pelanggan:'Customer fixture'}));assert.equal(f.raw('PO')[0].total,0);assert.deepEqual(f.good('getState').po[0].cutting.pendingUkuran,['M','L']);
 });
-test('uncut selected size blocks whole-PO QC, close and auto-completion even when first size is complete',()=>{
+test('an uncut selected size blocks close and auto-completion, while the counted first size can already be inspected by QC',()=>{
   const f=fixture(),made=f.good('savePOWithRencana',f.bundle());f.cut(made.rencana,{M:7},'size-cut-001');
   f.h.run(`pkStore_().lock(function(){pkStore_().append('SlipKirim',{id:'size-send001',poId:'size-po-001',maklonId:'sewer0001',tanggal:'2026-10-08',ukuran:{M:7},total:7,upah:1000});pkStore_().append('SlipSetor',{id:'size-setor01',poId:'size-po-001',maklonId:'sewer0001',tanggal:'2026-10-08',ukuran:{M:7},total:7,reject:0,status:'diterima',upah:1000});});`);
-  let state=f.good('getState'),po=state.po[0];assert.equal(po.workflow.ukuran.M.readyQC,true);assert.equal(po.workflow.readyQC,false);assert.equal(po.workflow.complete,false);
-  const qc=f.call('createQC',{qc:{id:'size-qc001',poId:'size-po-001',setorId:'size-setor01',ukuran:{M:7},tanggal:'2026-10-08'}});assert.equal(qc.ok,false);
-  f.h.run(`pkStore_().lock(function(){pkStore_().append('QC',{id:'historicalqc',poId:'size-po-001',setorId:'size-setor01',maklonId:'sewer0001',tanggal:'2026-10-08',ukuran:{M:7},total:7});pkStore_().update('PO','size-po-001',{tuntasPada:'2020-01-01T00:00:00Z'});});`);
+  let state=f.good('getState'),po=state.po[0];assert.equal(po.workflow.ukuran.M.readyQC,true);assert.equal(po.workflow.readyQC,true);assert.equal(po.workflow.complete,false);
+  const qc=f.call('createQC',{qc:{id:'size-qc001',poId:'size-po-001',setorId:'size-setor01',ukuran:{M:7},tanggal:'2026-10-08'}});assert.equal(qc.ok,true);
+  f.h.run(`pkStore_().lock(function(){pkStore_().update('PO','size-po-001',{tuntasPada:'2020-01-01T00:00:00Z'});});`);
   po=f.good('getState').po[0];assert.equal(po.workflow.ukuran.M.complete,true);assert.equal(po.workflow.complete,false);assert.equal(po.status,'aktif');assert.equal(po.tuntasPada,'');assert.equal(f.call('setStatusPO',{id:po.id,status:'selesai'}).ok,false);
   const next=f.good('saveRencanaPotong',{rencana:{id:'size-plan-002',poId:po.id,alokasiBahan:[{stokId:'size-stock-001',qty:3}]}});f.cut(next,{L:5},'size-cut-002');assert.deepEqual(f.good('getState').po[0].cutting.pendingUkuran,[]);
 });

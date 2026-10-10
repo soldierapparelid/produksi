@@ -26,10 +26,10 @@ test('new actual cut clears only its size and trusted overlay permits it without
  f.good('createPotong',{potong:{id:'cutxl001',poId:'mixedpo1',userId:'cutter2',ukuran:{XL:7},tarif:500}});let po=f.good('getState',{},f.cutter).po[0];assert.deepEqual(po.cutting.pendingUkuran,['XXL']);assert.deepEqual(JSON.parse(f.raw('PO')[0].ukuran),{M:10});assert.equal(f.raw('PO')[0].total,10);
  f.good('createPotong',{potong:{id:'cutxxl01',poId:'mixedpo1',userId:'cutter1',ukuran:{XXL:8},tarif:500}});assert.deepEqual(f.good('getState',{},f.other).po[0].cutting.pendingUkuran,[]);
 });
-test('completed counted size cannot permit QC, completion or auto-close while source sizes are uncut',()=>{
+test('a counted size is inspected by QC while source sizes are uncut, but completion and auto-close still wait',()=>{
  const f=fixture();f.h.run(`pkStore_().lock(function(){pkStore_().append('SlipKirim',{id:'sendm001',poId:'mixedpo1',maklonId:'sewer001',tanggal:'2026-10-01',ukuran:{M:10},total:10,upah:2000});pkStore_().append('SlipSetor',{id:'countm01',poId:'mixedpo1',maklonId:'sewer001',tanggal:'2026-10-02',ukuran:{M:10},total:10,reject:0,status:'diterima',upah:2000});});`);
- let po=f.good('getState').po[0];assert.equal(po.workflow.ukuran.M.readyQC,true);assert.equal(po.workflow.readyQC,false);assert.equal(po.workflow.complete,false);assert.deepEqual(po.workflow.pendingCutSizes,['XL','XXL']);assert.equal(f.call('createQC',{qc:{id:'qcnow001',poId:'mixedpo1',setorId:'countm01',ukuran:{M:10},tanggal:'2026-10-03'}}).ok,false);
- f.h.run(`pkStore_().lock(function(){pkStore_().append('QC',{id:'existingqc',poId:'mixedpo1',setorId:'countm01',maklonId:'sewer001',tanggal:'2026-10-03',ukuran:{M:10},total:10});pkStore_().update('PO','mixedpo1',{tuntasPada:'2020-01-01T00:00:00Z'});});`);
+ let po=f.good('getState').po[0];assert.equal(po.workflow.ukuran.M.readyQC,true);assert.equal(po.workflow.readyQC,true);assert.equal(po.workflow.complete,false);assert.deepEqual(po.workflow.pendingCutSizes,['XL','XXL']);assert.equal(f.call('createQC',{qc:{id:'qcnow001',poId:'mixedpo1',setorId:'countm01',ukuran:{M:10},tanggal:'2026-10-03'}}).ok,true);
+ f.h.run(`pkStore_().lock(function(){pkStore_().update('PO','mixedpo1',{tuntasPada:'2020-01-01T00:00:00Z'});});`);
  po=f.good('getState').po[0];assert.equal(po.workflow.ukuran.M.complete,true);assert.equal(po.workflow.complete,false);assert.equal(po.status,'aktif');assert.equal(po.tuntasPada,'');assert.equal(f.call('setStatusPO',{id:'mixedpo1',status:'selesai'}).ok,false);
 });
 test('tampered or malformed evidence never adds allowed sizes and marks active source for review',()=>{
