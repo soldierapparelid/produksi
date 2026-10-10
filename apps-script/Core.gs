@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.17';
+var APP_VERSION = '1.5.18';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -1687,6 +1687,7 @@ function createCore(store, env) {
     var rec = isiStok(r, null); rec.id = d.id; rec.dibuatOleh = me.id; rec.dibuat = nowIso(); rec.asal = '';
     if (rec.jenis === 'koreksi') ensureAggregateCorrection(rec,null);
     store.append('StokBahan', rec);
+    if (rec.jenis === 'beli' || rec.qty > 0) tampilkanBahan([rec.bahan]);
     return rec;
   };
   actions.saveInvoiceBahan = function (p) {
@@ -1721,7 +1722,7 @@ function createCore(store, env) {
     var total = plan.rows.reduce(function (sum, r) { return sum + Number(r.total); }, 0);
     if (!Number.isSafeInteger(total)) fail('Total invoice terlalu besar.');
     if (store.validateRows) store.validateRows('StokBahan', plan.pending);
-    if (plan.pending.length) store.appendMany('StokBahan', plan.pending);
+    if (plan.pending.length) { store.appendMany('StokBahan', plan.pending); tampilkanBahan(plan.pending.map(function (r) { return r.bahan; })); }
     return { invoiceId: inv.id, rows: plan.rows, total: total };
   };
   /* Merinci stok yang sudah ada menjadi rol. Stok lama hanya mencatat total kg; di sini owner mengisi berat tiap rol
@@ -1856,8 +1857,93 @@ function createCore(store, env) {
       supplier: '', invoice: '', sumber: '', alasan: 'stok_opname', catatan: teks(p.catatan, 300) || ('Hitung fisik ' + fisik + ', catatan ' + saldo), dibuatOleh: me.id, dibuat: nowIso(), asal: '' };
     ensureAggregateCorrection(rec,null,inventory);
     store.append('StokBahan', rec);
+    if (fisik > 0) tampilkanBahan([rec.bahan]);
     return rec;
   };
+  /* Bahan yang disembunyikan tampil lagi begitu stoknya diisi lagi (pembelian, stok awal, atau hasil hitung fisik). */
+  function tampilkanBahan(names) {
+    var st = settings(), buka = {}; (names || []).forEach(function (n) { var k = coreNormBahan(n); if (k) buka[k] = 1; });
+    var sisa = st.bahanSembunyi.filter(function (n) { return !buka[coreNormBahan(n)]; });
+    if (sisa.length !== st.bahanSembunyi.length) { st.bahanSembunyi = sisa; store.setSettings(st); }
+  }
+  /* "Mulai dari nol": owner mengosongkan seluruh stok bahan sebelum mengisi stok gudang yang sebenarnya.
+     Tidak ada riwayat yang dihapus. Urutannya: (1) persiapan potong yang belum dipakai dibatalkan supaya tidak ada
+     bahan yang dicadangkan; (2) tanggal mulai hitung pemakaian dipindah ke hari ini, lalu tiap rol dan tiap saldo
+     bahan dikoreksi menjadi 0 dan nama bahannya disembunyikan (muncul lagi saat stoknya diisi); (3) PO aktif yang
+     belum punya catatan produksi sama sekali dibatalkan dan diarsipkan, sehingga barangnya kembali "belum PO".
+     Aman diulang: panggilan berikutnya hanya mengerjakan yang belum selesai, dan selesai:false berarti panggil lagi. */
+  var NOL_KATA = 'MULAI DARI NOL', NOL_BATAS = 25;
+  function mulaiNol(p, tulis) {
+    ['Pegawai','PO','RencanaPotong','Potong','StokBahan','SlipKirim','SlipSetor','QC','Gudang'].forEach(function (name) { if (store.fresh) store.fresh(name); });
+    var me = auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengosongkan stok.');
+    if (typeof coreCutAvailability !== 'function') fail('Paket persiapan potong belum lengkap. Muat ulang aplikasi.');
+    if (tulis && String(p.yakin || '') !== NOL_KATA) fail('Ketik ' + NOL_KATA + ' untuk melanjutkan.');
+    var out = { pratinjau: !tulis, selesai: true, rencana: 0, rol: 0, bahan: 0, po: 0, daftarBahan: [], daftarPO: [] };
+    var cuts = store.read('Potong'), dipakai = {}; cuts.forEach(function (r) { if (r.rencanaId) dipakai[r.rencanaId] = true; });
+    function gantung(r) { return r.status === 'siap' && !dipakai[r.id]; }
+
+    /* 1. persiapan potong yang masih mencadangkan bahan */
+    var tunggu = store.read('RencanaPotong').filter(gantung);
+    out.rencana = tunggu.length;
+    if (tulis && tunggu.length) {
+      tunggu.slice(0, NOL_BATAS).forEach(function (r) { store.update('RencanaPotong', r.id, prepareRow({}, r.id, r.poId, 'batal', r)); });
+      if (tunggu.length > NOL_BATAS) { out.selesai = false; return out; }
+    }
+
+    /* 2. stok: dihitung seolah-olah semua persiapan di atas sudah batal */
+    var st = settings(), hari = today(), stNol = {};
+    Object.keys(st).forEach(function (k) { stNol[k] = st[k]; });
+    if (!stNol.stokMulai || stNol.stokMulai < hari) stNol.stokMulai = hari;
+    var rencana = store.read('RencanaPotong').filter(function (r) { return !gantung(r); }), stok = store.read('StokBahan');
+    var inv = coreRollInventory(cuts, stok, stNol, rencana), baris = [], dibuat = nowIso(), rolPer = {};
+    var catatan = 'Mulai dari nol ' + hari.split('-').reverse().join('/') + ': stok dikosongkan sebelum diisi stok gudang yang sebenarnya';
+    function bulat(n) { return Math.round(n * 1000) / 1000; }
+    inv.rolls.forEach(function (r) {
+      if (Math.abs(r.saldo) < 0.0005) return;
+      out.rol++; rolPer[coreNormBahan(r.bahan)] = coreNum(rolPer[coreNormBahan(r.bahan)]) + 1;
+      baris.push({ id: env.id(), jenis: 'koreksi', tanggal: hari, bahan: r.bahan, qty: bulat(-r.saldo), satuan: r.satuan, rol: 0, harga: 0, total: 0, supplier: '', invoice: r.invoice, sumber: '', alasan: 'stok_opname',
+        catatan: catatan, dibuatOleh: me.id, dibuat: dibuat, asal: '', sourceStockId: r.id, saldoBefore: r.saldo, saldoAfter: 0, previousCorrectionId: r.correctionRevision, sourceRevision: r.sourceRevision });
+    });
+    inv.legacy.forEach(function (m) {
+      if (Math.abs(m.saldo) < 0.0005) return;
+      baris.push({ id: env.id(), jenis: 'koreksi', tanggal: hari, bahan: m.nama, qty: bulat(-m.saldo), satuan: m.satuan, rol: 0, harga: 0, total: 0, supplier: '', invoice: '', sumber: '', alasan: 'stok_opname',
+        catatan: catatan, dibuatOleh: me.id, dibuat: dibuat, asal: '' });
+    });
+    inv.materials.forEach(function (m) {
+      if (Math.abs(m.saldo) < 0.0005 && !rolPer[m.kunci]) return;
+      out.bahan++; if (out.daftarBahan.length < 300) out.daftarBahan.push({ nama: m.nama, saldo: m.saldo, satuan: m.satuan, rol: coreNum(rolPer[m.kunci]) });
+    });
+    var semuaNama = {}, sembunyi = st.bahanSembunyi.slice();
+    sembunyi.forEach(function (n) { semuaNama[coreNormBahan(n)] = 1; });
+    inv.materials.forEach(function (m) { if (!semuaNama[m.kunci]) { semuaNama[m.kunci] = 1; sembunyi.push(m.nama); } });
+    if (tulis && (baris.length || sembunyi.length !== st.bahanSembunyi.length || st.stokMulai !== stNol.stokMulai)) {
+      /* periksa hasilnya dulu: sesudah koreksi, semua rol dan semua bahan harus tepat nol */
+      var uji = coreRollInventory(cuts, stok.concat(baris), stNol, rencana);
+      if (uji.rolls.some(function (r) { return Math.abs(r.saldo) >= 0.0005; }) || uji.materials.some(function (m) { return Math.abs(m.saldo) >= 0.0005; })) fail('Hitungan pengosongan stok tidak menghasilkan nol. Stok belum diubah; laporkan ke pembuat aplikasi.');
+      if (JSON.stringify(sembunyi).length > 45000) fail('Daftar bahan yang disembunyikan terlalu panjang.');
+      if (baris.length && store.validateRows) store.validateRows('StokBahan', baris);
+      st.stokMulai = stNol.stokMulai; st.bahanSembunyi = sembunyi; store.setSettings(st);
+      if (baris.length) store.appendMany('StokBahan', baris);
+    }
+
+    /* 3. PO aktif yang belum punya catatan produksi sama sekali */
+    var terpakai = {};
+    ['Potong','SlipKirim','SlipSetor','QC','Gudang','GudangLama','LegacySettlement'].forEach(function (s) { store.read(s).forEach(function (r) { if (r.poId) terpakai[r.poId] = true; }); });
+    var kosong = store.read('PO').filter(function (r) { return r.status === 'aktif' && !terpakai[r.id]; });
+    out.po = kosong.length; out.daftarPO = kosong.slice(0, 300).map(function (r) { return { id: r.id, noPO: r.noPO, nama: r.nama }; });
+    if (tulis && kosong.length) {
+      var kerja = kosong.slice(0, NOL_BATAS), sekarang = nowIso();
+      kerja.forEach(function (r) { store.update('PO', r.id, { status: 'batal', diubah: sekarang, selesaiPada: hari }); });
+      var st2 = settings(), arsip = st2.poSembunyi.slice();
+      kerja.forEach(function (r) { if (arsip.indexOf(r.id) < 0) arsip.push(r.id); });
+      if (JSON.stringify(arsip).length > 45000) fail('Arsip PO sudah terlalu panjang.');
+      st2.poSembunyi = arsip; store.setSettings(st2);
+      if (kosong.length > NOL_BATAS) out.selesai = false;
+    }
+    return out;
+  }
+  actions.getPratinjauNol = function (p) { return mulaiNol(p, false); };
+  actions.mulaiDariNol = function (p) { return mulaiNol(p, true); };
 
   /* ---------- karyawan harian & gaji mingguan ---------- */
   actions.saveKaryawan = function (p) {
@@ -2699,7 +2785,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
