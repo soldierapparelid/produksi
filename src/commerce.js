@@ -124,8 +124,6 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
           if(old.productSnapshot)out.productSnapshot=old.productSnapshot;if(old.supplierSnapshot)out.supplierSnapshot=old.supplierSnapshot;
           var got=current.receivedByItem||{};Object.keys(got).forEach(function(k){if(!coreNum(got[k]))return;var kept=out.items.filter(function(i){return i.id===k;})[0];if(!kept||kept.jumlah<coreNum(got[k]))fail('Varian yang sudah diterima tidak boleh dihapus atau dikurangi di bawah jumlah yang diterima.');});
           if(out.totalHarga<current.totalPaid)fail('Total pesanan tidak boleh lebih kecil dari yang sudah dibayar.');
-          var first=current.events.filter(function(e){return e.kind!=='void'&&!e.voided;}).map(function(e){return String(e.tanggal||'');}).sort()[0];
-          if(first&&out.tanggalOrder>first)fail('Tanggal pesanan tidak boleh sesudah pembayaran atau penerimaan pertama.');
         }
       }
     }
@@ -156,13 +154,36 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     if(kind==='receipt'){if(module!=='pembelian')fail('Penerimaan hanya untuk pembelian.');d.itemId=id(p.itemId);d.jumlah=num(p.jumlah,1e8,true,true);d.kondisi=text(p.kondisi,100);}
     if(kind==='void')d.eventId=id(p.eventId);
     if(prior){if(prior.module!==module||prior.parentId!==parent||prior.kind!==kind||prior.dibuatOleh!==me.id||coreCommerceHash(coreCommerceData(prior))!==coreCommerceHash(d))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return reply(module,row,p,me);}
-    expected(row,p);if(record.cancelled)fail('Catatan sudah dibatalkan.');if(d.tanggal<String(record.tanggalOrder||record.date||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');
+    expected(row,p);if(record.cancelled)fail('Catatan sudah dibatalkan.');/* pembelian: DP boleh dibayar kapan pun, juga sebelum tanggal order; nota penjualan tetap tidak boleh mendahului notanya */if(module==='nota'&&d.tanggal<String(record.date||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');
     if(kind==='payment'&&(record.paymentReview||d.jumlah>record.balance))fail('Pembayaran melebihi sisa tagihan atau riwayat nominal perlu diperiksa.');
     if(kind==='receipt'){var item=(record.items||[]).filter(function(i){return i.id===d.itemId;})[0];if(record.receiptReview||!item)fail('Hubungan varian penerimaan perlu diperiksa; tidak boleh ditebak.');if(d.jumlah>coreNum(item.jumlah)-coreNum(record.receivedByItem[d.itemId]))fail('Penerimaan melebihi sisa varian pesanan.');}
     if(kind==='void'){var source=record.events.filter(function(e){return e.id===d.eventId;})[0];if(!source||source.kind==='void'||source.voided)fail('Transaksi asal tidak ditemukan atau telah dibatalkan.');}
     var stored={id:key,module:module,parentId:parent,kind:kind,data:JSON.stringify(d),dibuat:now(),dibuatOleh:me.id,sourceHash:''};checkRows('CommerceEvent',[stored]);store.append('CommerceEvent',stored);return reply(module,row,p,me);
   }
   actions.appendCommercePayment=function(p){return event(p,'payment');};actions.appendCommerceReceipt=function(p){return event(p,'receipt');};actions.voidCommerceEvent=function(p){return event(p,'void');};
+  /* Ubah pembayaran atau penerimaan yang sudah tercatat (owner): catatan lama dikoreksi dan penggantinya ditulis dalam
+     satu langkah, sehingga owner tidak perlu mengoreksi lalu mengisi ulang. Catatan lama tetap ada sebagai riwayat. */
+  actions.gantiCommerceEvent=function(p){
+    var me=writable(p,true),module=p.module||'pembelian';if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');
+    var key=id(p.id),parent=id(p.parentId||p.orderId),sourceId=id(p.eventId),row=find(module,module==='nota'?'nota':'order',parent),record=view(row);
+    var sudah=store.read('CommerceEvent').filter(function(e){return e.id===key;})[0];
+    if(sudah){if(sudah.module!==module||sudah.parentId!==parent||sudah.dibuatOleh!==me.id)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return reply(module,row,p,me);}
+    expected(row,p);if(record.cancelled)fail('Catatan sudah dibatalkan.');
+    var source=record.events.filter(function(e){return e.id===sourceId;})[0];
+    if(!source||source.voided||(source.kind!=='payment'&&source.kind!=='receipt'))fail('Transaksi asal tidak ditemukan atau telah dibatalkan.');
+    if(source.sourceReview)fail('Catatan lama yang masih perlu diperiksa tidak dapat diubah.');
+    var kind=source.kind,d={tanggal:date(p.tanggal||source.tanggal),catatan:text(p.catatan,500)};
+    if(module==='nota'&&d.tanggal<String(record.date||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');
+    if(kind==='payment'){d.jumlah=num(p.jumlah,1e15,true,true);d.metode=text(p.metode||source.metode||'cash',40,true);
+      if(record.paymentReview||d.jumlah>record.balance+coreNum(source.jumlah))fail('Pembayaran melebihi sisa tagihan atau riwayat nominal perlu diperiksa.');}
+    else{if(module!=='pembelian')fail('Penerimaan hanya untuk pembelian.');d.itemId=id(p.itemId||source.itemId);d.jumlah=num(p.jumlah,1e8,true,true);d.kondisi=text(p.kondisi===undefined?String(source.kondisi||''):p.kondisi,100);
+      var item=(record.items||[]).filter(function(i){return i.id===d.itemId;})[0];if(record.receiptReview||!item)fail('Hubungan varian penerimaan perlu diperiksa; tidak boleh ditebak.');
+      var diterima=coreNum(record.receivedByItem[d.itemId])-(source.itemId===d.itemId?coreNum(source.jumlah):0);
+      if(d.jumlah>coreNum(item.jumlah)-diterima)fail('Penerimaan melebihi sisa varian pesanan.');}
+    var stamp=now(),rows=[{id:'gv_'+coreCommerceHash([key,sourceId]).slice(0,40),module:module,parentId:parent,kind:'void',data:JSON.stringify({tanggal:String(stamp).slice(0,10),catatan:'Diubah menjadi catatan baru',eventId:sourceId}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''},
+      {id:key,module:module,parentId:parent,kind:kind,data:JSON.stringify(d),dibuat:stamp,dibuatOleh:me.id,sourceHash:''}];
+    checkRows('CommerceEvent',rows);store.appendMany('CommerceEvent',rows);return reply(module,row,p,me);
+  };
   /* Bayar grup: one payment event per order, written together, all carrying the same groupId. */
   actions.appendCommerceGroupPayment=function(p){
     var me=writable(p),key=id(p.id),ids=p.orderIds,seen={};if(!(ids instanceof Array)||ids.length<2||ids.length>40)fail('Pilih 2 sampai 40 order untuk pembayaran grup.');
@@ -176,7 +197,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       if(!same)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return answer();
     }
     var views=rows.map(view);
-    views.forEach(function(v){if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa. Keluarkan order itu dari pembayaran grup.');if(d.tanggal<String(v.tanggalOrder||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');});
+    views.forEach(function(v){if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa. Keluarkan order itu dari pembayaran grup.');});
     var shares=coreCommerceSplit(amount,views.map(function(v){return v.balance;}));if(!shares)fail('Pembayaran grup harus lebih dari nol dan tidak melebihi sisa tagihan grup.');
     var stamp=now(),stored=[];views.forEach(function(v,i){if(shares[i])stored.push({id:eventId(v.id),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
     checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
