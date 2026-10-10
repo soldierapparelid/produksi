@@ -3,7 +3,9 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const root=path.resolve(__dirname,'..'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 function part(a,b){const p=html.indexOf(a),q=html.indexOf(b,p+a.length);assert.ok(p>=0&&q>p,a);return html.slice(p,q);}
 function fixture(opt){opt=opt||{};const c=vm.createContext({console});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);vm.runInContext(`
-var A={},S={state:{settings:{ukuran:['M','L','XL']}}},D={po:{po1:{id:'po1',nama:'Polo',status:'aktif',ukuran:{}}}},rendered='',requests=[],messages=[],closed=0,admin=${opt.admin?'true':'false'};
+var A={},R={},S={state:{settings:{ukuran:['M','L','XL']}}},rendered='',requests=[],messages=[],closed=0,admin=${opt.admin?'true':'false'};
+var D={po:{po1:{id:'po1',nama:'Polo',status:'aktif',ukuran:{},workflow:{ukuran:{M:{maklon:{maklon1:{kirim:332,diterima:0,reject:0,diajukan:332,sisa:332}}},L:{maklon:{maklon1:{kirim:120,diterima:70,reject:2,diajukan:0,sisa:48}}},XL:{maklon:{other:{kirim:50,diterima:0,reject:0,diajukan:0,sisa:50}}}}}}}};
+function workflowFor(po){return po.workflow||{ukuran:{}};}function poSizes(){return ['M','L','XL'];}var ringkas={hidden:true,className:'',textContent:''};function $(sel){return sel==='[data-terima-ringkas]'?ringkas:null;}
 var lama={id:'pending1',noSlip:'',poId:'po1',maklonId:'maklon1',tanggal:'2026-10-07',ukuran:{M:332},total:332,reject:0,rejectUkuran:{},upah:0,status:'diajukan',asal:'lama',catatan:'Sisa laporan jahit belum dihitung',imporSumber:JSON.stringify({baseline:true,skuId:'sku1',siklus:'current',field:'jahit',entryId:''})};
 var baru={id:'native01',noSlip:'',poId:'po1',maklonId:'maklon1',tanggal:'2026-10-08',ukuran:{M:100},total:100,reject:0,rejectUkuran:{},upah:0,status:'diajukan',asal:'',imporSumber:''};
 var slips={pending1:lama,native01:baru},form={values:{id:'pending1',tanggal:'2026-10-09',upah:'',catatan:''},sizes:{M:106},rejects:{}},button={};
@@ -43,10 +45,28 @@ test('counting everything, or good plus real rejects, leaves nothing waiting',as
 
 test('more than the old report, a missing date or a future date is stopped on the device',()=>{
   const f=fixture();f.run("form.sizes={M:332};form.rejects={M:226};A.terimaSave(button)");
-  assert.equal(f.c.requests.length,0);assert.match(f.c.messages.join(' '),/Hitungan M melebihi laporan lama \(332 pcs\)/);
+  assert.equal(f.c.requests.length,0);assert.match(f.c.messages.join(' '),/Ukuran M: dihitung 332 \+ reject 226 = 558 pcs, lebih dari laporan 332 pcs\. Reject hanya untuk barang rusak; kosongkan kalau tidak ada\./);
+  f.run("form.sizes={M:400};form.rejects={};A.terimaSave(button)");assert.match(f.c.messages.join(' '),/Hitungan M \(400 pcs\) melebihi laporan lama \(332 pcs\)\. Kelebihannya dicatat lewat Catat langsung\./);
   f.run("form.sizes={M:10};form.rejects={};form.values.tanggal='';A.terimaSave(button)");assert.match(f.c.messages.join(' '),/Isi tanggal hitungnya/);
   f.run("form.values.tanggal='2026-10-10';A.terimaSave(button)");assert.match(f.c.messages.join(' '),/tidak boleh melewati hari ini/);
   assert.equal(f.c.requests.length,0);
+});
+
+test('the reject boxes are folded away, the form shows where the sewer stands on this PO, and a running line says what is left',()=>{
+  const f=fixture();f.run("openTerima('pending1')");const out=f.c.rendered;
+  assert.match(out,/<details class="rj-lipat"><summary>Ada barang reject \(rusak\)\? Ketuk untuk mengisi<\/summary><div>Reject<\/div>/,'closed until someone really has rejects');
+  assert.match(out,/data-form="terima" data-lapor="\{&quot;M&quot;:332\}"/);assert.match(out,/Jumlah yang Anda hitung per ukuran \(pcs bagus\)/);
+  assert.match(out,/Jahitan Mang Atep di PO ini/);
+  assert.match(out,/<tr><td class="b">M<\/td><td>332<\/td><td class="z">–<\/td><td>332<\/td><td class="z">–<\/td><\/tr><tr><td class="b">L<\/td><td>120<\/td><td>72<\/td><td class="z">–<\/td><td>48<\/td><\/tr>/,'assigned, counted, waiting for the count, still being sewn');
+  assert.match(out,/<tfoot><tr><td>Total<\/td><td>452<\/td><td>72<\/td><td>332<\/td><td>48<\/td><\/tr><\/tfoot>/);assert.ok(!/<td class="b">XL<\/td>/.test(out),'another sewer\'s size is not listed');
+  f.run("var fake={sizes:{M:106},rejects:{},getAttribute:function(){return JSON.stringify({M:332});}};R.terima(fake)");
+  assert.equal(f.c.ringkas.hidden,false);assert.equal(f.c.ringkas.className,'note');assert.equal(f.c.ringkas.textContent,'M: laporan 332 · dihitung 106 · sisa menunggu 226');
+  f.run("fake.sizes={M:72};fake.rejects={M:72};fake.getAttribute=function(){return JSON.stringify({M:72});};R.terima(fake)");
+  assert.equal(f.c.ringkas.className,'note bad');assert.equal(f.c.ringkas.textContent,'M: dihitung 72 + reject 72 = 144 pcs, lebih dari laporan 72 pcs. Reject hanya untuk barang rusak; kosongkan kalau tidak ada.');
+  f.run("fake.sizes={M:60};fake.rejects={M:12};R.terima(fake)");assert.equal(f.c.ringkas.textContent,'M: laporan 72 · dihitung 60 · reject 12 · sisa menunggu 0');
+  /* a new report from a sewer has no running line */
+  f.run("fake.getAttribute=function(){return null;};R.terima(fake)");assert.equal(f.c.ringkas.hidden,true);
+  f.run("openTerima('native01')");assert.ok(!/data-lapor=/.test(f.c.rendered));assert.match(f.c.rendered,/<details class="rj-lipat">/);
 });
 
 test('a new report from a sewer is counted as before, only with the count date added',async()=>{
