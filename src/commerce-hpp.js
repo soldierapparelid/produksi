@@ -391,11 +391,14 @@ function coreCommerceHpp(input) {
   rows(tables.KoreksiRiwayat).forEach(function(r){var g=poMap[r.poId];if(g)g.warnings.push('Jumlah riwayat memiliki koreksi fisik; cocokkan acuan biaya lama sebelum memakai HPP.');});
   function nativeCosts(g){
     if(!g.nativeCuts.length)return null;
+    /* Acuan biaya memakai potongan ukuran XL saja bila ada: satu barang (M sampai XXL) dihitung dari kebutuhan kain XL.
+       Potongan yang memuat beberapa ukuran sekaligus tidak bisa dipisah per ukuran, jadi tidak dihitung sebagai acuan XL. */
+    var acuanXL=g.nativeCuts.filter(function(r){var m=json(r.ukuran,{}),ada=Object.keys(m).filter(function(k){return (n(m[k]) || 0)>0;});return ada.length===1&&String(ada[0]).trim().toUpperCase()==='XL';}),cuts=acuanXL.length?acuanXL:g.nativeCuts;
     var pcs=0,fabricCost=0,cutCost=0,warnings=[],cutWarnings=[],details=[],cutDetails=[];
     function warn(s){warnings.push(s);}
     function price(p){var qty=n(p.qty),rate=n(p.harga),total=n(p.total);if(qty===null||qty<=0)return null;if(rate!==null&&rate>0){if(total!==null&&Math.abs(total-qty*rate)>Math.max(1,qty*rate*0.000001))return null;return rate;}return total!==null&&total>0?total/qty:null;}
     function average(name,u){var purchases=(stockByName[C.norm(name)] || []).filter(function(p){return unit(p.satuan)===u;}),qty=0,cost=0;if(!purchases.length)return null;for(var i=0;i<purchases.length;i++){var pr=price(purchases[i]);if(pr===null)return null;qty+=Number(purchases[i].qty);cost+=Number(purchases[i].qty)*pr;}return qty?cost/qty:null;}
-    g.nativeCuts.forEach(function(r){
+    cuts.forEach(function(r){
       var q=n(r.total), sizeMap=json(r.ukuran,{}), actual=sum(Object.keys(sizeMap).map(function(k){return n(sizeMap[k]) || 0;}));
       if(q===null||q<=0||!Number.isSafeInteger(q)||q!==actual){warn('Jumlah hasil potong '+r.id+' belum konsisten.');cutWarnings.push('Jumlah hasil potong belum konsisten.');return;}pcs+=q;
       var wage=n(r.tarif);if(wage===null)cutWarnings.push('Tarif potong '+r.id+' belum tercatat.');else{cutCost+=q*wage;cutDetails.push({id:r.id,tanggal:r.tanggal || '',jumlah:q,tarif:wage,totalCost:q*wage,source:'tarif-tercatat'});}
@@ -411,7 +414,7 @@ function coreCommerceHpp(input) {
       });
       Object.keys(declared).forEach(function(key){var d=declared[key],left=d.qty-(allocated[key] || 0);if(left< -0.000001){warn('Jumlah rol melebihi bahan pada hasil potong '+r.id+'.');return;}if(left<=0.000001)return;var rate=average(d.nama,d.unit);if(rate===null)warn('Harga rata-rata pembelian '+d.nama+' ('+d.unit+') belum lengkap.');else fabricCost+=left*rate;details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:left,avgHarga:rate,totalCost:rate===null?null:left*rate,priceSource:'rata-rata-pembelian'});});
     });
-    return {fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
+    return {xl:!!acuanXL.length,fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:acuanXL.length?'Catatan bahan Produksi, potongan ukuran XL':'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
   }
   function nativeSewing(g){
     var cost=0,pcs=0,warnings=[],seen=Object.create(null);
@@ -422,11 +425,12 @@ function coreCommerceHpp(input) {
     return {perPcs:null,totalPcs:0,totalCost:0,complete:false,warnings:warnings.concat(rates.length?'Tarif jahit model berbeda; pilih perkiraan manual.':'Tarif jahit belum tersedia.'),source:'Belum ada tarif jahit'};
   }
   var models=Object.keys(groups).sort().map(function(id){
-    var g=groups[id],lc=g.legacy?C.reference(g.legacy,legacy.stock || {}):null,lp=lc?C.cutting(g.legacy,legacy.meta || {},lc):null,ls=g.legacy?C.sewing(g.legacy,legacy.workers || []):null,native=nativeCosts(g),ns=nativeSewing(g),kain=evidence([lc,native&&native.fabric]),potong=evidence([lp,native&&native.cutting]);
+    var g=groups[id],lc=g.legacy?C.reference(g.legacy,legacy.stock || {}):null,lp=lc?C.cutting(g.legacy,legacy.meta || {},lc):null,ls=g.legacy?C.sewing(g.legacy,legacy.workers || []):null,native=nativeCosts(g),ns=nativeSewing(g),pakaiXL=!!(native&&native.xl),kain=evidence(pakaiXL?[native.fabric]:[lc,native&&native.fabric]),potong=evidence(pakaiXL?[native.cutting]:[lp,native&&native.cutting]);
     var jahit=ns.totalPcs?(ls&&ls.totalPcs?evidence([ls,ns]):ns):(ls || ns),ci=C.config({id:id,members:g.members},cfg),value=ci.value,mode=value&&value.jahitMode || (value?'manual':'auto');
     if(mode!=='auto'&&mode!=='manual')g.warnings.push('Pilihan ongkos jahit tidak valid.');
     var hargaJahit=mode==='auto'?(jahit.complete?jahit.perPcs:null):n(value&&value.hargaJahit),biayaLain=value?n(value.biayaLain===undefined?0:value.biayaLain):0,margin=value?n(value.targetMargin===undefined?30:value.targetMargin):30;
-    var basis={policy:'complete-legacy-v1',allPcs:(lc?lc.basis.allPcs:0)+(native?native.fabric.totalPcs:0),includedPcs:kain.totalPcs,excludedPcs:lc?lc.basis.excludedPcs:0,excluded:lc?lc.basis.excluded:[],origins:{legacy:lc?lc.totalPcs:0,native:native?native.fabric.totalPcs:0}};
+    var basis={policy:'complete-legacy-v1',allPcs:(lc?lc.basis.allPcs:0)+(native?native.fabric.totalPcs:0),includedPcs:kain.totalPcs,excludedPcs:pakaiXL?0:(lc?lc.basis.excludedPcs:0),excluded:pakaiXL?[]:(lc?lc.basis.excluded:[]),origins:{legacy:pakaiXL?0:(lc?lc.totalPcs:0),native:native?native.fabric.totalPcs:0}};
+    if(pakaiXL)basis.ukuran='XL';
     var warnings=unique(g.warnings.concat(kain.warnings,potong.warnings,ci.warnings));
     if(hargaJahit===null)warnings=warnings.concat(jahit.warnings,['Isi ongkos jahit atau lengkapi tarif penugasan.']);
     if(ci.source==='legacy-compatible')warnings.push('Biaya lama tetap tersimpan. Periksa dan simpan sekali untuk model ini.');
