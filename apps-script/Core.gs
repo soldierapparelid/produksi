@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.22';
+var APP_VERSION = '1.5.23';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -2876,7 +2876,7 @@ function createCore(store, env) {
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
-  var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
+  var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, gantiCommerceGroupPayment:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
 
   function handle(action, payload) {
@@ -5387,6 +5387,37 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     views.forEach(function(v){if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa. Keluarkan order itu dari pembayaran grup.');});
     var shares=coreCommerceSplit(amount,views.map(function(v){return v.balance;}));if(!shares)fail('Pembayaran grup harus lebih dari nol dan tidak melebihi sisa tagihan grup.');
     var stamp=now(),stored=[];views.forEach(function(v,i){if(shares[i])stored.push({id:eventId(v.id),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
+    checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
+  };
+  /* Ubah atau hapus satu pembayaran gabungan (owner). Semua bagiannya di tiap order dikoreksi sekaligus, lalu total yang
+     baru dibagi ulang menurut sisa tagihan tiap order (sisa dihitung seolah pembayaran lama belum ada). jumlah 0 berarti
+     pembayaran gabungan itu dihapus. Tidak ada baris yang dibuang: bagian lama tetap ada sebagai riwayat yang dikoreksi. */
+  actions.gantiCommerceGroupPayment=function(p){
+    var me=writable(p,true),key=id(p.id),groupId=id(p.groupId),amount=num(p.jumlah,1e15,false,true);
+    function answer(){var out={groupId:key};if(p.withState===true)out.commerce=stateOf('pembelian',me);return out;}
+    function voidId(eventId){return 'gg_'+coreCommerceHash([key,eventId]).slice(0,40);}
+    var semua=store.read('CommerceEvent').filter(function(e){return e.module==='pembelian';});
+    var lama=semua.filter(function(e){return e.kind==='payment'&&coreCommerceData(e).groupId===groupId;});
+    if(!lama.length)fail('Pembayaran gabungan tidak ditemukan.');
+    var bekas={};lama.forEach(function(e){bekas[voidId(e.id)]=true;});
+    var sudah=semua.filter(function(e){return bekas[e.id];});
+    if(sudah.length){if(sudah.some(function(e){return e.dibuatOleh!==me.id;}))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return answer();}
+    if(semua.some(function(e){return coreCommerceData(e).groupId===key;}))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');
+    var awal=coreCommerceData(lama[0]),d={tanggal:date(p.tanggal||awal.tanggal),catatan:text(p.catatan,500),metode:text(p.metode||awal.metode||'transfer',40,true)};
+    var seen={},rows=[];lama.forEach(function(e){if(seen[e.parentId])return;seen[e.parentId]=true;rows.push(find('pembelian','order',e.parentId));});
+    var views=rows.map(view),bagian={};
+    views.forEach(function(v){
+      if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');
+      if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa.');
+      bagian[v.id]=v.events.filter(function(e){return e.kind==='payment'&&!e.voided&&e.groupId===groupId;});
+    });
+    var hidup=0;views.forEach(function(v){bagian[v.id].forEach(function(e){hidup+=coreNum(e.jumlah);});});
+    if(!hidup)fail('Pembayaran gabungan ini sudah dikoreksi.');
+    var shares=amount?coreCommerceSplit(amount,views.map(function(v){return v.balance+bagian[v.id].reduce(function(n,e){return n+coreNum(e.jumlah);},0);})):views.map(function(){return 0;});
+    if(!shares)fail('Pembayaran gabungan melebihi sisa tagihan order-ordernya.');
+    var stamp=now(),hari=String(stamp).slice(0,10),stored=[];
+    views.forEach(function(v){bagian[v.id].forEach(function(e){stored.push({id:voidId(e.id),module:'pembelian',parentId:v.id,kind:'void',data:JSON.stringify({tanggal:hari,catatan:amount?'Pembayaran gabungan diubah':'Pembayaran gabungan dihapus',eventId:e.id}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});});
+    views.forEach(function(v,i){if(shares[i])stored.push({id:'gp_'+coreCommerceHash([key,v.id]).slice(0,40),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
     checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
   };
   actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return reply(module,row,p,me);fail('Catatan sudah dibatalkan.');}expected(row,p);
