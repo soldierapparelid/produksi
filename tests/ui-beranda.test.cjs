@@ -137,3 +137,30 @@ test('a clean day says so, and the page actions exist', () => {
   assert.match(html, /A\.todoGo = function/);
   assert.match(html, /A\.berandaPeriode = function \(el\) \{ S\.sub\.bdP = el\.getAttribute\('data-v'\); LS\.set\('pk_beranda_periode'/);
 });
+
+test('a late sewing job can be given a new target from its own row; an order near its deadline opens the PO form', async () => {
+  const c = context(); isi(c);
+  vm.runInContext(`p2.jenis='pesanan';p2.pelanggan='Komunitas';p2.deadline=coreYmd(new Date(Date.now()+86400000));`, c);
+  const telat = json(c, 'tindakan().filter(function(x){return x.k==="telat";}).map(function(x){return [x.btn,x.a,x.id,x.m||"",x.v===undefined?"":x.v,x.lihat];})');
+  assert.deepEqual(telat, [['Ubah target', 'targetOpen', 'p2', 'atep', json(c, 'lama'), 'p2'], ['Ubah deadline', 'poEdit', 'p2', '', '', 'p2']]);
+  vm.runInContext("S.sub.todoK='telat';", c);
+  const view = vm.runInContext('VIEWS.beranda()', c);
+  assert.match(view, /<button class="btn sm ghost" data-a="poOpen" data-id="p2">Lihat<\/button><button class="btn sm" data-a="targetOpen" data-id="p2" data-m="atep" data-v="\d{4}-\d\d-\d\d">Ubah target<\/button>/);
+  assert.match(view, /<button class="btn sm ghost" data-a="poOpen" data-id="p2">Lihat<\/button><button class="btn sm" data-a="poEdit" data-id="p2">Ubah deadline<\/button>/);
+  /* the dialog and what it sends */
+  vm.runInContext(`var A={},sheets=[{node:{}}],log={req:[],toast:[],tutup:0},isian={poId:'p2',maklonId:'atep',target:'2026-10-25'};
+    function hid(n,v){return '<input type="hidden" name="'+n+'" value="'+v+'">';} function fTanggal(l,n,v){return '<input type="date" name="'+n+'" value="'+v+'" data-label="'+l+'">';}
+    function sheetHtml(t,b,f){return t+'|'+b+'|'+f;} function openSheet(fn){log.lembar=fn();} function closeSheet(){log.tutup++;} function formVals(){return isian;} function quiet(){}
+    function toast(m,bad){log.toast.push((bad?'!':'')+m);} function act(el,p){return Promise.resolve(p);}
+    function req(a,p){log.req.push([a,JSON.parse(JSON.stringify(p))]);return Promise.resolve({ok:true});}`, c);
+  vm.runInContext(between('A.targetOpen = function', 'A.goPegawai = function'), c);
+  vm.runInContext(`A.targetOpen({getAttribute:function(k){return {'data-id':'p2','data-m':'atep','data-v':lama}[k];}});`, c);
+  const lembar = json(c, 'log.lembar');
+  assert.match(lembar, /^Target selesai\|/); assert.match(lembar, /<b>Atep<\/b> · Polo · target sekarang /); assert.match(lembar, new RegExp('name="target" value="' + json(c, 'todayYmd()') + '"'), 'a target already in the past is not offered again');
+  assert.match(lembar, /data-a="targetSave" data-kosong="1">Tanpa target/); assert.match(lembar, /class="btn pri" data-a="targetSave">Simpan/);
+  vm.runInContext(`A.targetSave({getAttribute:function(){return null;}});A.targetSave({getAttribute:function(k){return k==='data-kosong'?'1':null;}});isian.target='';A.targetSave({getAttribute:function(){return null;}});`, c);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(json(c, 'log.req'), [['ubahTargetJahit', { poId: 'p2', maklonId: 'atep', target: '2026-10-25' }], ['ubahTargetJahit', { poId: 'p2', maklonId: 'atep', target: '' }]]);
+  assert.equal(json(c, 'log.tutup'), 2); assert.match(json(c, 'log.toast').join('|'), /Target diubah\.\|Target dihapus\.|!Isi tanggal targetnya\./);
+  assert.match(html, /data-a="targetOpen" data-id="' \+ esc\(po\.id\) \+ '" data-m="' \+ esc\(mid\) \+ '"/, 'the per-sewer table of a PO offers the same dialog');
+});
