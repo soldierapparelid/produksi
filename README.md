@@ -109,6 +109,8 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.16 — **Input QC per setoran yang sudah dihitung.** Penjahit menyetor bertahap, jadi QC tidak lagi menunggu seluruh PO selesai dijahit dan dihitung: `createQC` menerima slip mana pun yang sudah diterima (tetap satu kali per slip dan ukuran, dan harus mencakup seluruh hitungan slip itu). Di alur produksi, `readyQC` per ukuran kini berarti "ada hitungan yang boleh diperiksa"; "seluruh ukuran sudah kembali dan dihitung" pindah ke `countComplete`, yang tetap menjadi syarat `complete` dan penutupan PO. Persiapan potong yang masih menunggu tidak lagi menahan QC. Upah tidak berubah: sebelum QC mengikuti hitungan slip, sesudah QC mengikuti barang OK slip itu. Layar QC dan PO tidak lagi menulis "menunggu seluruh PO"; daftar "Jahitan belum lengkap" menunjukkan berapa yang sudah dihitung dan berapa yang masih dijahit.
+
 Mulai 1.5.15 (hanya tampilan, formulir "Hitung & terima"): kotak Reject dilipat di balik "Ada barang reject (rusak)?" supaya tidak terisi tanpa sengaja; ada tabel "Jahitan <penjahit> di PO ini" (ditugaskan, sudah dihitung, menunggu dihitung, masih dijahit per ukuran, dari alur produksi server); untuk laporan lama ada ringkasan langsung "laporan · dihitung · reject · sisa menunggu"; pesan salah isi menyebut angkanya (dihitung + reject melebihi laporan).
 
 Mulai 1.5.14:
