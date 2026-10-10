@@ -37,7 +37,8 @@ test('114→144→114 changes physical projection and keeps raw paid source, rec
   assert.equal(first.state.payroll[0].total, 114); assert.equal(first.state.payroll[0].paidQty, 114);
   assert.deepEqual(first.state.stokRingkas, oldState.stokRingkas);
   assert.equal(first.state.po[0].imporReview, 'Bukti sejarah belum lengkap'); assert.equal(first.state.po[0].workflow.readyQC, false);
-  assert.throws(() => a.call('createSetor', { setor: { poId: 'po00001', maklonId: 'worker1', ukuran: { XXL: 144 } } }), /Bukti sejarah/);
+  /* the review stays on record, but since 1.5.22 an old-app PO no longer stops new work (see po-lama-jalan.test.cjs) */
+  assert.deepEqual(first.state.po[0].workflow.issues, ['Bukti sejarah belum lengkap']); assert.deepEqual(first.state.po[0].workflow.blockingIssues, []); assert.equal(first.state.po[0].workflow.lama, true);
   a.call('makePdf', { type: 'upah', id: 'receipt1' });
   assert.match(a.run('pdfHtml'), /114/); assert.match(a.run('pdfHtml'), /57\.000/);
   const second = a.save(114, 'change02');
