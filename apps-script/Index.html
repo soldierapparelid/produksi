@@ -147,6 +147,56 @@ button.kpi:hover { border-color: var(--accent); }
 .kpi .u { font-size: 12px; color: var(--muted); }
 .kpi.alert { border-color: var(--warn); background: var(--warn-soft); }
 .kpi.alert .v { color: var(--warn); }
+/* ---------- Beranda: baris siaga, laporan divisi, saringan ---------- */
+.kpi { transition: border-color .15s, transform .12s; }
+button.kpi:active { transform: scale(.98); }
+.siaga { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: var(--r); border: 1px solid var(--line); background: var(--surface); }
+.siaga.bad { background: var(--bad-soft); border-color: var(--bad); }
+.siaga.warn { background: var(--warn-soft); border-color: var(--warn); }
+.siaga.info { background: var(--info-soft); border-color: transparent; }
+.siaga.ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); align-items: center; }
+.siaga-ic { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none; background: var(--surface); color: var(--info); }
+.siaga.bad .siaga-ic { color: var(--bad); } .siaga.warn .siaga-ic { color: var(--warn); } .siaga.ok .siaga-ic { color: var(--ok); }
+.siaga-t { font-family: var(--f-display); font-weight: 700; font-size: 21px; line-height: 1.15; letter-spacing: .01em; }
+.siaga button.chip { cursor: pointer; min-height: 32px; padding: 4px 12px; font-size: 13px; background: var(--surface); border-color: var(--line); color: var(--ink-2); }
+.siaga button.chip:hover { border-color: var(--accent); }
+.siaga button.chip b { font-variant-numeric: tabular-nums; color: var(--ink); }
+.siaga button.chip.bad b { color: var(--bad); } .siaga button.chip.warn b { color: var(--warn); } .siaga button.chip.info b { color: var(--info); } .siaga button.chip.ok b { color: var(--ok); }
+.bd-h { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.g-div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1080px) { .g-div { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.dv { background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--c); border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dv-h { display: flex; align-items: center; gap: 8px; }
+.dv-ic { width: 30px; height: 30px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--c); flex: none; }
+.dv-n { font-family: var(--f-display); font-weight: 700; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+.dv-u { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.dv-r { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; color: var(--ink-2); min-width: 0; }
+.dv-r b { font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.dv-pos { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 0; border-top: 1px dashed var(--line); padding: 9px 0 0; font-size: 13px; color: var(--ink-2); }
+.dv-pos b { font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.dv-pos:hover { color: var(--accent); }
+.dv-m { display: flex; flex-direction: column; gap: 6px; margin-top: auto; }
+.dv-m button { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; border: 0; border-radius: var(--r-s); padding: 8px 10px; min-height: 36px; font-size: 13px; font-weight: 600; background: var(--warn-soft); color: var(--warn); }
+.dv-m button.bad { background: var(--bad-soft); color: var(--bad); }
+.dv-m button:hover { filter: brightness(1.08); }
+.dv-ok { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ok); }
+.saring { display: flex; gap: 6px; padding: 10px 14px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.saring::-webkit-scrollbar { display: none; }
+.saring button { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.saring button b { font-variant-numeric: tabular-nums; color: var(--muted); }
+.saring button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.saring button.on b { color: inherit; }
+.item.todo.sv-bad { box-shadow: inset 3px 0 0 var(--bad); }
+.item.todo.sv-warn { box-shadow: inset 3px 0 0 var(--warn); }
+.item.todo.sv-info { box-shadow: inset 3px 0 0 var(--info); }
+.item.todo.sv-ok { box-shadow: inset 3px 0 0 var(--ok); }
+.item.lagi { justify-content: center; color: var(--accent); font-weight: 600; font-size: 13.5px; min-height: 44px; }
+.item.ev { gap: 8px; }
+.item-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 0; text-align: left; }
+.item-main:hover .t { color: var(--accent); }
+.btn.perlu { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+#bd-todo { scroll-margin-top: calc(var(--top-h) + 12px); }
+@media (max-width: 619px) { .dv { padding: 12px; } .dv-n { font-size: 30px; } .siaga { padding: 12px; } .siaga-ic { width: 34px; height: 34px; } }
 
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); white-space: nowrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
@@ -372,7 +422,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261010-qc-per-setoran-1516';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261010-beranda-divisi-1517';</script>
 <script>
 (function () {
 'use strict';
@@ -394,7 +444,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.16';
+var APP_VERSION = '1.5.17';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -5731,7 +5781,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.16';
+var UI_VERSION = '1.5.17';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -7365,44 +7415,62 @@ A.logout = function () {
 function poAktif() { return S.state.po.filter(function (p) { return p.status === 'aktif'; }); }
 function maklonAktif() { return S.state.users.filter(function (u) { return u.divisi === 'jahit' && u.aktif; }); }
 
-/* daftar hal yang menunggu tindakan owner, urut dari yang paling mendesak */
+/* daftar hal yang menunggu tindakan owner, urut dari yang paling mendesak.
+   k = kelompok untuk tombol saring di Beranda, w = urutan (kecil = lebih dulu), cls = warna tingkat masalah. */
 function tindakan() {
   var st = S.state, out = [];
+  /* uang lebih dulu: slip dan potongan yang harganya kosong tidak menambah upah di slip mingguan */
+  st.setor.forEach(function (s) {
+    if (s.status === 'diterima' && !sourcePaid(s) && !(s.upah > 0) && s.total > 0) out.push({ k: 'harga', j: 'jahit', w: 0, n: s.total, icon: 'wallet', cls: 'warn', t: 'Slip ' + s.noSlip + ' belum punya harga', d: namaUser(s.maklonId) + ' · ' + poNama(s.poId) + ' · ' + nf(s.total) + ' pcs', btn: 'Atur harga', a: 'hargaOpen', id: s.id, s: 'SlipSetor' });
+  });
+  st.potong.forEach(function (r) {
+    if (!sourcePaid(r) && !(r.tarif > 0) && r.total > 0) out.push({ k: 'harga', j: 'potong', w: 0, n: r.total, icon: 'wallet', cls: 'warn', t: 'Potongan ' + tgl(r.tanggal) + ' belum punya harga', d: namaUser(r.userId) + ' · ' + poNama(r.poId) + ' · ' + nf(r.total) + ' pcs', btn: 'Atur harga', a: 'hargaOpen', id: r.id, s: 'Potong' });
+  });
+  /* setoran maklon yang belum dihitung: laporan baru dulu, laporan lama dari aplikasi sebelumnya sesudahnya */
   st.setor.forEach(function (s) {
     if (s.status !== 'diajukan') return;
-    out.push({ w: 0, icon: 'inbox', cls: 'warn', t: namaUser(s.maklonId) + ' melapor setor ' + nf(s.total) + ' pcs', d: poNama(s.poId) + ' · belum dihitung QC · ' + lalu(s.dibuat), btn: 'Hitung', a: 'terimaOpen', id: s.id });
+    var lama = setorLaporanLama(s);
+    out.push({ k: 'hitung', w: lama ? 3 : 1, n: s.total, icon: 'inbox', cls: 'warn', t: namaUser(s.maklonId) + ' melapor setor ' + nf(s.total) + ' pcs', d: poNama(s.poId) + ' · belum dihitung QC · ' + (lama ? 'laporan lama · ' : '') + lalu(s.dibuat), btn: 'Hitung', a: 'terimaOpen', id: s.id });
   });
+  var tanpaUpah = {};
   poAktif().forEach(function (po) {
     var m = (po.agg && po.agg.maklon) || {};
     Object.keys(m).forEach(function (mid) {
       var x = m[mid]; var d = selisihHari(x.target);
-      if (x.sisa > 0 && d !== null && d < 0) out.push({ w: 1, n: x.sisa, icon: 'clock', cls: 'bad', t: namaUser(mid) + ' telat ' + (-d) + ' hari', d: po.nama + ' · sisa ' + nf(x.sisa) + ' pcs · target ' + tgl(x.target), btn: 'Lihat', a: 'poOpen', id: po.id });
+      if (x.sisa > 0 && d !== null && d < 0) out.push({ k: 'telat', w: 2, n: x.sisa, icon: 'clock', cls: 'bad', t: namaUser(mid) + ' telat ' + (-d) + ' hari', d: po.nama + ' · sisa ' + nf(x.sisa) + ' pcs · target ' + tgl(x.target), btn: 'Lihat', a: 'poOpen', id: po.id });
     });
     if (po.jenis === 'pesanan' && po.deadline) {
       var dl = selisihHari(po.deadline);
-      if (dl !== null && dl <= 3) out.push({ w: dl < 0 ? 1 : 2, icon: 'alert', cls: dl < 0 ? 'bad' : 'warn', t: 'Pesanan ' + (po.pelanggan || '') + (dl < 0 ? ' lewat ' + (-dl) + ' hari' : (dl === 0 ? ' jatuh tempo hari ini' : ' jatuh tempo ' + dl + ' hari lagi')), d: po.nama + ' · ' + po.noPO, btn: 'Lihat', a: 'poOpen', id: po.id });
+      if (dl !== null && dl <= 3) out.push({ k: 'telat', w: dl < 0 ? 2 : 3, icon: 'alert', cls: dl < 0 ? 'bad' : 'warn', t: 'Pesanan ' + (po.pelanggan || '') + (dl < 0 ? ' lewat ' + (-dl) + ' hari' : (dl === 0 ? ' jatuh tempo hari ini' : ' jatuh tempo ' + dl + ' hari lagi')), d: po.nama + ' · ' + po.noPO, btn: 'Lihat', a: 'poOpen', id: po.id });
     }
     var t = T(po);
-    if (t.siapKirim > 0) out.push({ w: 3, n: t.siapKirim, icon: 'send', cls: 'info', t: nf(t.siapKirim) + ' pcs sudah dipotong, belum ditugaskan ke maklon', d: po.nama + ' · ' + po.noPO, btn: 'Tugaskan', a: 'kirimOpen', id: po.id });
+    if (pos(t.qcPerbaikan) > 0) out.push({ k: 'qc', w: 4, n: t.qcPerbaikan, icon: 'shield', cls: 'warn', t: nf(t.qcPerbaikan) + ' pcs sedang diperbaiki', d: po.nama + ' · ' + po.noPO + ' · belum kembali ke QC', btn: 'Lihat', a: 'poOpen', id: po.id });
+    if (t.siapKirim > 0) out.push({ k: 'tugas', w: 5, n: t.siapKirim, icon: 'send', cls: 'info', t: nf(t.siapKirim) + ' pcs sudah dipotong, belum ditugaskan ke maklon', d: po.nama + ' · ' + po.noPO, btn: 'Tugaskan', a: 'kirimOpen', id: po.id });
+    /* PO yang seluruh ukurannya sudah selesai QC (dan sudah diinput ke BigSeller) tinggal ditutup */
+    if (poTahap(po).k === 'tuntas' && (po.jenis === 'pesanan' || !(pos(t.stok) > 0))) out.push({ k: 'tutup', w: 6, icon: 'check', cls: 'ok', t: po.nama + ' sudah tuntas', d: po.noPO + ' · semua ukuran selesai QC' + (po.jenis === 'pesanan' ? '' : ' dan sudah diinput ke BigSeller'), btn: 'Tandai selesai', a: 'poStatusSet', id: po.id, v: 'selesai' });
+    /* barang yang upah per pcs-nya kosong: potongan atau penugasan berikutnya akan tersimpan tanpa harga */
+    var pr = po.produkId ? D.produk[po.produkId] : null;
+    if (pr) {
+      var perluPotong = poUkuranPotong(po).length > 0, x2 = tanpaUpah[pr.id] || (tanpaUpah[pr.id] = { pr: pr, potong: false, jahit: false });
+      if (perluPotong && !(tarifBawaan(po, 'tarifPotong') > 0)) x2.potong = true;
+      if ((perluPotong || t.siapKirim > 0) && !(tarifBawaan(po, 'tarifJahit') > 0)) x2.jahit = true;
+    }
+  });
+  Object.keys(tanpaUpah).forEach(function (id) {
+    var x = tanpaUpah[id]; if (!x.potong && !x.jahit) return;
+    out.push({ k: 'upah', w: 7, icon: 'tag', cls: 'info', t: x.pr.nama + ' belum punya upah ' + [x.potong ? 'potong' : '', x.jahit ? 'jahit' : ''].filter(Boolean).join(' dan '), d: 'Dipakai PO aktif · isi sekali, catatan berikutnya langsung punya harga', btn: 'Isi upah', a: 'produkOpen', id: id });
   });
   /* divisi yang belum punya akun sama sekali */
   [['qc', 'Belum ada akun QC', 'Setoran maklon baru bisa dihitung QC setelah akunnya dibuat. Sementara itu owner yang menghitung.'],
    ['potong', 'Belum ada akun tukang potong', 'Hasil potong belum bisa dicatat dari HP tukang potong.'],
    ['jahit', 'Belum ada akun maklon jahit', 'Bahan belum bisa ditugaskan ke maklon.']].forEach(function (x) {
-    if (!st.users.some(function (u) { return u.aktif && u.divisi === x[0]; })) out.push({ w: 0, icon: 'user', cls: 'warn', t: x[1], d: x[2], btn: 'Tambah', a: 'pegawaiBaru', id: x[0] });
-  });
-  /* slip yang sudah terbit tetapi harganya masih kosong */
-  st.setor.forEach(function (s) {
-    if (s.status === 'diterima' && !s.upahId && !(s.upah > 0) && s.total > 0) out.push({ w: 0, icon: 'wallet', cls: 'warn', t: 'Slip ' + s.noSlip + ' belum punya harga', d: namaUser(s.maklonId) + ' · ' + poNama(s.poId) + ' · ' + nf(s.total) + ' pcs', btn: 'Atur harga', a: 'hargaOpen', id: s.id, s: 'SlipSetor' });
-  });
-  st.potong.forEach(function (r) {
-    if (!r.upahId && !(r.tarif > 0) && r.total > 0) out.push({ w: 2, icon: 'wallet', cls: 'warn', t: 'Potongan ' + tgl(r.tanggal) + ' belum punya harga', d: namaUser(r.userId) + ' · ' + poNama(r.poId) + ' · ' + nf(r.total) + ' pcs', btn: 'Atur harga', a: 'hargaOpen', id: r.id, s: 'Potong' });
+    if (!st.users.some(function (u) { return u.aktif && u.divisi === x[0]; })) out.push({ k: 'akun', w: 0, icon: 'user', cls: 'warn', t: x[1], d: x[2], btn: 'Tambah', a: 'pegawaiBaru', id: x[0] });
   });
   /* bahan yang saldonya kritis atau minus */
   var genting = (st.stokRingkas || []).filter(function (b) { return !b.sembunyi && (b.status === 'kritis' || b.status === 'minus'); });
-  if (genting.length) out.push({ w: 2, icon: 'tag', cls: 'warn', t: genting.length + ' bahan perlu diperhatikan', d: genting.slice(0, 4).map(function (b) { return b.nama + ' ' + nfQty(b.saldo) + ' ' + satuanPendek(b.satuan); }).join(' · ') + (genting.length > 4 ? ' · …' : ''), btn: 'Lihat', a: 'tab', id: 'stok' });
+  if (genting.length) out.push({ k: 'stok', w: 3, icon: 'tag', cls: 'warn', t: genting.length + ' bahan perlu diperhatikan', d: genting.slice(0, 4).map(function (b) { return b.nama + ' ' + nfQty(b.saldo) + ' ' + satuanPendek(b.satuan); }).join(' · ') + (genting.length > 4 ? ' · …' : ''), btn: 'Lihat', a: 'tab', id: 'stok' });
   var tanpaPin = st.users.filter(function (u) { return u.aktif && u.adaPin === false; });
-  if (tanpaPin.length) out.push({ w: 0, icon: 'key', cls: 'warn', t: tanpaPin.length + ' pegawai belum punya PIN', d: tanpaPin.map(function (u) { return u.nama; }).join(', ') + ' belum bisa masuk aplikasi', btn: 'Buat PIN', a: 'goPegawai', id: '' });
+  if (tanpaPin.length) out.push({ k: 'akun', w: 0, icon: 'key', cls: 'warn', t: tanpaPin.length + ' pegawai belum punya PIN', d: tanpaPin.map(function (u) { return u.nama; }).join(', ') + ' belum bisa masuk aplikasi', btn: 'Buat PIN', a: 'goPegawai', id: '' });
   out.sort(function (a, b) { return (a.w - b.w) || ((b.n || 0) - (a.n || 0)); });   /* yang paling mendesak dulu, lalu yang jumlahnya paling besar */
   return out;
 }
@@ -7431,10 +7499,6 @@ VIEWS.beranda = function () {
   if (k.qcWait) kpis += '<div class="note row"><span class="grow"><b>' + nf(k.qcWait) + ' pcs sudah dihitung tetapi QC-nya tertahan.</b> Ada catatan lama yang perlu diperiksa dulu.</span><button class="btn sm" data-a="kpiGo" data-id="po:lengkap">Lihat PO</button></div>';
 
   var todo = tindakan();
-  var todoHtml = todo.length ? todo.slice(0, 8).map(function (x) {
-    return '<div class="item"><span class="chip ' + x.cls + '" style="padding:6px">' + ic(x.icon, 's') + '</span><span class="grow"><span class="t">' + esc(x.t) + '</span><br><span class="d">' + esc(x.d) + '</span></span>' +
-      '<button class="btn sm" data-a="' + x.a + '" data-id="' + esc(x.id) + '"' + (x.s ? ' data-s="' + x.s + '" data-v="0"' : '') + '>' + x.btn + '</button></div>';
-  }).join('') + (todo.length > 8 ? '<div class="item"><span class="d">' + (todo.length - 8) + ' hal lain ada di tab PO.</span></div>' : '') : emptyBox('Tidak ada yang menunggu tindakan.');
 
   var flow = [['Belum dikirim', k.kirim, 'c-potong'], ['Di maklon', k.maklon, 'c-maklon'], ['Menunggu dicek', k.cekPcs, 'c-cek'], ['Dihitung · QC tertahan', k.qcWait, 'c-qc-wait'], ['Siap QC', k.qc, 'c-qc'], ['Belum BigSeller', k.bs, 'c-jual']];
   var tot = 0; flow.forEach(function (f) { tot += f[1]; });
@@ -7452,30 +7516,142 @@ VIEWS.beranda = function () {
       (m.telat ? '<span style="color:var(--bad)">' + m.telat + ' PO telat</span> · ' : '') + (m.cek ? nf(m.cek) + ' pcs menunggu dicek' : (m.sisa ? 'sedang mengerjakan' : 'tidak ada kerjaan')) + '</span></span><span class="n">' + nf(m.sisa) + '</span></button>';
   }).join('') : emptyBox('Belum ada maklon jahit.', '<button class="btn sm" data-a="pegawaiOpen">Tambah pegawai</button>');
 
-  var ev = [];
-  st.potong.forEach(function (r) { ev.push({ at: r.dibuat, t: namaUser(r.userId) + ' memotong ' + nf(r.total) + ' pcs', po: r.poId, c: 'c-potong' }); });
-  st.kirim.forEach(function (r) { ev.push({ at: r.dibuat, t: nf(r.total) + ' pcs dikirim ke ' + namaUser(r.maklonId), po: r.poId, c: 'c-maklon' }); });
-  st.setor.forEach(function (r) { ev.push({ at: r.dibuat, t: namaUser(r.maklonId) + ' setor ' + nf(r.total) + ' pcs' + (r.status === 'diajukan' ? ' (menunggu dicek)' : ''), po: r.poId, c: 'c-cek' }); });
-  st.qc.forEach(function (r) { ev.push({ at: r.dibuat, t: 'QC ' + nf(r.total) + ' pcs lolos' + (r.reject ? ', ' + nf(r.reject) + ' reject' : ''), po: r.poId, c: 'c-qc' }); });
-  st.gudang.forEach(function (r) { ev.push({ at: r.dibuat, t: nf(r.total) + ' pcs diinput ke BigSeller', po: r.poId, c: 'c-jual' }); });
-  ev.sort(function (a, b) { return String(a.at) < String(b.at) ? 1 : -1; });
-  var evHtml = ev.length ? ev.slice(0, 8).map(function (e) {
-    return '<button class="item ' + e.c + '" data-a="poOpen" data-id="' + esc(e.po) + '"><i style="width:8px;height:8px;border-radius:50%;background:var(--c);flex:none"></i><span class="grow"><span class="t">' + esc(e.t) + '</span><br><span class="d">' + esc(poNama(e.po)) + '</span></span><span class="xs muted nowrap">' + esc(lalu(e.at)) + '</span></button>';
-  }).join('') : emptyBox('Belum ada catatan produksi.');
-
   var kosong = !st.po.length ? '<div class="card col"><h3>Mulai dari sini</h3><ol class="steps"><li>Tambah pegawai: tukang potong, maklon jahit, dan QC. Masing-masing dapat PIN sendiri.</li><li>Tambah produk dan upah per pcs-nya.</li><li>Buat PO. Setelah itu tiap divisi tinggal mengisi bagiannya dari HP masing-masing.</li></ol>' +
     '<div class="row wrap"><button class="btn pri" data-a="pegawaiOpen">Tambah pegawai</button><button class="btn" data-a="imporOpen">Impor data dari aplikasi lama</button></div></div>' : '';
 
   return '<div class="head"><div class="grow"><h1>Laporan produksi</h1><div class="sub">' + esc(tglPanjang()) + '</div></div><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
-    kosong + kpis +
-    '<div class="grid g-2"><div class="col gap-l">' +
-    '<div class="card flush"><div class="sec-h"><h3>Perlu tindakan</h3>' + (todo.length ? '<span class="chip warn">' + todo.length + '</span>' : '') + '</div><div class="list">' + todoHtml + '</div></div>' +
+    kosong + berandaSiaga(todo) + kpis + berandaDivisi(todo, k) +
+    '<div class="grid g-2"><div class="col gap-l">' + berandaTodo(todo) +
     '<div class="card col"><h3>Barang sedang di mana</h3>' + flowHtml + '</div></div>' +
     '<div class="col gap-l"><div class="card flush"><div class="sec-h"><h3>Maklon jahit</h3><span class="label">sisa pcs</span></div><div class="list">' + mkHtml + '</div></div>' +
-    '<div class="card flush"><div class="sec-h"><h3>Catatan terbaru</h3></div><div class="list">' + evHtml + '</div></div></div></div>' + commerceHomeCards();
+    berandaCatatan() + '</div></div>' + commerceHomeCards();
 };
+
+/* ---------- Beranda: baris siaga, laporan tiap divisi, saringan Perlu tindakan, catatan terbaru ---------- */
+var TODO_KELOMPOK = [['harga', 'Harga kosong'], ['hitung', 'Belum dihitung'], ['telat', 'Telat'], ['qc', 'Perbaikan QC'], ['tugas', 'Belum ditugaskan'], ['stok', 'Stok bahan'], ['akun', 'Akun'], ['tutup', 'Bisa ditutup'], ['upah', 'Upah barang']];
+var BERANDA_PERIODE = [['hari', 'Hari ini'], ['minggu', 'Minggu ini'], ['bulan', 'Bulan ini']];
+function todoPer(todo) { var per = {}; todo.forEach(function (x) { per[x.k] = (per[x.k] || 0) + 1; }); return per; }
+function todoTingkat(rows) {
+  if (rows.some(function (x) { return x.cls === 'bad'; })) return 'bad';
+  if (rows.some(function (x) { return x.cls === 'warn'; })) return 'warn';
+  return rows.some(function (x) { return x.cls === 'info'; }) ? 'info' : 'ok';
+}
+/* satu baris di paling atas: berapa masalah yang ada dan jenisnya; ketuk jenisnya untuk langsung ke daftarnya */
+function berandaSiaga(todo) {
+  if (!S.state.po.length) return '';
+  if (!todo.length) return '<div class="siaga ok"><span class="siaga-ic">' + ic('check') + '</span><span class="grow"><b class="siaga-t">Semua beres</b><br><span class="small">Tidak ada masalah dan tidak ada yang menunggu tindakan.</span></span></div>';
+  var per = todoPer(todo), masalah = todo.filter(function (x) { return x.cls === 'bad' || x.cls === 'warn'; }).length;
+  var chips = TODO_KELOMPOK.filter(function (g) { return per[g[0]]; }).map(function (g) {
+    return '<button class="chip ' + todoTingkat(todo.filter(function (x) { return x.k === g[0]; })) + '" data-a="todoGo" data-v="' + g[0] + '">' + g[1] + ' <b>' + per[g[0]] + '</b></button>';
+  }).join('');
+  return '<div class="siaga ' + todoTingkat(todo) + '"><span class="siaga-ic">' + ic(masalah ? 'alert' : 'inbox') + '</span><div class="grow col gap-s"><div><b class="siaga-t">' + (masalah ? nf(masalah) + ' masalah perlu ditindak' : nf(todo.length) + ' hal menunggu tindakan') + '</b>' +
+    (masalah && todo.length > masalah ? ' <span class="small muted">· ' + nf(todo.length - masalah) + ' hal lain menunggu</span>' : '') + '</div><div class="chips">' + chips + '</div></div></div>';
+}
+function berandaPeriode() {
+  var v = S.sub.bdP || LS.get('pk_beranda_periode') || 'minggu';
+  return BERANDA_PERIODE.some(function (x) { return x[0] === v; }) ? v : 'minggu';
+}
+function berandaRentang(p) {
+  var n = new Date(), a = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  if (p === 'minggu') a.setDate(a.getDate() - ((a.getDay() + 6) % 7));      /* Senin minggu ini */
+  else if (p === 'bulan') a.setDate(1);
+  return { dari: coreYmd(a), sampai: todayYmd() };
+}
+/* laporan tiap divisi untuk periode yang dipilih: hasil kerjanya, posisi barang sekarang, dan masalahnya */
+function berandaDivisi(todo, k) {
+  var st = S.state; if (!st.po.length) return '';
+  var p = berandaPeriode(), r = berandaRentang(p);
+  function dalam(x) { var d = String(x.tanggal || '').slice(0, 10); return d >= r.dari && d <= r.sampai; }
+  function jml(rows, f) { var n = 0; rows.forEach(function (x) { n += pos(coreNum(x[f || 'total'])); }); return n; }
+  function perOrang(rows, key) {
+    var m = {}; rows.forEach(function (x) { var id = x[key]; if (id) m[id] = (m[id] || 0) + pos(coreNum(x.total)); });
+    return Object.keys(m).map(function (id) { return [namaUser(id), m[id]]; }).sort(function (a, b) { return b[1] - a[1]; });
+  }
+  function nTodo(kel, j) { return todo.filter(function (x) { return x.k === kel && (!j || x.j === j); }).length; }
+  function baris(label, nilai) { return '<div class="dv-r"><span class="cut">' + esc(label) + '</span><b>' + nilai + '</b></div>'; }
+  function orang(list, kosong) {
+    if (!list.length) return '<div class="dv-r muted"><span>' + kosong + '</span></div>';
+    return list.slice(0, 3).map(function (o) { return baris(o[0], nf(o[1])); }).join('') + (list.length > 3 ? '<div class="dv-r muted"><span>+' + (list.length - 3) + ' orang lain</span></div>' : '');
+  }
+  function soal(n, teks, aksi, nilai, cls) { return n ? '<button class="' + (cls || 'warn') + '" data-a="' + aksi + '" data-' + (aksi === 'kpiGo' ? 'id' : 'v') + '="' + nilai + '">' + ic('alert', 's') + '<span>' + teks + '</span></button>' : ''; }
+  function posisi(label, nilai, tujuan) { return '<button class="dv-pos" data-a="kpiGo" data-id="' + tujuan + '"><span class="grow">' + label + '</span><b>' + nilai + '</b>' + ic('chev', 's') + '</button>'; }
+  function kartu(c, icon, nama, angka, satuan, rinci, letak, masalah) {
+    return '<section class="dv ' + c + '"><div class="dv-h"><span class="dv-ic">' + ic(icon, 's') + '</span><h3 class="grow">' + nama + '</h3></div>' +
+      '<div><div class="dv-n">' + nf(angka) + '</div><div class="dv-u">' + satuan + '</div></div><div class="col gap-s">' + rinci + '</div>' + letak +
+      '<div class="dv-m">' + (masalah || '<span class="dv-ok">' + ic('check', 's') + 'Tidak ada masalah</span>') + '</div></section>';
+  }
+  var potong = st.potong.filter(dalam), kirim = st.kirim.filter(dalam), hitung = st.setor.filter(function (x) { return x.status === 'diterima' && dalam(x); }), qc = st.qc.filter(dalam), gudang = st.gudang.filter(dalam);
+  var belumPotong = poAktif().filter(function (po) { return !T(po).potong; }).length, poInput = {};
+  gudang.forEach(function (x) { poInput[x.poId] = 1; });
+  var hargaPotong = nTodo('harga', 'potong'), hargaJahit = nTodo('harga', 'jahit'), telat = nTodo('telat'), perbaikan = nTodo('qc');
+  var teksRentang = r.dari === r.sampai ? tgl(r.dari) : tgl(r.dari) + ' – ' + tgl(r.sampai);
+  return '<div class="col"><div class="bd-h"><div class="grow"><h2>Laporan divisi</h2><div class="small muted">' + esc(teksRentang) + '</div></div><div class="seg" role="tablist">' +
+    BERANDA_PERIODE.map(function (o) { return '<button data-a="berandaPeriode" data-v="' + o[0] + '"' + (o[0] === p ? ' class="on"' : '') + '>' + o[1] + '</button>'; }).join('') + '</div></div><div class="grid g-div">' +
+    kartu('c-potong', 'cut', 'Potong', jml(potong), 'pcs dipotong · ' + potong.length + ' catatan', orang(perOrang(potong, 'userId'), 'Belum ada catatan potong'),
+      posisi('PO belum dipotong', nf(belumPotong), 'po:potong'), soal(hargaPotong, hargaPotong + ' potongan belum punya harga', 'todoGo', 'harga')) +
+    kartu('c-maklon', 'people', 'Jahit maklon', jml(hitung), 'pcs disetor & dihitung · ' + hitung.length + ' slip', baris('Ditugaskan', nf(jml(kirim)) + ' pcs') + orang(perOrang(hitung, 'maklonId'), 'Belum ada setoran yang dihitung'),
+      posisi('Masih di penjahit', nf(k.maklon) + ' pcs', 'po:maklon'),
+      soal(k.cekN, k.cekN + ' setoran belum dihitung', 'todoGo', 'hitung') + soal(telat, telat + ' telat dari target', 'todoGo', 'telat', 'bad') + soal(hargaJahit, hargaJahit + ' slip belum punya harga', 'todoGo', 'harga')) +
+    kartu('c-qc', 'shield', 'QC', jml(qc), 'pcs lolos QC · ' + qc.length + ' catatan', baris('Reject', nf(jml(qc, 'reject')) + ' pcs') + baris('Masuk perbaikan', nf(jml(qc, 'perbaikan')) + ' pcs') + baris('Offline', nf(jml(qc, 'offline')) + ' pcs'),
+      posisi('Antre QC', nf(k.qc) + ' pcs', 'po:qc'),
+      soal(k.qcWait, nf(k.qcWait) + ' pcs dihitung, QC tertahan', 'kpiGo', 'po:lengkap') + soal(perbaikan, nf(k.perbaikan) + ' pcs sedang diperbaiki', 'todoGo', 'qc')) +
+    kartu('c-jual', 'box', 'BigSeller', jml(gudang), 'pcs diinput · ' + gudang.length + ' catatan', baris('PO yang diinput', nf(Object.keys(poInput).length)),
+      posisi('Belum diinput', nf(k.bs) + ' pcs', 'po:jual'), '') + '</div></div>';
+}
+/* Perlu tindakan: semua hal tampil di sini (tidak lagi dialihkan ke tab PO), bisa disaring per jenis */
+function berandaTodo(todo) {
+  var per = todoPer(todo), cur = S.sub.todoK || ''; if (cur && !per[cur]) cur = '';
+  var rows = cur ? todo.filter(function (x) { return x.k === cur; }) : todo;
+  var semua = S.sub.todoAll === '1', tampil = semua ? rows : rows.slice(0, 8);
+  var grup = TODO_KELOMPOK.filter(function (g) { return per[g[0]]; });
+  var saring = grup.length > 1 ? '<div class="saring">' + [['', 'Semua']].concat(grup).map(function (g) {
+    return '<button data-a="sub" data-k="todoK" data-v="' + g[0] + '"' + (g[0] === cur ? ' class="on"' : '') + '>' + g[1] + '<b>' + (g[0] ? per[g[0]] : todo.length) + '</b></button>';
+  }).join('') + '</div>' : '';
+  var list = tampil.map(function (x) {
+    return '<div class="item todo sv-' + x.cls + '"><span class="chip ' + x.cls + '" style="padding:6px">' + ic(x.icon, 's') + '</span><span class="grow"><span class="t">' + esc(x.t) + '</span><br><span class="d">' + esc(x.d) + '</span></span>' +
+      '<button class="btn sm" data-a="' + x.a + '" data-id="' + esc(x.id) + '"' + (x.s ? ' data-s="' + x.s + '"' : '') + (x.v !== undefined ? ' data-v="' + esc(x.v) + '"' : (x.s ? ' data-v="0"' : '')) + '>' + x.btn + '</button></div>';
+  }).join('');
+  if (rows.length > 8) list += '<button class="item lagi" data-a="sub" data-k="todoAll" data-v="' + (semua ? '' : '1') + '">' + (semua ? 'Ringkas lagi' : 'Tampilkan semua · ' + (rows.length - 8) + ' lagi') + '</button>';
+  return '<div class="card flush" id="bd-todo"><div class="sec-h"><h3>Perlu tindakan</h3>' + (todo.length ? '<span class="chip ' + todoTingkat(todo) + '">' + todo.length + '</span>' : '') + '</div>' + saring +
+    '<div class="list">' + (todo.length ? list : emptyBox('Tidak ada yang menunggu tindakan.')) + '</div></div>';
+}
+/* Catatan terbaru dari semua divisi; yang masih bisa diubah punya tombolnya sendiri di baris itu */
+function berandaCatatan() {
+  var st = S.state, admin = isAdmin(), ev = [];
+  st.potong.forEach(function (r) {
+    var kosong = !(r.tarif > 0) && r.total > 0, bisa = admin && sourceCanEditRate(r, 'Potong');
+    ev.push({ g: 'potong', at: r.dibuat, t: namaUser(r.userId) + ' memotong ' + nf(r.total) + ' pcs', po: r.poId, c: 'c-potong', x: admin ? (kosong ? 'harga belum diatur' : rp(r.tarif) + '/pcs') : '',
+      tail: bisa ? '<button class="btn sm' + (kosong ? ' perlu' : '') + '" data-a="hargaOpen" data-s="Potong" data-id="' + esc(r.id) + '" data-v="' + coreNum(r.tarif) + '">' + (kosong ? 'Atur harga' : 'Harga') + '</button>' : '' });
+  });
+  st.kirim.forEach(function (r) {
+    ev.push({ g: 'jahit', at: r.dibuat, t: nf(r.total) + ' pcs dikirim ke ' + namaUser(r.maklonId), po: r.poId, c: 'c-maklon', x: '', tail: '<button class="btn sm" data-a="slip" data-t="kirim" data-id="' + esc(r.id) + '">Slip</button>' });
+  });
+  st.setor.forEach(function (r) {
+    var tunggu = r.status === 'diajukan';
+    ev.push({ g: 'jahit', at: r.dibuat, t: namaUser(r.maklonId) + ' setor ' + nf(r.total) + ' pcs' + (tunggu ? ' (menunggu dicek)' : ''), po: r.poId, c: 'c-cek', x: r.status === 'ditolak' ? 'ditolak' : '',
+      tail: tunggu ? '<button class="btn sm perlu" data-a="terimaOpen" data-id="' + esc(r.id) + '">Hitung</button>' : '<button class="btn sm" data-a="slip" data-t="setor" data-id="' + esc(r.id) + '">Slip</button>' });
+  });
+  st.qc.forEach(function (r) { ev.push({ g: 'qc', at: r.dibuat, t: 'QC ' + nf(r.total) + ' pcs lolos' + (r.reject ? ', ' + nf(r.reject) + ' reject' : ''), po: r.poId, c: 'c-qc', x: '', tail: '' }); });
+  st.gudang.forEach(function (r) { ev.push({ g: 'jual', at: r.dibuat, t: nf(r.total) + ' pcs diinput ke BigSeller', po: r.poId, c: 'c-jual', x: '', tail: '' }); });
+  ev.sort(function (a, b) { return String(a.at) < String(b.at) ? 1 : -1; });
+  var cur = S.sub.evK || '', rows = cur ? ev.filter(function (e) { return e.g === cur; }) : ev, banyak = S.sub.evAll === '1', tampil = rows.slice(0, banyak ? 40 : 8);
+  var saring = ev.length ? '<div class="saring">' + [['', 'Semua'], ['potong', 'Potong'], ['jahit', 'Jahit'], ['qc', 'QC'], ['jual', 'BigSeller']].map(function (g) {
+    return '<button data-a="sub" data-k="evK" data-v="' + g[0] + '"' + (g[0] === cur ? ' class="on"' : '') + '>' + g[1] + '</button>';
+  }).join('') + '</div>' : '';
+  var list = tampil.map(function (e) {
+    return '<div class="item ev ' + e.c + '"><button class="item-main" data-a="poOpen" data-id="' + esc(e.po) + '"><i style="width:8px;height:8px;border-radius:50%;background:var(--c);flex:none"></i><span class="grow"><span class="t">' + esc(e.t) + '</span><br><span class="d">' + esc(poNama(e.po)) + (e.x ? ' · ' + esc(e.x) : '') + '</span></span><span class="xs muted nowrap">' + esc(lalu(e.at)) + '</span></button>' + e.tail + '</div>';
+  }).join('');
+  if (rows.length > 8) list += '<button class="item lagi" data-a="sub" data-k="evAll" data-v="' + (banyak ? '' : '1') + '">' + (banyak ? 'Ringkas lagi' : 'Lihat lebih banyak') + '</button>';
+  return '<div class="card flush"><div class="sec-h"><h3>Catatan terbaru</h3></div>' + saring + '<div class="list">' + (rows.length ? list : emptyBox(ev.length ? 'Belum ada catatan dari divisi ini.' : 'Belum ada catatan produksi.')) + '</div></div>';
+}
 function tglPanjang() { var d = new Date(); var H = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu']; return H[d.getDay()] + ', ' + d.getDate() + ' ' + BULAN[d.getMonth()] + ' ' + d.getFullYear(); }
 A.pegawaiBaru = function (el) { openPegawai('', el.getAttribute('data-id') || ''); };
+A.berandaPeriode = function (el) { S.sub.bdP = el.getAttribute('data-v'); LS.set('pk_beranda_periode', S.sub.bdP); render(); };
+/* dari baris siaga atau kartu divisi: saring Perlu tindakan ke jenis itu, tampilkan semuanya, lalu gulir ke sana */
+A.todoGo = function (el) {
+  S.sub.todoK = el.getAttribute('data-v') || ''; S.sub.todoAll = '1'; render();
+  var n = document.getElementById('bd-todo'); if (n && n.scrollIntoView) n.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 A.copyVal = function (el) { copyText(el.getAttribute('data-v') || '', 'Link tersalin. Tempel di WhatsApp.'); };
 /* link aplikasi untuk satu divisi; link tanpa divisi adalah link owner */
 function linkFor(div) {
