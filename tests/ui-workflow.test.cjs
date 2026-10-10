@@ -47,6 +47,9 @@ test('dashboard shows all sixty counted pieces as ready for QC while the rest of
     function emptyBox(){return '';} function maklonAktif(){return [];} function tglPanjang(){return '';}
     function namaUser(){return '';} function poNama(){return '';} function lalu(){return '';}
     function poAktif(){return S.state.po;} var VIEWS={};
+    S.sub={}; var LS={get:function(){return '';},set:function(){}};
+    function todayYmd(){return coreYmd(new Date());} function tgl(s){return String(s);} function isAdmin(){return true;}
+    function sourceCanEditRate(){return true;}
     var po={id:'p',nama:'Kaos',status:'aktif',jenis:'stok',ukuran:{M:40,L:50}};
     var cuts=[{id:'cut',poId:'p',ukuran:{M:40,L:50},total:90}];
     var assignments=[{id:'send',poId:'p',maklonId:'w',ukuran:{M:40,L:50},total:90}];
