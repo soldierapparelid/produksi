@@ -4,7 +4,7 @@
    Simpanan cache dipakai bersama oleh semua aplikasi di alamat induk yang sama, jadi file ini hanya
    membuat dan menghapus cache miliknya sendiri (nama berawalan pk-produksi-app-). */
 var AWALAN = 'pk-produksi-app-';
-var RAKITAN = '20261009-hitung-sebagian-1513';
+var RAKITAN = '20261010-kasbon-slip-1514';
 var CACHE = AWALAN + RAKITAN;
 var HALAMAN = './index.html';
 var FILES = [HALAMAN, './manifest.webmanifest', './manifest-potong.webmanifest', './manifest-jahit.webmanifest', './manifest-qc.webmanifest', './logo-192.png', './logo-512.png'];

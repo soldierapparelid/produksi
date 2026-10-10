@@ -109,6 +109,13 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.14:
+
+- **Kasbon mengurangi total slip gaji:** cicilan karyawan harian dipotong di slip yang rentangnya memuat tanggal potong (`coreCicilanPeriode`). Sebelumnya cicilan hanya cocok kalau nama periodenya sama persis, sehingga gaji yang dicatat dengan rentang (mis. 5–10 Okt) tidak terpotong oleh cicilan yang tersimpan sebagai minggu "2026-W41". Cicilan dari aplikasi lama tetap di periode asalnya. Formulir potong kasbon kini hanya jumlah, tanggal, keterangan.
+- **Ubah kasbon dan cicilan:** aksi `ubahKasbon` (owner/admin) mengubah jumlah, tanggal, keterangan tanpa menghapus. Kasbon tidak boleh kurang dari yang sudah dicicil, cicilan tidak boleh melebihi sisa, baris penyesuaian dari aplikasi lama tidak bisa diubah, dan cicilan pada minggu gaji yang sudah ditandai dibayar terkunci.
+- **Kasbon di slip upah tukang:** slip mingguan jahit/potong menulis "Potongan kasbon periode ini", "Upah bersih setelah potongan kasbon", dan sisa kasbon pada akhir periode. Di layar Upah > Slip mingguan ada tombol "Potong kasbon" dan keterangan sisa kasbon; formulir Bayar upah mengusulkan potongan sebesar potongan kasbon minggu berjalan (sekali saja).
+- **Ukuran selesai QC:** kartu dan rincian PO memisahkan ukuran yang produksinya sudah selesai (dihitung, di-QC, tanpa perbaikan tertinggal) sebagai "Selesai QC"; ukuran itu tidak lagi bertanda aktif. Tombol "PO baru untuk barang ini" dari 1.5.13 dicabut.
+
 Mulai 1.5.13:
 
 - **Hitung fisik bertahap untuk laporan jahit lama:** laporan jahit dari aplikasi lama yang belum dihitung (baris "Sisa laporan jahit belum dihitung") boleh dihitung sebagian. Yang dihitung diterima dan slipnya terbit; sisanya otomatis menjadi baris menunggu baru (id asal + `s`, `imporSumber.sisaDari` menunjuk laporan asal) dengan tanggal laporan semula. Jumlah per ukuran tetap utuh: diterima + reject + sisa = laporan semula; hitungan yang melebihi laporan tetap ditolak. Sisa mewarisi ikatan pembayaran lama (`sourceInLegacySettlement`, tanda tahan di `corePayroll`), jadi perlakuan upahnya sama persis dengan sebelum perubahan ini. Laporan baru dari maklon tidak berubah: kalau dihitung lebih sedikit, tidak ada baris sisa.
