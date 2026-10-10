@@ -302,6 +302,36 @@ test('the HPP list leaves out models whose PO was deleted and shows the automati
   h.run("S.sub.hppSemua='1';");body=h.run('VIEWS.hpp()');assert.match(body,/<b>Dihapus<\/b>/);assert.match(body,/Sembunyikan lagi/);
   assert.match(html,/dihitung dari potongan ukuran '\+esc\(basis\.ukuran\)\+' saja/);
 });
+test('payments are listed as a history with a group payment as one line, and the forms say total, paid and remaining',()=>{
+  const h=harness(),order=(id,extra)=>Object.assign({id,revision:'r'+id,supplierName:'Reseller A',supplierSnapshot:{id:'s1',nama:'Reseller A'},status:'dp'},extra);
+  h.seed('pembelian',{suppliers:[],products:[],orders:[
+    order('o1',{productName:'Topi A',grupNama:'Invoice Okt',totalHarga:10000,totalPaid:1000,balance:9000,payments:[{id:'a',kind:'payment',tanggal:'2026-10-10',jumlah:600,metode:'transfer',catatan:'DP',groupId:'g1'},{id:'b',kind:'payment',tanggal:'2026-10-09',jumlah:400,metode:'cash',catatan:''},{id:'x',kind:'payment',tanggal:'2026-10-08',jumlah:999,metode:'cash',voided:true}]}),
+    order('o2',{productName:'Topi B',grupNama:'Invoice Okt',totalHarga:5000,totalPaid:400,balance:4600,payments:[{id:'c',kind:'payment',tanggal:'2026-10-10',jumlah:400,metode:'transfer',catatan:'DP',groupId:'g1'}]}),
+    order('o3',{productName:'Topi C',status:'batal',totalHarga:100,totalPaid:0,balance:100,payments:[{id:'d',kind:'payment',tanggal:'2026-10-11',jumlah:50,metode:'cash'}]})]});
+  assert.deepEqual(h.json("commerceRiwayatRows(commerceData('pembelian').orders).map(function(r){return [r.tanggal,r.jumlah,r.model.join('+'),r.orderId];})"),[['2026-10-10',1000,'Topi A+Topi B','o1'],['2026-10-09',400,'Topi A','o1']],'corrected payments and removed orders are left out');
+  const daftar=h.run("commerceRiwayatBayar(commerceData('pembelian').orders)");
+  assert.match(daftar,/2 pembayaran<\/span><span class="right">Total dibayar <b>Rp1400<\/b>/);assert.match(daftar,/Pembayaran gabungan untuk 2 model: Topi A, Topi B/);assert.match(daftar,/Reseller A · Invoice Okt/);
+  assert.match(html,/\['orders','Order'\],\['payments','Riwayat bayar'\],\['products','Produk'\]/);
+  /* the group card and the payment forms spell out total, paid and what is left */
+  const kartu=h.run("commerceGroupCard(commerceOrderGroups(commerceData('pembelian').orders.slice(0,2))[0])");
+  assert.match(kartu,/Sisa bayar<\/span><br><b>Rp13600<\/b><br><span class="small muted">Total Rp15000<\/span><br><span class="small muted">Sudah dibayar Rp1400<\/span>/);
+  h.run("A.commerceGroupPayOpen({getAttribute:function(k){return k==='data-ids'?'o1,o2':'Invoice Okt';}})");
+  let form=h.run('lastSheet');assert.match(form,/<dt>Total 2 order<\/dt><dd class="b">Rp15000<\/dd><dt>Sudah dibayar \(DP\)<\/dt><dd class="b">Rp1400<\/dd><dt>Sisa tagihan<\/dt><dd class="b">Rp13600<\/dd>/);assert.match(form,/Total Rp10000 · sudah dibayar Rp1000/);
+  h.run("A.commercePaymentOpen({getAttribute:function(k){return k==='data-m'?'pembelian':'o2';}})");
+  form=h.run('lastSheet');assert.match(form,/<dt>Total<\/dt><dd class="b">Rp5000<\/dd><dt>Sudah dibayar<\/dt><dd class="b">Rp400<\/dd><dt>Sisa<\/dt><dd class="b">Rp4600<\/dd>/);
+});
+test('a model whose cost was already saved opens ready to be corrected, and the cost is worked out as the numbers are typed',()=>{
+  const h=harness(),model=extra=>Object.assign({id:'m1',nama:'Hoodie',series:'S',sizes:['XL'],kain:{complete:true,perPcs:33430},potong:{complete:true,perPcs:1100},jahit:{complete:true,perPcs:5000},hargaJahit:5000,biayaLain:50000,warnings:[],config:{value:{jahitMode:'auto',hargaJahit:5000,biayaLain:50000,targetMargin:30,ketLain:'salah input'}}},extra);
+  h.seed('hpp',{models:[model({configured:true,hppTotal:89530}),model({id:'m2',configured:false,config:{value:{}}})],config:{},revision:'r'});
+  h.run("A.commerceHppOpen({getAttribute:function(){return 'm1';}})");let form=h.run('lastSheet');
+  assert.match(form,/name="reviewed" checked>/);assert.match(form,/Salah isi\? Ubah angkanya lalu tekan Simpan biaya model/);assert.match(form,/data-commerce-hpp-live/);
+  h.run("A.commerceHppOpen({getAttribute:function(){return 'm2';}})");form=h.run('lastSheet');assert.match(form,/name="reviewed">/);assert.ok(!form.includes('Salah isi?'));
+  const hitung=values=>h.run(`var kotak={};currentForm._commerceModel=commerceHppModel('m1');currentForm.values=${JSON.stringify(values)};commerceHppLive(currentForm,kotak);kotak.innerHTML||kotak.textContent`);
+  let teks=hitung({jahitMode:'auto',hargaJahit:'5000',biayaLain:'5000'});
+  assert.match(teks,/<b>HPP Rp44530 \/ pcs<\/b>/);assert.match(teks,/kain Rp33430 \+ potong Rp1100 \+ jahit Rp5000 \+ biaya lain Rp5000/);assert.match(teks,/Yang tersimpan sekarang Rp89530\. Tekan Simpan biaya model untuk menggantinya/);
+  teks=hitung({jahitMode:'auto',hargaJahit:'5000',biayaLain:'50000'});assert.match(teks,/<b>HPP Rp89530 \/ pcs<\/b>/);assert.ok(!teks.includes('Yang tersimpan sekarang'));
+  teks=hitung({jahitMode:'manual',hargaJahit:'6000',biayaLain:''});assert.match(teks,/<b>HPP Rp40530 \/ pcs<\/b>/);
+});
 test('several models go into one invoice: the order form takes an invoice name and "Tambah model" opens it for the same group',()=>{
   const h=harness(),order=(id,extra)=>Object.assign({id,revision:'r'+id,supplierName:'Reseller A',supplierSnapshot:{id:'s1',nama:'Reseller A'},totalPaid:0,totalReceived:0,status:'pending'},extra);
   h.seed('pembelian',{suppliers:[{id:'s1',nama:'Reseller A',aktif:true}],products:[{id:'p1',nama:'Topi A',supplierId:'s1',harga:48000,aktif:true},{id:'p2',nama:'Topi B',supplierId:'s1',harga:50000,aktif:true}],orders:[
