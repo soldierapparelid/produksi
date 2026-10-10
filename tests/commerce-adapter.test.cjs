@@ -142,6 +142,29 @@ test('many orders reuse one product and supplier index and keep the names the pe
  const listed=f.state().orders,single=f.good('saveCommerceOrder',{record:f.order({id:'order00'})}).record;
  assert.equal(listed.length,6);assert.deepEqual(listed.find(o=>o.id==='order00'),single);assert.ok(listed.every(o=>o.productName==='Product Fixture'&&o.supplierName==='Supplier Fixture'));
 });
+test('the owner changes or removes a whole group payment in one step: every share is corrected and the new total is divided again',()=>{
+ const f=fixture();f.masters();const a=f.good('saveCommerceOrder',{record:f.order()}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02',items:[{id:'only',nama:'M',jumlah:1}]})}).record;
+ const paid=f.good('appendCommerceGroupPayment',{id:'group-pay-01',module:'pembelian',orderIds:['order01','order02'],expectedRevisions:{order01:a.revision,order02:b.revision},tanggal:'2026-10-09',jumlah:600,metode:'transfer',catatan:'DP salah ketik',withState:true});
+ const rev=s=>Object.fromEntries(s.commerce.orders.map(o=>[o.id,o.revision])),by=(s,id)=>s.commerce.orders.find(o=>o.id===id);
+ assert.equal(by(paid,'order01').totalPaid,500);assert.equal(by(paid,'order02').totalPaid,100);
+ const ubah={id:'group-edit-01',module:'pembelian',groupId:'group-pay-01',expectedRevisions:rev(paid),tanggal:'2026-10-10',jumlah:30000,metode:'cash',catatan:'DP yang benar',withState:true};
+ f.bad('gantiCommerceGroupPayment',ubah,/owner/,'fixture-admin-token-001');
+ f.bad('gantiCommerceGroupPayment',{...ubah,groupId:'missing-group'},/tidak ditemukan/);
+ f.bad('gantiCommerceGroupPayment',{...ubah,expectedRevisions:{order01:a.revision,order02:b.revision}},/berubah/);
+ f.bad('gantiCommerceGroupPayment',{...ubah,jumlah:60001},/melebihi sisa/);
+ assert.equal(f.raw('CommerceEvent').length,2,'a refused change writes nothing');
+ const baru=f.good('gantiCommerceGroupPayment',ubah),p1=by(baru,'order01').payments,hidup=p1.find(e=>!e.voided);
+ assert.equal(by(baru,'order01').totalPaid,25000);assert.equal(by(baru,'order02').totalPaid,5000);
+ assert.equal(p1.filter(e=>e.voided).length,1,'the old share stays as corrected history');assert.equal(hidup.groupId,'group-edit-01');assert.equal(hidup.metode,'cash');assert.equal(hidup.tanggal,'2026-10-10');assert.equal(hidup.catatan,'DP yang benar');
+ assert.equal(f.raw('CommerceEvent').length,6);
+ /* the same request again changes nothing; the old group cannot be changed a second time */
+ assert.equal(by(f.good('gantiCommerceGroupPayment',ubah),'order01').totalPaid,25000);assert.equal(f.raw('CommerceEvent').length,6);
+ f.bad('gantiCommerceGroupPayment',{...ubah,id:'group-edit-02',expectedRevisions:rev(baru)},/sudah dikoreksi/);
+ /* zero removes the group payment: nothing is paid any more, the ledger keeps every row */
+ const hapus=f.good('gantiCommerceGroupPayment',{id:'group-edit-03',module:'pembelian',groupId:'group-edit-01',expectedRevisions:rev(baru),jumlah:0,withState:true});
+ assert.ok(hapus.commerce.orders.every(o=>o.totalPaid===0&&o.balance===o.totalHarga));assert.equal(f.raw('CommerceEvent').length,8);
+ assert.ok(by(hapus,'order01').payments.every(e=>e.voided));
+});
 test('a group payment is divided by remaining balance in whole rupiah, written once, and replays without paying twice',()=>{
  const f=fixture();f.masters();const a=f.good('saveCommerceOrder',{record:f.order()}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02',items:[{id:'only',nama:'M',jumlah:1}]})}).record;
  assert.equal(a.balance,50000);assert.equal(b.balance,10000);
