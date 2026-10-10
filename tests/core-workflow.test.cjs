@@ -45,24 +45,50 @@ function app() {
   return { run, call, seed, count, inspect, state: token => call('sync', {}, token), pay: () => run('corePayroll(db.Potong,db.SlipSetor,db.QC,db.SlipUpah)'), db: sheet => run(`db[${JSON.stringify(sheet)}]`) };
 }
 
-test('QC waits for all sizes of a PO; physical counts and slips remain available earlier', () => {
+test('a counted delivery is inspected by QC right away, slip by slip, while the rest of the PO is still being sewn', () => {
   const a = app(); a.seed(); a.count({ M: 20 });
-  assert.throws(() => a.inspect({ M: 20 }), /belum lengkap/);
+  let w = a.state().po[0].workflow;
+  assert.equal(w.ukuran.M.readyQC, true); assert.equal(w.ukuran.M.countComplete, false); assert.equal(w.ukuran.M.siapQC, 20);
+  assert.equal(w.ukuran.L.readyQC, false); assert.equal(w.readyQC, true); assert.equal(w.complete, false);
+  a.inspect({ M: 20 });                       /* 20 M and every L are still at the sewer */
+  w = a.state().po[0].workflow;
+  assert.equal(w.ukuran.M.qcOk, 20); assert.equal(w.ukuran.M.siapQC, 0); assert.equal(w.ukuran.M.stok, 20);
+  assert.equal(w.readyQC, false); assert.equal(w.ukuran.M.complete, false); assert.equal(w.complete, false); assert.equal(w.issues.length, 0);
+  const qc = (id, setorId, ukuran) => a.call('createQC', { qc: { id, poId: 'po00001', setorId, ukuran, tanggal: '2026-10-03' } });
+  assert.throws(() => qc('qc00002', 'count01', { M: 20 }), /sudah di-QC/);
+  assert.throws(() => qc('qc00003', 'count01', { L: 5 }), /belum punya hitungan fisik/);
   a.count({ M: 20 }, 'count02');
-  assert.throws(() => a.inspect({ M: 20 }), /PO belum lengkap/);
-  const w = a.state().po[0].workflow;
-  assert.equal(w.ukuran.M.readyQC, true);
-  assert.equal(w.ukuran.M.siapQC, 40);
-  assert.equal(w.ukuran.L.readyQC, false);
-  assert.equal(w.readyQC, false);
-  a.count({ L: 60 }, 'count03');
-  a.inspect({ M: 20 });
-  assert.equal(a.state().po[0].workflow.readyQC, true);
+  assert.throws(() => qc('qc00004', 'count02', { M: 19 }), /seluruh hitungan slip/, 'one slip is still inspected as a whole');
+  w = a.state().po[0].workflow;
+  assert.equal(w.ukuran.M.countComplete, true); assert.equal(w.ukuran.M.siapQC, 20); assert.equal(w.readyQC, true);
+  qc('qc00005', 'count02', { M: 20 });
+  w = a.state().po[0].workflow;
+  assert.equal(w.ukuran.M.complete, true); assert.equal(w.complete, false, 'the PO is finished only when L is sewn, counted and inspected too');
+  assert.throws(() => a.call('setStatusPO', { id: 'po00001', status: 'selesai' }), /belum selesai/);
+  a.count({ L: 60 }, 'count03'); qc('qc00006', 'count03', { L: 60 });
+  assert.equal(a.state().po[0].workflow.complete, true);
   const b = app(); b.seed({ M: 40 });
   b.call('createSetor', { setor: { id: 'report1', poId: 'po00001', ukuran: { M: 40 } } }, 'worker-token-12345678');
   assert.equal(b.db('SlipSetor')[0].status, 'diajukan');
   assert.equal(b.pay().filter(r => r.jenis === 'jahit').length, 0);
   assert.equal(b.state().po[0].workflow.ukuran.M.readyQC, false);
+});
+
+test('wages follow each delivery: the first one is paid on its own count, then on its own QC result, while the rest is still at the sewer', () => {
+  const a = app(); a.seed({ M: 100 }); a.count({ M: 50 });
+  const sewing = () => a.pay().filter(r => r.jenis === 'jahit');
+  assert.deepEqual(sewing().map(r => [r.sourceId, r.total, r.available]), [['count01', 50, 50]], 'counted, not yet inspected: the count is payable');
+  a.call('createQC', { qc: { id: 'qc00001', poId: 'po00001', setorId: 'count01', ukuran: { M: 46 }, rejectUkuran: { M: 1 }, reject: 1, perbaikanUkuran: { M: 3 }, perbaikan: 3, tanggal: '2026-10-03' } });
+  assert.deepEqual(sewing().map(r => [r.sourceId, r.total, r.available]), [['count01', 46, 46]], 'after QC only the pieces that passed are payable');
+  let w = a.state().po[0].workflow;
+  assert.equal(w.ukuran.M.qcOk, 46); assert.equal(w.ukuran.M.qcPerbaikan, 3); assert.equal(w.ukuran.M.sisaMaklon, 50); assert.equal(w.ukuran.M.stok, 46); assert.equal(w.complete, false); assert.equal(w.issues.length, 0);
+  const paid = a.call('createUpah', { upah: { id: 'pay00001', pegawaiId: 'worker1', itemIds: sewing().map(r => r.id) } }).data;
+  assert.equal(paid.totalQty, 46);
+  a.count({ M: 50 }, 'count02');
+  assert.deepEqual(sewing().filter(r => r.available > 0).map(r => [r.sourceId, r.total, r.available]), [['count02', 50, 50]], 'next week: only the second delivery is open');
+  a.call('createQC', { qc: { id: 'qc00002', poId: 'po00001', setorId: 'count02', ukuran: { M: 50 }, tanggal: '2026-10-09' } });
+  w = a.state().po[0].workflow;
+  assert.equal(w.ukuran.M.qcOk, 96); assert.equal(w.ukuran.M.countComplete, true); assert.equal(w.ukuran.M.complete, false, 'three pieces are still being repaired');
 });
 
 test('assignment/count reject wrong sizes and cumulative over-capacity including pending reports', () => {

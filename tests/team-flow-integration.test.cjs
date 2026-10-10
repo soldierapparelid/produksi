@@ -28,12 +28,12 @@ test('one invoice funds an owner-prepared cut, two sewing workers, physical coun
   const reportA=good('createSetor',{setor:{id:'count_team_a',poId:'po_team_01',ukuran:{M:10,L:5},tanggal:'2026-10-06'}},sewerA);
   assert.equal(reportA.status,'diajukan');assert.equal(reportA.noSlip,'');
   const acceptedA=good('prosesSetor',{id:reportA.id,ukuran:{M:10,L:5},rejectUkuran:{}},qc);assert.ok(acceptedA.noSlip);
-  assert.equal(good('getState').po.find(p=>p.id==='po_team_01').workflow.readyQC,false);
-  const early=call('createQC',{qc:{id:'earlyqc01',poId:'po_team_01',setorId:reportA.id,ukuran:{M:10},tanggal:'2026-10-08'}},qc);assert.equal(early.ok,false);assert.match(early.error,/PO belum lengkap/);
+  assert.equal(good('getState').po.find(p=>p.id==='po_team_01').workflow.readyQC,true,'the first sewer\'s counted delivery can be inspected while the second sewer is still working');
+  const early=call('createQC',{qc:{id:'earlyqc01',poId:'po_team_01',setorId:reportA.id,ukuran:{M:10},tanggal:'2026-10-08'}},qc);assert.equal(early.ok,true);
   const reportB=good('createSetor',{setor:{id:'count_team_b',poId:'po_team_01',ukuran:{L:5},tanggal:'2026-10-06'}},sewerB);
   good('prosesSetor',{id:reportB.id,ukuran:{L:5},rejectUkuran:{}},qc);
   assert.equal(good('getState').po.find(p=>p.id==='po_team_01').workflow.readyQC,true);
-  good('createQC',{qc:{id:'qc_team_a',poId:'po_team_01',setorId:reportA.id,ukuran:{M:10,L:5},tanggal:'2026-10-08'}},qc);
+  good('createQC',{qc:{id:'qc_team_a',poId:'po_team_01',setorId:reportA.id,ukuran:{L:5},tanggal:'2026-10-08'}},qc);
   good('createQC',{qc:{id:'qc_team_b',poId:'po_team_01',setorId:reportB.id,ukuran:{L:5},tanggal:'2026-10-08'}},qc);
   const done=good('getState'),po=done.po.find(p=>p.id==='po_team_01');assert.equal(po.workflow.complete,true);assert.ok(po.tuntasPada);
   const ids=done.payroll.filter(r=>r.pegawaiId==='sewuser1'&&r.available>0).map(r=>r.id);
