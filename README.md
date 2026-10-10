@@ -109,6 +109,8 @@ PO lama tanpa waktu tuntas yang dapat dipercaya mulai dihitung saat pertama kali
 
 ### Pemuatan aplikasi
 
+Mulai 1.5.15 (hanya tampilan, formulir "Hitung & terima"): kotak Reject dilipat di balik "Ada barang reject (rusak)?" supaya tidak terisi tanpa sengaja; ada tabel "Jahitan <penjahit> di PO ini" (ditugaskan, sudah dihitung, menunggu dihitung, masih dijahit per ukuran, dari alur produksi server); untuk laporan lama ada ringkasan langsung "laporan · dihitung · reject · sisa menunggu"; pesan salah isi menyebut angkanya (dihitung + reject melebihi laporan).
+
 Mulai 1.5.14:
 
 - **Kasbon mengurangi total slip gaji:** cicilan karyawan harian dipotong di slip yang rentangnya memuat tanggal potong (`coreCicilanPeriode`). Sebelumnya cicilan hanya cocok kalau nama periodenya sama persis, sehingga gaji yang dicatat dengan rentang (mis. 5–10 Okt) tidak terpotong oleh cicilan yang tersimpan sebagai minggu "2026-W41". Cicilan dari aplikasi lama tetap di periode asalnya. Formulir potong kasbon kini hanya jumlah, tanggal, keterangan.

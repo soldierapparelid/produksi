@@ -257,6 +257,9 @@ button.po:hover { border-color: var(--accent); }
 .sz-tanda.potong { background: var(--warn-soft); color: var(--warn); }
 .sz-aktif.selesai { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); font-weight: 700; }
 .sz-tanda.selesai { background: var(--surface-2); color: var(--muted); }
+.rj-lipat { border: 1px dashed var(--line); border-radius: var(--r-s); padding: 8px 10px; }
+.rj-lipat > summary { cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--muted); }
+.rj-lipat[open] > summary { margin-bottom: 8px; color: var(--text); }
 .po-seri { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .po-seri-h { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
 .po-seri-h h3 { font-family: var(--f-display); font-size: 18px; letter-spacing: .04em; text-transform: uppercase; }
@@ -369,7 +372,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261010-kasbon-slip-1514';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261010-form-hitung-1515';</script>
 <script>
 (function () {
 'use strict';
@@ -391,7 +394,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.14';
+var APP_VERSION = '1.5.15';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -5726,7 +5729,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.14';
+var UI_VERSION = '1.5.15';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -10502,14 +10505,47 @@ function openTerima(id) {
     if (rec.status !== 'diajukan') return sheetHtml('Hitung & terima', '<div class="note ok">Slip ini sudah diproses' + (rec.diprosesOleh ? ' oleh ' + esc(namaUser(rec.diprosesOleh)) : '') + '.</div>');
     var po = D.po[rec.poId] || { nama: 'PO terhapus', ukuran: {} }; var sp = sizesSplit(po); var hint = {};
     Object.keys(rec.ukuran || {}).forEach(function (s) { hint[s] = 'setor ' + rec.ukuran[s]; if (sp.main.indexOf(s) < 0) { sp.main.push(s); sp.extra = sp.extra.filter(function (x) { return x !== s; }); } });
-    return sheetHtml('Hitung & terima', '<div class="col" data-form="terima">' + hid('id', rec.id) + poHead(po) +
-      '<dl class="kv"><dt>Maklon</dt><dd class="b">' + esc(namaUser(rec.maklonId)) + '</dd><dt>Slip</dt><dd>' + esc(rec.noSlip) + ' · ' + tgl(rec.tanggal) + '</dd>' + (rec.catatan ? '<dt>Catatan</dt><dd>' + esc(rec.catatan) + '</dd>' : '') + '</dl>' +
-      '<div class="col gap-s"><div class="label">Hasil hitung per ukuran (pcs bagus)</div>' + sizeGrid(sp.main, { hint: hint, val: rec.ukuran, extra: sp.extra }) + '<p class="xs muted">' + (setorLaporanLama(rec) ? 'Angka sudah diisi sesuai laporan lama. Kalau baru sebagian yang disetor, isi yang sudah Anda hitung saja: sisanya tetap menunggu di daftar ini. Yang belum disetor jangan dimasukkan ke Reject.' : 'Angka sudah diisi sesuai laporan maklon. Ubah kalau hitungan Anda berbeda.') + '</p></div>' + sumLine('Total diterima') +
-      rejectGrid(po, categorySizes(rec,'rejectUkuran','reject')) + '<div class="f-row">' + fTanggal('Tanggal hitung', 'tanggal') + (isAdmin() ? fNum('Harga / pcs', 'upah', rec.upah || hargaKiriman(rec.poId, rec.maklonId) || tarifBawaan(po, 'tarifJahit') || '', 'step="100"') : '') + '</div>' +
+    var rj = categorySizes(rec, 'rejectUkuran', 'reject'), lapor = terimaLaporan(rec);
+    return sheetHtml('Hitung & terima', '<div class="col" data-form="terima"' + (setorLaporanLama(rec) ? ' data-lapor="' + esc(JSON.stringify(lapor)) + '"' : '') + '>' + hid('id', rec.id) + poHead(po) +
+      '<dl class="kv"><dt>Maklon</dt><dd class="b">' + esc(namaUser(rec.maklonId)) + '</dd><dt>Slip</dt><dd>' + esc(rec.noSlip) + ' · ' + tgl(rec.tanggal) + '</dd>' + (rec.catatan ? '<dt>Catatan</dt><dd>' + esc(rec.catatan) + '</dd>' : '') + '</dl>' + terimaPosisi(po, rec.maklonId) +
+      '<div class="col gap-s"><div class="label">Jumlah yang Anda hitung per ukuran (pcs bagus)</div>' + sizeGrid(sp.main, { hint: hint, val: rec.ukuran, extra: sp.extra }) + '<p class="xs muted">' + (setorLaporanLama(rec) ? 'Angka sudah diisi sesuai laporan lama. Kalau baru sebagian yang disetor, isi yang sudah Anda hitung saja: sisanya tetap menunggu di daftar ini. Yang belum disetor jangan dimasukkan ke Reject.' : 'Angka sudah diisi sesuai laporan maklon. Ubah kalau hitungan Anda berbeda.') + '</p></div>' + sumLine('Total diterima') + '<div class="note" data-terima-ringkas hidden></div>' +
+      '<details class="rj-lipat"' + (coreSumSizes(rj) ? ' open' : '') + '><summary>Ada barang reject (rusak)? Ketuk untuk mengisi</summary>' + rejectGrid(po, rj) +
+      '<p class="xs muted">Reject hanya untuk barang rusak dan termasuk dalam jumlah laporan. Kalau tidak ada yang rusak, biarkan kosong.</p></details>' + '<div class="f-row">' + fTanggal('Tanggal hitung', 'tanggal') + (isAdmin() ? fNum('Harga / pcs', 'upah', rec.upah || hargaKiriman(rec.poId, rec.maklonId) || tarifBawaan(po, 'tarifJahit') || '', 'step="100"') : '') + '</div>' +
       '<p class="xs muted">Setelah diterima, slip setor terbit dengan nomor dan harga' + (isAdmin() ? ' di atas' : ' yang diatur owner') + '.</p>' +
       fCatatan(rec.catatan) + '</div>', '<button class="btn danger" data-a="terimaTolak">Tolak</button><button class="btn pri" data-a="terimaSave">Terima &amp; terbitkan slip</button>');
   });
 }
+/* Posisi jahitan satu penjahit pada satu PO, per ukuran: ditugaskan, sudah dihitung (bagus + reject), menunggu dihitung
+   (sudah dilaporkan, belum dihitung), dan masih dijahit (belum dilaporkan sama sekali). Angkanya dari alur produksi server. */
+function terimaPosisi(po, maklonId) {
+  var uk = workflowFor(po).ukuran || {}, rows = [], tot = [0, 0, 0, 0];
+  poSizes(po).forEach(function (s) {
+    var m = ((uk[s] || {}).maklon || {})[maklonId]; if (!m || !(coreNum(m.kirim) > 0)) return;
+    var hitung = coreNum(m.diterima) + coreNum(m.reject), tunggu = coreNum(m.diajukan), jahit = Math.max(0, coreNum(m.kirim) - hitung - tunggu);
+    var v = [coreNum(m.kirim), hitung, tunggu, jahit]; v.forEach(function (n, i) { tot[i] += n; }); rows.push([s].concat(v));
+  });
+  if (!rows.length) return '';
+  var sel = function (n) { return '<td' + (n ? '' : ' class="z"') + '>' + (n ? nf(n) : '–') + '</td>'; };
+  return '<div class="col gap-s"><div class="label">Jahitan ' + esc(namaUser(maklonId)) + ' di PO ini</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ukuran</th><th>Ditugaskan</th><th>Sudah dihitung</th><th>Menunggu dihitung</th><th>Masih dijahit</th></tr></thead><tbody>' +
+    rows.map(function (r) { return '<tr><td class="b">' + esc(r[0]) + '</td>' + r.slice(1).map(sel).join('') + '</tr>'; }).join('') +
+    '</tbody>' + (rows.length > 1 ? '<tfoot><tr><td>Total</td>' + tot.map(function (n) { return '<td>' + nf(n) + '</td>'; }).join('') + '</tr></tfoot>' : '') + '</table></div></div>';
+}
+/* jumlah laporan per ukuran (bagus + reject yang dilaporkan) */
+function terimaLaporan(rec) { var o = {}; [rec && rec.ukuran, rec && rec.rejectUkuran].forEach(function (m) { m = coreMap(m); Object.keys(m).forEach(function (s) { if (coreNum(m[s]) > 0) o[s] = (o[s] || 0) + coreNum(m[s]); }); }); return o; }
+/* ringkasan langsung saat angka diketik, untuk laporan lama yang dihitung bertahap */
+R.terima = function (f) {
+  var kotak = $('[data-terima-ringkas]', f); if (!kotak) return;
+  var lapor = coreParseJSON(f.getAttribute('data-lapor'), null); if (!lapor) { kotak.hidden = true; return; }
+  var uk, rj; try { uk = sizeVals(f); rj = rejectValues(f); } catch (e) { kotak.hidden = true; return; }
+  var baris = [], lebih = false;
+  Object.keys(Object.assign({}, lapor, uk, rj)).forEach(function (s) {
+    var l = coreNum(lapor[s]), a = coreNum(uk[s]), b = coreNum(rj[s]); if (!l && !a && !b) return;
+    if (a + b > l) { lebih = true; baris.push(s + ': dihitung ' + nf(a) + ' + reject ' + nf(b) + ' = ' + nf(a + b) + ' pcs, lebih dari laporan ' + nf(l) + ' pcs'); }
+    else baris.push(s + ': laporan ' + nf(l) + ' · dihitung ' + nf(a) + (b ? ' · reject ' + nf(b) : '') + ' · sisa menunggu ' + nf(l - a - b));
+  });
+  kotak.hidden = !baris.length; kotak.className = 'note' + (lebih ? ' bad' : '');
+  kotak.textContent = baris.join(' — ') + (lebih ? '. Reject hanya untuk barang rusak; kosongkan kalau tidak ada.' : '');
+};
 A.terimaSave = function (el) {
   var f = topForm(); var v = formVals(f); var uk, rejectUkuran;
   try { uk = sizeVals(f); rejectUkuran = rejectValues(f); } catch (e) { return toast(e.message, true); }
@@ -10520,10 +10556,11 @@ A.terimaSave = function (el) {
   /* laporan lama dihitung bertahap: yang diisi tidak boleh melebihi laporannya, sisanya tetap menunggu */
   var asal = findSlip('setor', v.id), sisa = 0;
   if (setorLaporanLama(asal)) {
-    var lapor = {}, lebih = '';
-    [asal.ukuran, asal.rejectUkuran].forEach(function (m) { m = coreMap(m); Object.keys(m).forEach(function (s) { lapor[s] = (lapor[s] || 0) + coreNum(m[s]); }); });
+    var lapor = terimaLaporan(asal), lebih = '';
     Object.keys(Object.assign({}, lapor, uk, rejectUkuran)).forEach(function (s) { var d = coreNum(lapor[s]) - coreNum(uk[s]) - coreNum(rejectUkuran[s]); if (d < 0 && !lebih) lebih = s; if (d > 0) sisa += d; });
-    if (lebih) return toast('Hitungan ' + lebih + ' melebihi laporan lama (' + nf(coreNum(lapor[lebih])) + ' pcs). Kelebihannya dicatat lewat Catat langsung.', true);
+    if (lebih) return toast(coreNum(rejectUkuran[lebih]) > 0
+      ? 'Ukuran ' + lebih + ': dihitung ' + nf(coreNum(uk[lebih])) + ' + reject ' + nf(coreNum(rejectUkuran[lebih])) + ' = ' + nf(coreNum(uk[lebih]) + coreNum(rejectUkuran[lebih])) + ' pcs, lebih dari laporan ' + nf(coreNum(lapor[lebih])) + ' pcs. Reject hanya untuk barang rusak; kosongkan kalau tidak ada.'
+      : 'Hitungan ' + lebih + ' (' + nf(coreNum(uk[lebih])) + ' pcs) melebihi laporan lama (' + nf(coreNum(lapor[lebih])) + ' pcs). Kelebihannya dicatat lewat Catat langsung.', true);
   }
   act(el, req('prosesSetor', { id: v.id, keputusan: 'terima', ukuran: uk, reject: reject, rejectUkuran: rejectUkuran, upah: v.upah, catatan: v.catatan, tanggal: v.tanggal })).then(function (rec) { dropForm(f); toast('Slip ' + ((rec && rec.noSlip) || '') + ' terbit. ' + (sisa ? 'Sisa ' + nf(sisa) + ' pcs tetap menunggu hitungan berikutnya.' : 'QC dibuka setelah hitungan ukuran lengkap.')); }).catch(quiet);
 };
