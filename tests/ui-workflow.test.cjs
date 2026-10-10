@@ -30,6 +30,26 @@ test('QC queue lists a counted slip at once, without waiting for the rest of the
   assert.deepEqual(json(c, 'antreanQC().map(x=>({uk:x.uk,sisa:x.sisa,waiting:x.waiting}))'), [{ uk: { M: 40 }, sisa: 40, waiting: { L: 20 } }]);
 });
 
+test('the QC queue shows one card per PO with a row per counted slip, and says whether the sewing has all come back', () => {
+  const c = context();
+  vm.runInContext(`function esc(s){return String(s);} function nf(n){return String(n);} function ic(){return '';} function tgl(s){return s;} function thumb(){return '';} function poMeta(po){return po.noPO;}
+    function sizeChips(u){return JSON.stringify(u);} function namaUser(id){return 'Penjahit '+id;} function pos(n){return n>0?n:0;} function T(po){return po.total;}
+    S.state.setor=[
+      {id:'s1',noSlip:'SS-1',poId:'p',maklonId:'a',status:'diterima',ukuran:{M:40},total:40,tanggal:'2026-10-01',diprosesPada:'2026-10-02T03:00:00.000Z'},
+      {id:'s2',noSlip:'SS-2',poId:'p',maklonId:'a',status:'diterima',ukuran:{L:20},total:20,tanggal:'2026-10-08'},
+      {id:'s3',noSlip:'SS-3',poId:'q',maklonId:'b',status:'diterima',ukuran:{M:10},total:10,tanggal:'2026-10-05'}];
+    D.po.p={id:'p',nama:'Kaos A',noPO:'PO-1',status:'aktif',total:{kirim:100,terima:60,sisaMaklon:30,diajukan:10},workflow:{issues:[],ukuran:{M:{readyQC:true},L:{readyQC:true}}}};
+    D.po.q={id:'q',nama:'Kaos B',noPO:'PO-2',status:'aktif',total:{kirim:10,terima:10,sisaMaklon:0,diajukan:0},workflow:{issues:[],ukuran:{M:{readyQC:true}}}};`, c);
+  assert.deepEqual(json(c, 'qcAntreanPO(antreanQC()).map(g=>({po:g.poId,pcs:g.pcs,slip:g.baris.map(x=>x.s.id)}))'), [{ po: 'p', pcs: 60, slip: ['s1', 's2'] }, { po: 'q', pcs: 10, slip: ['s3'] }]);
+  const kartu = vm.runInContext('qcKartuPO(qcAntreanPO(antreanQC())[0])', c);
+  assert.match(kartu, /Kaos A/); assert.match(kartu, />60<\/span><span class="xs muted">pcs · 2 hitungan</);
+  assert.match(kartu, /Sudah dihitung 60 dari 100 pcs yang ditugaskan · menunggu dihitung 10 · masih dijahit 30/);
+  assert.match(kartu, /Dihitung 2026-10-02<\/span> <span class="xs muted">Penjahit a · SS-1/); assert.match(kartu, /Dihitung 2026-10-08<\/span>/);
+  assert.equal(kartu.split('data-a="qcSlipOpen"').length - 1, 2, 'each counted slip keeps its own Periksa button');
+  assert.match(vm.runInContext('qcKartuPO(qcAntreanPO(antreanQC())[1])', c), /jahitan sudah kembali semua/);
+  assert.match(html, /miniKpi\(\[\['Antrean', nf\(qcAntreanPO\(antre\)\.length\), 'PO · '/);
+});
+
 test('historical QC ambiguity holds only its baseline count, while a new source stays selectable', () => {
   const c=context();
   vm.runInContext(`S.state.setor=[
