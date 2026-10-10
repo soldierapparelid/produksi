@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.18';
+var APP_VERSION = '1.5.19';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -2096,6 +2096,27 @@ function createCore(store, env) {
     store.append('SlipKirim', rec);
     return rec;
   };
+  /* Target selesai jahitan seorang penjahit pada satu PO boleh diubah, misalnya target lama dari aplikasi sebelumnya.
+     Target per penjahit adalah tanggal target paling akhir di antara penugasannya: tanggal itu yang diganti, dan
+     penugasan lain yang targetnya lebih akhir dari tanggal baru ikut disamakan. target kosong = tanpa target.
+     Jumlah, harga, dan upah tidak disentuh. */
+  actions.ubahTargetJahit = function (p) {
+    var me = auth(p); mustAdmin(me);
+    if (store.fresh) store.fresh('SlipKirim');
+    var po = findRow('PO', String(p.poId || '')); if (!po) fail('PO tidak ditemukan.');
+    var maklonId = String(p.maklonId || ''), kosong = p.target === '' || p.target === undefined || p.target === null, target = kosong ? '' : coreTglOk(p.target);
+    if (!kosong && !target) fail('Tanggal target tidak sah.');
+    var rows = store.read('SlipKirim').filter(function (r) { return r.poId === po.id && r.maklonId === maklonId; });
+    if (!rows.length) fail('Belum ada penugasan jahit untuk penjahit ini di PO tersebut.');
+    var utama = rows[0];
+    rows.forEach(function (r) { var a = String(r.target || ''), b = String(utama.target || ''); if (a > b || (a === b && String(r.dibuat || '') >= String(utama.dibuat || ''))) utama = r; });
+    var diubah = 0;
+    rows.forEach(function (r) {
+      var kini = String(r.target || ''), baru = r.id === utama.id ? target : (kosong || kini > target ? target : kini);
+      if (baru !== kini) { store.update('SlipKirim', r.id, { target: baru }); diubah++; }
+    });
+    return { ok: true, target: target, diubah: diubah };
+  };
 
   function upahJahitTerakhir(po, maklonId, st) {
     var best = null;
@@ -2780,7 +2801,7 @@ function createCore(store, env) {
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
-    tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1,
+    tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
