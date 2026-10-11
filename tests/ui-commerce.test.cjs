@@ -302,6 +302,25 @@ test('the HPP list leaves out models whose PO was deleted and shows the automati
   h.run("S.sub.hppSemua='1';");body=h.run('VIEWS.hpp()');assert.match(body,/<b>Dihapus<\/b>/);assert.match(body,/Sembunyikan lagi/);
   assert.match(html,/dihitung dari potongan ukuran '\+esc\(basis\.ukuran\)\+' saja/);
 });
+test('an old-app purchase order offers "Jadikan bisa diedit" to the owner, and the copy is opened once it is saved',()=>{
+  const h=harness();h.run('var ditutup=0;function closeAll(){ditutup++;}');
+  h.seed('pembelian',{suppliers:[],products:[],orders:[
+    {id:'lama1',revision:'rl',legacy:true,needsReview:true,status:'review',productName:'Topi Lama',supplierName:'Reseller A',supplierSnapshot:{id:'s1'},grupNama:'Orderan 2',tanggalOrder:'2026-08-31',items:[{id:'i1',nama:'hitam',jumlah:300}],totalQty:300,totalHarga:14400,totalPaid:9000,balance:5400,totalReceived:0,hargaSatuan:48,payments:[{id:'p1',kind:'payment',tanggal:'2026-09-07',jumlah:5000,sourceReview:true},{id:'p2',kind:'payment',tanggal:'2026-09-26',jumlah:4000,sourceReview:true},{id:'p0',kind:'payment',tanggal:'2026-09-01',jumlah:1,voided:true}],receipts:[]},
+    {id:'baru1',revision:'rb',status:'pending',productName:'Topi Baru',supplierName:'Reseller A',supplierSnapshot:{id:'s1'},tanggalOrder:'2026-10-10',items:[{id:'i2',nama:'hitam',jumlah:10}],totalQty:10,totalHarga:100,totalPaid:0,balance:100,totalReceived:0,hargaSatuan:10}]});
+  const kartu=id=>h.run(`commerceOrderCard(commerceRecord('pembelian','${id}'))`);
+  assert.match(kartu('lama1'),/data-a="commerceSalinLamaOpen" data-m="pembelian" data-id="lama1">Jadikan bisa diedit/);assert.ok(!kartu('lama1').includes('data-a="commerceOrderOpen"'));
+  assert.ok(!kartu('baru1').includes('commerceSalinLamaOpen'));assert.match(kartu('baru1'),/data-a="commerceOrderOpen" data-id="baru1">Edit/);
+  const el="{getAttribute:function(k){return k==='data-m'?'pembelian':'lama1';}}";
+  h.run(`A.commerceSalinLamaOpen(${el})`);const form=h.run('lastSheet');
+  assert.match(form,/Jadikan order ini bisa diedit/);assert.match(form,/2 kali · Rp9000 \(2026-09-07, 2026-09-26\)/);assert.match(form,/name="grupNama"[^>]*value="Orderan 2"/);assert.match(form,/name="orderId" value="lama1"/);
+  h.run("currentForm.values={id:'new5',orderId:'lama1',revision:'rl',grupNama:' Invoice Topi '};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();currentForm._commerceIntent=null;A.commerceSalinLamaSave(null)");
+  assert.equal(h.requests[0].action,'salinCommerceOrderLama');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{id:'new5',orderId:'lama1',expectedRevision:'rl',grupNama:'Invoice Topi',withState:true});
+  /* once saved, the other sheets close and the new order opens; skipped old receipts are mentioned */
+  h.run("lastSheet='';commerceAfterSave({action:'salinCommerceOrderLama',payload:{}},{record:{id:'baru1'},penerimaanDilewati:2})");
+  assert.equal(h.run('ditutup'),1);assert.match(h.json('messages').at(-1).text,/2 penerimaan lama tidak ikut disalin/);assert.match(h.run('lastSheet'),/Detail order produk/);
+  h.run(`S.state.me.divisi='admin';A.commerceSalinLamaOpen(${el})`);assert.match(h.json('messages').at(-1).text,/Hanya owner/);
+  assert.match(html,/commerceArsip\(o\) && me\(\)\.divisi === 'owner' \? '<button class="btn sm" data-a="commerceSalinLamaOpen"/,'the button is drawn for the owner only');
+});
 test('payments are listed as a history with a group payment as one line, and the forms say total, paid and remaining',()=>{
   const h=harness(),order=(id,extra)=>Object.assign({id,revision:'r'+id,supplierName:'Reseller A',supplierSnapshot:{id:'s1',nama:'Reseller A'},status:'dp'},extra);
   h.seed('pembelian',{suppliers:[],products:[],orders:[
