@@ -465,9 +465,30 @@ function pkStore_() {
   };
   return PK_STORE_;
 }
+/* This key never leaves Script Properties. Resolve it before core.handle reads
+   production rows; the store lock is reentrant for maintenance callers. A cold
+   concurrent initializer rereads the durable property after acquiring the lock. */
+function pkQcRevisionKey_() {
+  var name = 'qcRevisionSecret', key = pkProps_()[name];
+  if (key) return String(key);
+  return pkStore_().lock(function () {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty(name);
+    if (!saved) {
+      saved = Utilities.getUuid() + Utilities.getUuid();
+      props.setProperty(name, saved);
+    }
+    pkProps_()[name] = saved;
+    return String(saved);
+  });
+}
 function pkEnv_() {
+  var qcKey = pkQcRevisionKey_();
   return {
     enforceClientVersion: true,
+    signQcRevision: function (value) {
+      return 'qch1_' + Utilities.computeHmacSha256Signature('soldier-qc-source-v1|' + String(value), qcKey).map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+    },
     now: function () { return new Date(); },
     id: function () { return Utilities.getUuid().replace(/-/g, '').slice(0, 16); },
     makePdf: function (html, name) { return Utilities.base64Encode(Utilities.newBlob(html, 'text/html', name).getAs('application/pdf').getBytes()); }
