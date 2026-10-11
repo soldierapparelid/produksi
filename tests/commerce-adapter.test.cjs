@@ -142,6 +142,33 @@ test('many orders reuse one product and supplier index and keep the names the pe
  const listed=f.state().orders,single=f.good('saveCommerceOrder',{record:f.order({id:'order00'})}).record;
  assert.equal(listed.length,6);assert.deepEqual(listed.find(o=>o.id==='order00'),single);assert.ok(listed.every(o=>o.productName==='Product Fixture'&&o.supplierName==='Supplier Fixture'));
 });
+test('the owner turns an old-app order into an ordinary one: contents and live payments are copied with their dates, the old order is archived intact',()=>{
+ const f=fixture(),b=backup(),reference={soldier:{produksi:b.produksi,pembelianProduk:{produk:[{...b.soldier_pembelian_produk.produk[0],gambar:'data:image/png;base64,AAAA'}]},stokBahan:{pembelian:[]},produksi_meta:{tarif:1000}}};
+ const p=f.good('previewCommerceImport',{backup:b,reference});f.good('applyCommerceImport',{backup:b,reference,sourceHash:p.sourceHash,planHash:p.planHash});
+ const lama=f.state().orders[0];assert.equal(lama.legacy,true);assert.equal(lama.needsReview,true);
+ f.bad('saveCommerceOrder',{record:{id:lama.id,produkId:lama.produkId,items:[{id:'size01',nama:'M',jumlah:5}],hargaSatuan:9000,tanggalOrder:lama.tanggalOrder},expectedRevision:lama.revision},/data lama/);
+ const salin={id:'order-salin-01',orderId:lama.id,expectedRevision:lama.revision,grupNama:'Invoice Okt',withState:true};
+ f.bad('salinCommerceOrderLama',salin,/owner/,'fixture-admin-token-001');f.bad('salinCommerceOrderLama',{...salin,expectedRevision:'old'},/berubah/);f.bad('salinCommerceOrderLama',{...salin,orderId:'missing-order'},/tidak ditemukan/);
+ const catatan=f.raw('CommerceRecord').length,kejadian=f.raw('CommerceEvent').length,asli=f.raw('CommerceRecord').find(r=>r.kind==='order');
+ const hasil=f.good('salinCommerceOrderLama',salin),baru=hasil.record;
+ assert.equal(baru.id,'order-salin-01');assert.equal(baru.legacy,false);assert.equal(baru.needsReview,false);assert.equal(baru.grupNama,'Invoice Okt');
+ assert.equal(baru.totalHarga,50000);assert.equal(baru.totalPaid,10000);assert.equal(baru.balance,40000);assert.equal(baru.status,'dp');assert.match(baru.catatan,/Disalin dari data aplikasi lama/);
+ assert.equal(baru.payments.length,1);assert.equal(baru.payments[0].tanggal,'2026-09-01');assert.equal(baru.payments[0].metode,'cash');assert.ok(!baru.payments[0].sourceReview);
+ assert.equal(baru.totalReceived,0);assert.equal(hasil.penerimaanDilewati,1,'the old receipt pointed at an unknown variant, so it is not copied');
+ /* the old order is archived with its own records untouched */
+ const lamaKini=hasil.commerce.orders.find(o=>o.id===lama.id),barisLama=f.raw('CommerceRecord').find(r=>r.id===asli.id);
+ assert.equal(lamaKini.status,'batal');assert.equal(lamaKini.totalPaid,10000);assert.equal(lamaKini.receipts.length,1);assert.equal(barisLama.sourceHash,asli.sourceHash);
+ assert.equal(f.raw('CommerceRecord').length,catatan+1);assert.equal(f.raw('CommerceEvent').length,kejadian+1);
+ /* the same request again writes nothing more */
+ assert.equal(f.good('salinCommerceOrderLama',salin).record.totalPaid,10000);assert.equal(f.raw('CommerceRecord').length,catatan+1);assert.equal(f.raw('CommerceEvent').length,kejadian+1);
+ /* the copy is an ordinary order: price, quantity and the payment can be changed */
+ const edit=f.good('saveCommerceOrder',{record:{id:baru.id,produkId:baru.produkId,items:[{id:baru.items[0].id,nama:'M',jumlah:6}],hargaSatuan:12000,tanggalOrder:'2026-09-02',grupNama:baru.grupNama},expectedRevision:baru.revision}).record;
+ assert.equal(edit.totalHarga,72000);assert.equal(edit.tanggalOrder,'2026-09-02');
+ const ubah=f.good('gantiCommerceEvent',{id:'pay-edit-09',module:'pembelian',parentId:baru.id,eventId:edit.payments[0].id,expectedRevision:edit.revision,tanggal:'2026-09-03',jumlah:15000,metode:'transfer',catatan:'DP'}).record;
+ assert.equal(ubah.totalPaid,15000);assert.equal(ubah.balance,57000);
+ f.bad('salinCommerceOrderLama',{id:'order-salin-02',orderId:baru.id,expectedRevision:ubah.revision},/sudah bisa diubah/);
+ f.bad('salinCommerceOrderLama',{id:'order-salin-03',orderId:lama.id,expectedRevision:lamaKini.revision},/dibatalkan/);
+});
 test('the owner changes or removes a whole group payment in one step: every share is corrected and the new total is divided again',()=>{
  const f=fixture();f.masters();const a=f.good('saveCommerceOrder',{record:f.order()}).record,b=f.good('saveCommerceOrder',{record:f.order({id:'order02',items:[{id:'only',nama:'M',jumlah:1}]})}).record;
  const paid=f.good('appendCommerceGroupPayment',{id:'group-pay-01',module:'pembelian',orderIds:['order01','order02'],expectedRevisions:{order01:a.revision,order02:b.revision},tanggal:'2026-10-09',jumlah:600,metode:'transfer',catatan:'DP salah ketik',withState:true});
