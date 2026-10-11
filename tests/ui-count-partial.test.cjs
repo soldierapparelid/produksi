@@ -57,8 +57,8 @@ test('the reject boxes are folded away, the form shows where the sewer stands on
   assert.match(out,/<details class="rj-lipat"><summary>Ada barang reject \(rusak\)\? Ketuk untuk mengisi<\/summary><div>Reject<\/div>/,'closed until someone really has rejects');
   assert.match(out,/data-form="terima" data-lapor="\{&quot;M&quot;:332\}"/);assert.match(out,/Jumlah yang Anda hitung per ukuran \(pcs bagus\)/);
   assert.match(out,/Jahitan Mang Atep di PO ini/);
-  assert.match(out,/<tr><td class="b">M<\/td><td>332<\/td><td class="z">–<\/td><td>332<\/td><td class="z">–<\/td><\/tr><tr><td class="b">L<\/td><td>120<\/td><td>72<\/td><td class="z">–<\/td><td>48<\/td><\/tr>/,'assigned, counted, waiting for the count, still being sewn');
-  assert.match(out,/<tfoot><tr><td>Total<\/td><td>452<\/td><td>72<\/td><td>332<\/td><td>48<\/td><\/tr><\/tfoot>/);assert.ok(!/<td class="b">XL<\/td>/.test(out),'another sewer\'s size is not listed');
+  assert.doesNotMatch(out,/<table/,'mobile count form has no wide position table');assert.match(out,/data-terima-posisi="M"/);assert.match(out,/Sudah dilaporkan selesai 332 dari 332 pcs/);assert.match(out,/data-terima-posisi="L"/);assert.match(out,/Sudah dilaporkan selesai 72 dari 120 pcs/);
+  assert.match(out,/Total ditugaskan 452 pcs · sudah dihitung 72 pcs · menunggu dihitung 332 pcs · belum dilaporkan 48 pcs/);assert.ok(!/data-terima-posisi="XL"/.test(out),'another sewer\'s size is not listed');
   f.run("var fake={sizes:{M:106},rejects:{},getAttribute:function(){return JSON.stringify({M:332});}};R.terima(fake)");
   assert.equal(f.c.ringkas.hidden,false);assert.equal(f.c.ringkas.className,'note');assert.equal(f.c.ringkas.textContent,'M: laporan 332 · dihitung 106 · sisa menunggu 226');
   f.run("fake.sizes={M:72};fake.rejects={M:72};fake.getAttribute=function(){return JSON.stringify({M:72});};R.terima(fake)");
