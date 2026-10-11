@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.36';
+var APP_VERSION = '1.5.37';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -32,7 +32,7 @@ var SCHEMA = {
   RencanaPotong:['id','poId','bahanList','rol','catatan','status','dibuat','dibuatOleh','diubah','revision','alokasiBahan','poDraft','legacyBahanList'],
   SlipKirim: ['id','noSlip','poId','maklonId','tanggal','target','ukuran','total','upah','catatan','dibuatOleh','dibuat','asal','requestHash','requestActor','mutationHash','mutationActor'],
   SlipSetor: ['id','noSlip','poId','maklonId','tanggal','ukuran','total','reject','upah','catatan','status','dibuatOleh','dibuat','diprosesOleh','diprosesPada','upahId','asal','rejectUkuran','workflowVersion','imporSumber','requestHash','requestActor','mutationHash','mutationActor'],
-  QC:        ['id','poId','userId','maklonId','tanggal','ukuran','total','offline','perbaikan','reject','catatan','dibuat','setorId','asal','offlineUkuran','perbaikanUkuran','rejectUkuran','repairQcId','workflowVersion','imporSumber','upah','autoFromCount','upahId','requestHash','requestActor'],
+  QC:        ['id','poId','userId','maklonId','tanggal','ukuran','total','offline','perbaikan','reject','catatan','dibuat','setorId','asal','offlineUkuran','perbaikanUkuran','rejectUkuran','repairQcId','workflowVersion','imporSumber','upah','autoFromCount','upahId','requestHash','requestActor','qcBatchId','qcBatchSize'],
   Gudang:    ['id','poId','userId','tanggal','ukuran','total','catatan','dibuat','asal','workflowVersion','imporSumber','requestHash','requestActor'],
   GudangLama:['id','poId','maklonId','tanggal','ukuran','total','status','upah','qcId','workflowVersion','imporSumber','upahId'],
   SlipUpah:  ['id','noSlip','pegawaiId','jenis','tanggal','itemIds','totalQty','totalUpah','potongan','dibayar','catatan','dibuatOleh','dibuat','items','requestHash','requestActor'],
@@ -56,6 +56,7 @@ var SCHEMA = {
 };
 
 var TYPES = {
+  qcBatchSize:'num',
   saldoBefore:'num', saldoAfter:'num',
   imporVersion: 'num', workflowVersion: 'num', autoFromCount: 'bool',
   total: 'num', reject: 'num', perbaikan: 'num', offline: 'num', upah: 'num', tarif: 'num', kg: 'num', rol: 'num',
@@ -157,6 +158,34 @@ function coreDomainRevision(sheet, row) {
 function corePayrollRevision(row) {
   var proof={};['id','pegawaiId','poId','jenis','size','tanggal','total','available','paidQty','rate','issues','needsReview'].forEach(function(k){proof[k]=row[k]===undefined?'':row[k];});
   return coreHash(coreDomainCanonical(proof));
+}
+/* QC forms use opaque proofs computed before role redaction. Neither the proof
+   nor the grouping key exposes the source wage to the QC account. */
+function coreQcSourceRevision(source, qcRows, repairMode, sign, linkedSource) {
+  if (!source) return '';
+  if (source.qcRevision) return String(source.qcRevision);
+  function proof(row, sheet) {
+    var out = {};
+    (SCHEMA[sheet] || []).forEach(function (key) {
+      if (/^(request|mutation)/.test(key)) return;
+      var value = row[key];
+      if (['ukuran','rejectUkuran','offlineUkuran','perbaikanUkuran','imporSumber'].indexOf(key) >= 0) value = coreMap(value);
+      out[key] = value === undefined || value === null ? '' : value;
+    });
+    return out;
+  }
+  var related = (qcRows || []).filter(function (q) {
+    return repairMode ? q.repairQcId === source.id : q.setorId === source.id || q.poId === source.poId && !q.setorId && !!coreLegacyInfo(q, 'qc');
+  }).map(function (q) { return proof(q, 'QC'); }).sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); });
+  var linked = repairMode && source.setorId && linkedSource ? proof(linkedSource,'SlipSetor') : null;
+  var value = coreDomainCanonical([repairMode ? 'repair' : 'count', proof(source,repairMode ? 'QC' : 'SlipSetor'), related, linked]);
+  return typeof sign === 'function' ? sign(value) : coreHash(value);
+}
+function coreQcGroupKey(source, repairMode, setorRows) {
+  if (!source) return '';
+  if (source.qcGroupKey) return String(source.qcGroupKey);
+  var receipt = repairMode && source.setorId && !coreLegacyInfo(source,'qc') ? (setorRows || []).filter(function (s) { return s.id === source.setorId; })[0] : source;
+  return coreHash(coreDomainCanonical([source.poId,source.maklonId,coreNum((receipt || source).upah),repairMode ? 'repair' : 'count']));
 }
 function coreSizeOrder(list, pref) {
   var order = (pref || []).concat(['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL', 'XXXXXL', '2XL', '3XL', '4XL', '5XL']);
@@ -783,6 +812,10 @@ function createCore(store, env) {
   var insideWrite = false, skipAutoCompletion = false;
 
   function fail(msg) { throw new Error(msg); }
+  function qcSourceRevision(source, rows, repair, linkedSource) {
+    if (env.enforceClientVersion && typeof env.signQcRevision !== 'function') fail('Server perlu diperbarui sebelum pemeriksaan QC dibuka.');
+    return coreQcSourceRevision(source, rows, repair, env.signQcRevision, linkedSource);
+  }
   function nowIso() { return env.now().toISOString(); }
   function today() { return coreYmd(env.now()); }
   function tglOk(s) { s = String(s || ''); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''; }
@@ -982,6 +1015,24 @@ function createCore(store, env) {
     upah.forEach(function (u) { if (!u.items.length) { var original = coreLegacySlipItems(u, extras.settlements); if (original.length) u.items = original; } });
     po.forEach(function (p) { p.agg = agg[p.id]; p.workflow = wf[p.id]; if (wf[p.id] && wf[p.id].cutting) p.cutting = wf[p.id].cutting; });
     earned.forEach(function (r) { if (upahDitahan(wf[r.poId], r)) { r.issues = r.issues.concat(wf[r.poId].issues); r.available = 0; r.needsReview = true; } r.revision = corePayrollRevision(r); });
+    if (coreIsAdmin(me) || me.divisi === 'qc') {
+      var proofSetById = {}, proofQcBySource = {}, proofRepairs = {}, proofLegacyByPo = {}, publicGroups = {};
+      /* Publish cohort membership without a low-entropy hash of its tariff.
+         A representative source ID is stable and conveys no price to QC. */
+      function publicQcGroup(r, repair) {
+        var linked = proofSetById[r.setorId], internal = coreQcGroupKey(r,repair,linked ? [linked] : []);
+        if (!publicGroups[internal]) publicGroups[internal] = 'qc-group:' + (repair ? 'repair:' : 'count:') + r.id;
+        return publicGroups[internal];
+      }
+      setor.forEach(function (r) { proofSetById[r.id] = r; });
+      qc.forEach(function (r) {
+        if (r.setorId) (proofQcBySource[r.setorId] || (proofQcBySource[r.setorId] = [])).push(r);
+        else if (coreLegacyInfo(r,'qc')) (proofLegacyByPo[r.poId] || (proofLegacyByPo[r.poId] = [])).push(r);
+        if (r.repairQcId) (proofRepairs[r.repairQcId] || (proofRepairs[r.repairQcId] = [])).push(r);
+      });
+      setor.slice().sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); }).forEach(function (r) { r.qcRevision = qcSourceRevision(r,(proofQcBySource[r.id] || []).concat(proofLegacyByPo[r.poId] || []),false); r.qcGroupKey = publicQcGroup(r,false); });
+      qc.slice().sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); }).forEach(function (r) { r.qcRevision = qcSourceRevision(r,proofRepairs[r.id] || [],true,proofSetById[r.setorId]); r.qcGroupKey = publicQcGroup(r,true); });
+    }
 
     var admin = coreIsAdmin(me);
     if (me.divisi === 'owner' && migrationStatus) { st.legacyMigrationStatus = {}; ['batchId','beforeHash','planHash','at'].forEach(function (key) { if (migrationStatus[key] !== undefined) st.legacyMigrationStatus[key] = migrationStatus[key]; }); }
@@ -1106,9 +1157,9 @@ function createCore(store, env) {
       out.po = po.filter(function (p) { return p.status === 'aktif' || pending[p.id]; });
       var shown = {}; out.po.forEach(function (p) { shown[p.id] = 1; });
       var hide = function (r) { var o = copy(r); o.upah = 0; o.upahId = o.upahId ? 'x' : ''; return o; };
-      out.setor = setor.filter(function (r) { return shown[r.poId]; }).map(hide);
-      out.kirim = kirim.filter(function (r) { return shown[r.poId]; }).map(hide);
-      out.qc = qc.filter(function (r) { return shown[r.poId]; });
+      out.setor = setor.filter(function (r) { return shown[r.poId]; }).map(function (r) { var o = hide(r); if (r.status === 'diterima') delete o.revision; return o; });
+      out.kirim = kirim.filter(function (r) { return shown[r.poId]; }).map(function (r) { var o = hide(r); delete o.revision; return o; });
+      out.qc = qc.filter(function (r) { return shown[r.poId]; }).map(hide);
       out.gudang = gudang.filter(function (r) { return shown[r.poId]; });
     } else {
       out.po = [];
@@ -2389,17 +2440,17 @@ function createCore(store, env) {
     return { ok: true };
   };
 
-  actions.createQC = function (p) {
-    var me = auth(p); var admin = coreIsAdmin(me);
-    if (!admin && me.divisi !== 'qc') fail('Hanya QC atau admin.');
-    var r = p.qc || {}; var d = dedupe('QC', r, me); if (d.ada) return d.ada;
-    var po = openPO(r.poId);
-    var wf = poClean(po), setorId = String(r.setorId || ''), repairQcId = String(r.repairQcId || '');
-    var base = repairQcId ? findRow('QC', repairQcId) : null;
+  /* Validate and construct only; callers decide whether to append one source or
+     all sources together. No physical write may occur during batch preflight. */
+  function prepareQC(r, me, id, context) {
+    var po = context ? context.po : openPO(r.poId);
+    var wf = context ? context.wf : poClean(po), setorId = String(r.setorId || ''), repairQcId = String(r.repairQcId || '');
+    var qcRows = context ? context.qc : store.read('QC');
+    var base = repairQcId ? (context ? context.qcById[repairQcId] : findRow('QC', repairQcId)) : null;
     /* QC dicatat per slip yang sudah dihitung; sisa jahitan PO yang belum disetor tidak menahannya. */
     if (r.dariPerbaikan && !repairQcId) fail('Pilih catatan QC asal perbaikan.');
     if (repairQcId) { if (!base || base.repairQcId || base.poId !== po.id) fail('Asal perbaikan tidak sah.'); if (setorId && setorId !== base.setorId) fail('Hitungan asal perbaikan tidak cocok.'); setorId = base.setorId; }
-    var slip = findRow('SlipSetor', setorId);
+    var slip = context ? context.setById[setorId] : findRow('SlipSetor', setorId);
     var legacyRepair = !!(base && coreLegacyInfo(base, 'qc') && !base.setorId);
     if (!legacyRepair && (!slip || slip.poId !== po.id || slip.status !== 'diterima')) fail('Pilih slip hitung fisik yang sudah diterima.');
     var tanggalQc = tglOk(r.tanggal) || today();
@@ -2413,24 +2464,135 @@ function createCore(store, env) {
     if (repairQcId) {
       if (coreSumSizes(per)) fail('Hasil perbaikan harus berupa OK, offline, atau reject.');
       var remain = coreQcMaps(base, slip, []).perbaikan;
-      store.read('QC').forEach(function (q) { if (q.repairQcId === repairQcId) { var used = coreQcMaps(q, slip, []).perbaikan; remain = sumMaps([remain, used]); } });
+      qcRows.forEach(function (q) { if (q.repairQcId === repairQcId) { var used = coreQcMaps(q, slip, []).perbaikan; remain = sumMaps([remain, used]); } });
       per = {};
       Object.keys(inspected).forEach(function (s) { if (inspected[s] > coreNum(remain[s])) fail('Hasil perbaikan ' + s + ' melebihi sisa pada QC asal.'); per[s] = -inspected[s]; });
     } else {
       var previous = {};
-      store.read('QC').forEach(function (q) { if (q.setorId !== setorId || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, slip, []); previous = sumMaps([previous, maps.ok, maps.offline, maps.perbaikan, maps.reject]); });
+      qcRows.forEach(function (q) { if (q.setorId !== setorId || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, slip, []); previous = sumMaps([previous, maps.ok, maps.offline, maps.perbaikan, maps.reject]); });
       Object.keys(inspected).forEach(function (s) {
         var u = wf.ukuran[s]; if (!u || !u.readyQC) fail('Ukuran ' + s + ' belum punya hitungan fisik yang bisa diperiksa.');
-        if (coreLegacyQcBlocked(slip, store.read('QC'), s)) fail('Hitungan lama ini memiliki QC tanpa hubungan pasti. Cocokkan sumber historis sebelum memeriksa ulang.');
+        if (coreLegacyQcBlocked(slip, qcRows, s)) fail('Hitungan lama ini memiliki QC tanpa hubungan pasti. Cocokkan sumber historis sebelum memeriksa ulang.');
         if (previous[s]) fail('Hitungan ukuran ' + s + ' pada slip ini sudah di-QC.');
         if (inspected[s] !== coreNum(basis[s])) fail('OK + offline + perbaikan + reject ukuran ' + s + ' harus tepat seluruh hitungan slip (' + coreNum(basis[s]) + ').');
       });
     }
-    var rec = { id: d.id, poId: po.id, userId: me.id, maklonId: mk.id, tanggal: tanggalQc, ukuran: JSON.stringify(ukuran),
+    return { id: id, poId: po.id, userId: me.id, maklonId: mk.id, tanggal: tanggalQc, ukuran: JSON.stringify(ukuran),
       total: coreSumSizes(ukuran), offline: coreSumSizes(off), perbaikan: coreSumSizes(per), reject: coreSumSizes(rej), catatan: teks(r.catatan, 300), dibuat: nowIso(), setorId: setorId,
       offlineUkuran: JSON.stringify(off), perbaikanUkuran: JSON.stringify(per), rejectUkuran: JSON.stringify(rej), repairQcId: repairQcId, workflowVersion: WORKFLOW_VERSION };
+  }
+  actions.createQC = function (p) {
+    var me = auth(p);
+    if (!coreIsAdmin(me) && me.divisi !== 'qc') fail('Hanya QC atau admin.');
+    var r = p.qc || {}, d = dedupe('QC', r, me); if (d.ada) return d.ada;
+    var rec = prepareQC(r, me, d.id);
     store.append('QC', stampRequest(rec,d));
     return rec;
+  };
+
+  actions.simpanQCGabungan = function (p) {
+    var me = auth(p);
+    if (!coreIsAdmin(me) && me.divisi !== 'qc') fail('Hanya QC atau admin.');
+    var r = p.qc || {}, batchId = idOk(r.id), poId = String(r.poId || ''), tanggal = tglOk(r.tanggal);
+    if (!batchId) fail('Identitas QC gabungan tidak sah. Buka kembali formulir.');
+    if (!tanggal || coreTambahHari(tanggal,0) !== tanggal) fail('Tanggal QC tidak valid.');
+    if (!Array.isArray(r.kelompok) || !r.kelompok.length || r.kelompok.length > 50) fail('Pilih 1 sampai 50 kelompok QC.');
+    /* Read every source under the write lock; cache from an earlier form cannot
+       decide capacity or the source revision. One appendMany is the commit. */
+    if (store.fresh) ['PO','SlipSetor','QC'].forEach(function (sheet) { store.fresh(sheet); });
+    var po = findRow('PO',poId); if (!po) fail('PO tidak ditemukan.');
+    var allQc = store.read('QC'), sources = store.read('SlipSetor'), setById = {}, qcById = {}, seen = {}, sourceCount = 0;
+    sources.forEach(function (s) { setById[s.id] = s; }); allQc.forEach(function (q) { qcById[q.id] = q; });
+    var fields = ['ukuran','offlineUkuran','perbaikanUkuran','rejectUkuran'];
+    function quantities(raw) {
+      if (raw === undefined) return {};
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('Rinci hasil QC per ukuran.');
+      Object.keys(raw).forEach(function (s) {
+        var v = raw[s], n = Number(v);
+        if ((typeof v !== 'number' && typeof v !== 'string') || String(v).trim() === '' || !isFinite(n) || n < 0 || n > 1000000000 || n !== Math.floor(n)) fail('Jumlah QC harus bilangan bulat tidak negatif.');
+      });
+      return strictSizes(raw,po,true);
+    }
+    var intent = {id:batchId,poId:poId,tanggal:tanggal,catatan:teks(r.catatan,300),kelompok:r.kelompok.map(function (g) {
+      if (!g || !Array.isArray(g.sources) || !g.sources.length) fail('Pilih sumber hitung fisik untuk setiap kelompok QC.');
+      var group = {sources:g.sources.map(function (input) {
+        if (!input || typeof input !== 'object') fail('Sumber QC tidak sah.');
+        var s = {setorId:String(input.setorId || ''),repairQcId:String(input.repairQcId || ''),expectedRevision:String(input.expectedRevision || '')};
+        if (!(s.repairQcId || s.setorId) || !s.expectedRevision) fail('Versi sumber QC belum tersedia. Muat ulang lalu buka kembali formulir.');
+        var key = (s.repairQcId ? 'repair:' + s.repairQcId : 'count:' + s.setorId);
+        if (seen[key]) fail('Sumber QC dipilih lebih dari sekali.'); seen[key] = true;
+        if (++sourceCount > 200) fail('Pilih paling banyak 200 sumber QC sekali simpan.');
+        return s;
+      })};
+      fields.forEach(function (f) { group[f] = quantities(g[f]); });
+      return group;
+    })};
+    var hash = coreHash(coreDomainCanonical(['simpanQCGabungan',intent])), prefix = 'qcb_' + coreHash(batchId) + '_';
+    function result(rows) { return {id:batchId,poId:poId,ids:rows.map(function (q) { return q.id; }),records:rows}; }
+    var prior = allQc.filter(function (q) { return q.qcBatchId === batchId; });
+    if (prior.length) {
+      if (prior.some(function (q) { return q.requestHash !== hash || q.requestActor !== me.id; })) fail('ID QC gabungan sudah tersimpan dengan permintaan berbeda. Periksa data terbaru.');
+      var count = Number(prior[0].qcBatchSize), ordered = [];
+      if (!count || prior.length !== count || prior.some(function (q) { return Number(q.qcBatchSize) !== count; })) fail('QC gabungan tersimpan sebagian. Periksa data bersama owner; jangan membuat penyimpanan baru.');
+      for (var j = 0; j < count; j++) { var row = qcById[prefix + j]; if (!row || row.qcBatchId !== batchId) fail('QC gabungan tersimpan sebagian. Periksa data bersama owner.'); ordered.push(row); }
+      return result(ordered);
+    }
+    openPO(poId);
+    var context = {po:po,wf:poClean(po),qc:allQc,setById:setById,qcById:qcById}, pending = [];
+    intent.kelompok.forEach(function (g) {
+      var mode = !!g.sources[0].repairQcId, groupKey = '', totalBasis = {};
+      var selected = g.sources.map(function (input) {
+        if (!!input.repairQcId !== mode) fail('Pemeriksaan awal dan hasil perbaikan harus dipisahkan dalam kelompok.');
+        var base = mode ? qcById[input.repairQcId] : null, slip = setById[mode && base ? base.setorId : input.setorId], source = mode ? base : slip;
+        if (!source || source.poId !== poId || mode && source.repairQcId || !mode && source.status !== 'diterima') fail('Sumber QC harus berasal dari hitungan diterima pada PO yang sama.');
+        if (mode && input.setorId && input.setorId !== base.setorId) fail('Hitungan asal perbaikan tidak cocok.');
+        if (input.expectedRevision !== qcSourceRevision(source,allQc,mode,slip)) fail('Sumber atau hasil QC berubah sejak formulir dibuka. Muat ulang dan periksa kembali.');
+        var key = coreQcGroupKey(source,mode,sources);
+        if (groupKey && key !== groupKey) fail('Pisahkan kelompok QC menurut maklon dan tarif sumber yang sama.'); groupKey = key;
+        var basis = mode ? coreQcMaps(base,slip,[]).perbaikan : coreMap(slip.ukuran);
+        basis = Object.assign({},basis);
+        allQc.forEach(function (q) {
+          if (mode) { if (q.repairQcId === base.id) basis = sumMaps([basis,coreQcMaps(q,slip,[]).perbaikan]); }
+          else if (q.setorId === slip.id && !q.repairQcId && !(q.autoFromCount && coreLegacyInfo(q,'qc'))) {
+            var maps = coreQcMaps(q,slip,[]), used = sumMaps([maps.ok,maps.offline,maps.perbaikan,maps.reject]);
+            Object.keys(used).forEach(function (s) { if (used[s]) delete basis[s]; });
+          }
+        });
+        Object.keys(basis).forEach(function (s) { if (!(basis[s] > 0)) delete basis[s]; });
+        totalBasis = sumMaps([totalBasis,basis]);
+        return {source:source,slip:slip,base:base,basis:basis};
+      }).sort(function (a,b) { return String(a.source.tanggal).localeCompare(String(b.source.tanggal)) || String(a.source.id).localeCompare(String(b.source.id)); });
+      var inspected = sumMaps(fields.map(function (f) { return g[f]; }));
+      if (!coreSumSizes(inspected)) fail('Isi hasil QC untuk setiap kelompok.');
+      if (mode && coreSumSizes(g.perbaikanUkuran)) fail('Hasil perbaikan harus berupa OK, offline, atau reject.');
+      Object.keys(inspected).forEach(function (s) {
+        if (mode ? inspected[s] > coreNum(totalBasis[s]) : inspected[s] !== coreNum(totalBasis[s])) fail('Jumlah hasil QC ukuran ' + s + ' harus ' + (mode ? 'tidak melebihi' : 'tepat') + ' sisa sumber terpilih (' + coreNum(totalBasis[s]) + ' pcs).');
+      });
+      /* Apply the displayed allocation policy, not proportional rounding. Each
+         source keeps its worker, original tariff, payment credit and repair link. */
+      var remaining = {}; fields.forEach(function (f) { remaining[f] = Object.assign({},g[f]); });
+      selected.forEach(function (item) {
+        var child = {poId:poId,tanggal:tanggal,catatan:intent.catatan,setorId:mode ? item.base.setorId : item.slip.id,repairQcId:mode ? item.base.id : ''};
+        fields.forEach(function (f) { child[f] = {}; });
+        Object.keys(inspected).sort().forEach(function (s) {
+          var capacity = coreNum(item.basis[s]);
+          fields.forEach(function (f) { var n = Math.min(capacity,coreNum(remaining[f][s])); if (n) { child[f][s] = n; remaining[f][s] -= n; capacity -= n; } });
+        });
+        if (!coreSumSizes(sumMaps(fields.map(function (f) { return child[f]; })))) {
+          if (!mode) fail('Ada sumber terpilih tanpa ukuran yang dapat diperiksa. Buka kembali antrean QC.');
+          return;
+        }
+        var id = prefix + pending.length;
+        if (qcById[id]) fail('Identitas catatan QC sudah digunakan. Muat ulang sebelum melanjutkan.');
+        var rec = prepareQC(child,me,id,context);
+        rec.qcBatchId = batchId; rec.requestHash = hash; rec.requestActor = me.id;
+        pending.push(rec);
+      });
+    });
+    pending.forEach(function (q) { q.qcBatchSize = pending.length; });
+    if (store.validateRows) store.validateRows('QC',pending);
+    store.appendMany('QC',pending);
+    return result(pending);
   };
 
   actions.createGudang = function (p) {
@@ -2959,7 +3121,7 @@ function createCore(store, env) {
   if (typeof coreInstallHistoryCorrections === 'function') coreInstallHistoryCorrections(actions, { store: store, env: env, auth: auth, fail: fail });
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
-    savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1,
+    savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
@@ -2972,7 +3134,7 @@ function createCore(store, env) {
     var fn = actions[action];
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
-    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
+    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
     if ((contractAction[action] || COMMERCE_WRITE[action]) && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {

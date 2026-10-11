@@ -212,7 +212,11 @@ test('real importRows rejects old clients before writes and accepts v2 during se
     const h = harness(); let token;
     if (configured) {
       const setup = h.request('setupOwner', { nama: 'Owner', pin: '1234' }); assert.equal(setup.ok, true); token = setup.data.token;
-    } else h.run('pkSetup_();');
+    } else {
+      // Warm one-time schema and private QC signing-key setup, just as the
+      // configured path does. The version guard must still take no write lock.
+      h.run('pkSetup_();pkEnv_();');
+    }
     const payload = { token, sheet: 'PO', rows: [{ id: 'po00001', nama: 'Import', ukuran: { M: 10 }, total: 10 }], ukuran: ['M', 'NEW'] };
     const snapshot = () => JSON.stringify(Object.fromEntries(Object.entries(h.sheets).map(([name, sh]) => [name, { values: sh.values, writes: sh.writes }])));
     const before = snapshot(), version = h.properties.ver;
