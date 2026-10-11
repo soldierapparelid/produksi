@@ -431,7 +431,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261011-nota-gabungan-1528';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261011-jembatan-sejak-buka-1529';</script>
 <script>
 (function () {
 'use strict';
@@ -6067,7 +6067,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.28';
+var UI_VERSION = '1.5.29';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -6323,9 +6323,10 @@ var Api = (function () {
 
   /* Jembatan: jalur kedua ke server yang sama. Jawaban doPost diantar Google lewat alamat terpisah (macros/echo) dan bisa
      hilang di sana. Halaman kecil dari server (doGet ?jembatan=1) dimuat di bingkai tersembunyi dan meneruskan permintaan
-     lewat google.script.run, yang jawabannya kembali langsung. Dipakai hanya bila server menyatakan boleh (bootstrap
-     .jembatan === 1, diingat di pk_jembatan) dan aplikasi tidak sedang dibingkai situs lain. Pesan hanya diterima dari
-     dalam bingkai itu sendiri. Bila jembatan belum siap atau tidak menjawab, jalur biasa (fetch) yang dipakai. */
+     lewat google.script.run, yang jawabannya kembali langsung. Dipasang sejak aplikasi dibuka, supaya permintaan
+     pertama pun bisa lewat sini; hanya bila server pernah menyatakan tidak boleh (bootstrap tanpa jembatan === 1, diingat
+     sebagai pk_jembatan = 0) atau aplikasi sedang dibingkai situs lain, jembatan tidak dipasang. Pesan hanya diterima
+     dari dalam bingkai itu sendiri. Bila jembatan belum siap atau tidak menjawab, jalur biasa (fetch) yang dipakai. */
   var ASAL_JEMBATAN = /^https:\/\/n-[a-z0-9-]+-script\.googleusercontent\.com$/;
   var JEMBATAN_TUNGGU = 8000, JEMBATAN_SIAP_TUNGGU = 4000, JEMBATAN_MUAT_MAKS = 15000, JEMBATAN_UMUR = 30 * 60000;
   var J = { frame: null, win: null, asal: '', siap: false, mati: false, dengar: false, mulai: 0, gagal: 0, n: 0, tunggu: {}, antre: [] };
@@ -6387,7 +6388,7 @@ var Api = (function () {
   function jembatanIzin(res) {
     if (!res || !res.ok || !res.data) return;
     if (res.data.jembatan === 1) { if (LS.get('pk_jembatan') !== '1') LS.set('pk_jembatan', '1'); jembatanMulai(); }
-    else { if (LS.get('pk_jembatan') && LS.del) LS.del('pk_jembatan'); jembatanBuang(); }
+    else { if (LS.get('pk_jembatan') !== '0') LS.set('pk_jembatan', '0'); jembatanBuang(); }
   }
   function call(action, payload) {
     var body = JSON.stringify({ action: action, payload: payload || {} });
@@ -6488,7 +6489,7 @@ var Api = (function () {
   }
   return {
     /* dipanggil sekali setelah penyimpanan perangkat siap dibaca */
-    init: function () { readDiv(); if (!gas) { readInvite(); if (LS.get('pk_jembatan') === '1') jembatanMulai(); } },
+    init: function () { readDiv(); if (!gas) { readInvite(); if (LS.get('pk_jembatan') !== '0') jembatanMulai(); } },
     call: call,
     mode: function () { return gas ? 'gas' : (remoteUrl ? 'remote' : 'demo'); },
     local: function () { ensureLocal(); return local; },
@@ -6498,7 +6499,7 @@ var Api = (function () {
       var m = String(input || '').match(/\/macros\/s\/([A-Za-z0-9_-]{20,})/) || String(input || '').match(/k=([A-Za-z0-9_-]{20,})/) || String(input || '').trim().match(/^([A-Za-z0-9_-]{20,})$/);
       if (!m) return false;
       LS.set('pk_api', m[1]); remoteUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec';
-      jembatanBuang(); if (LS.get('pk_jembatan') === '1') jembatanMulai();
+      jembatanBuang(); if (LS.get('pk_jembatan') === '0' && LS.del) LS.del('pk_jembatan'); jembatanMulai();
       return true;
     },
     disconnect: function () { LS.del('pk_api'); remoteUrl = ''; jembatanBuang(); },
