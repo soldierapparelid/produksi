@@ -11,7 +11,7 @@ function fixture(){
  var store={read:function(s){return db[s]||[];},fresh:function(){},getSettings:function(){return config;},setSettings:function(s){config=s;version++;},version:function(){return version;},lock:function(fn){locks++;return fn();},
  append:function(s,r){if(s==='Gambar'&&failImage){failImage=false;throw new Error('Image write interrupted');}db[s].push(r);version++;},appendMany:function(s,r){db[s]=db[s].concat(r);version++;},
  update:function(s,id,p){Object.assign(db[s].find(function(r){return r.id===id;}),p);version++;},remove:function(s,id){db[s]=db[s].filter(function(r){return r.id!==id;});version++;},replaceAll:function(s,r){db[s]=r;version++;}};
- var core=createCore(store,{enforceClientVersion:true,now:function(){return new Date('2026-10-11T08:00:00Z');},id:function(){return 'generated'+(++serial);}});
+ var core=createCore(store,{enforceClientVersion:true,signQcRevision:coreHash,now:function(){return new Date('2026-10-11T08:00:00Z');},id:function(){return 'generated'+(++serial);}});
  `,c);
  const run=code=>vm.runInContext(code,c),plain=v=>JSON.parse(JSON.stringify(v));
  function call(action,p={},token='owner-token-111111111'){c.req={token,workflowVersion:2,clientVersion:run('APP_VERSION'),...p};return plain(run(`core.handle(${JSON.stringify(action)},JSON.parse(JSON.stringify(req)))`));}
