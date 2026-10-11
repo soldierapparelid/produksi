@@ -33,15 +33,19 @@ function alat({bendera='1',dibingkai=false}={}){
 }
 const teks=data=>JSON.stringify({ok:true,data});
 
-test('the bridge starts only when the server allowed it, and is removed when the server no longer does',async()=>{
-  const lama=alat({bendera:''});assert.equal(lama.body.children.length,0,'no frame before the server said so');
-  let done=lama.run("Api.call('bootstrap',{})");lama.calls[0].resolve(jawab({users:[],jembatan:1}));await done;
-  assert.equal(lama.ls.pk_jembatan,'1');assert.equal(lama.body.children.length,1);
-  const f=lama.bingkai();assert.match(f.src,/^https:\/\/script\.google\.com\/macros\/s\/deployment_example123456789\/exec\?jembatan=1$/);
+test('the bridge starts as soon as the app opens, and stays away only after the server said no',async()=>{
+  const baru=alat({bendera:''});assert.equal(baru.body.children.length,1,'first open after the update: started at once, before any answer');
+  const f=baru.bingkai();assert.match(f.src,/^https:\/\/script\.google\.com\/macros\/s\/deployment_example123456789\/exec\?jembatan=1$/);
   assert.equal(f['aria-hidden'],'true');assert.match(f.style,/width:0;height:0/);
-  const baru=alat();assert.equal(baru.body.children.length,1,'remembered on this device: started at once');
-  done=baru.run("Api.call('bootstrap',{})");baru.calls[0].resolve(jawab({users:[]}));await done;
-  assert.equal(baru.ls.pk_jembatan,undefined);assert.equal(baru.body.children.length,0,'an older server: plain path only');
+  /* the very first bootstrap is sent the ordinary way and is joined by the bridge as soon as it is ready */
+  let done=baru.run("Api.call('bootstrap',{})");assert.equal(baru.calls.length,1);const w=baru.siap();assert.equal(baru.pesan.length,1);
+  baru.balas(w,{ok:true,s:teks({users:[],jembatan:1})});await done;assert.equal(baru.ls.pk_jembatan,'1');assert.equal(baru.body.children.length,1);
+  /* an older server, or the switch turned off: remembered, the frame is removed and not started on the next open */
+  const mati=alat();done=mati.run("Api.call('bootstrap',{})");mati.calls[0].resolve(jawab({users:[]}));await done;
+  assert.equal(mati.ls.pk_jembatan,'0');assert.equal(mati.body.children.length,0);
+  const lagi=alat({bendera:'0'});assert.equal(lagi.body.children.length,0,'remembered: plain path only');
+  done=lagi.run("Api.call('bootstrap',{})");lagi.calls[0].resolve(jawab({users:[],jembatan:1}));await done;
+  assert.equal(lagi.ls.pk_jembatan,'1');assert.equal(lagi.body.children.length,1,'the server allows it again');
   const dibingkai=alat({dibingkai:true});assert.equal(dibingkai.body.children.length,0,'never inside another site\'s frame');
 });
 test('only the bridge page inside our own frame is believed',async()=>{
