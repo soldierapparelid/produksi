@@ -606,7 +606,7 @@ function corePayrollRevision(row) {
 }
 /* QC forms use opaque proofs computed before role redaction. Neither the proof
    nor the grouping key exposes the source wage to the QC account. */
-function coreQcSourceRevision(source, qcRows, repairMode) {
+function coreQcSourceRevision(source, qcRows, repairMode, sign, linkedSource) {
   if (!source) return '';
   if (source.qcRevision) return String(source.qcRevision);
   function proof(row, sheet) {
@@ -622,7 +622,9 @@ function coreQcSourceRevision(source, qcRows, repairMode) {
   var related = (qcRows || []).filter(function (q) {
     return repairMode ? q.repairQcId === source.id : q.setorId === source.id || q.poId === source.poId && !q.setorId && !!coreLegacyInfo(q, 'qc');
   }).map(function (q) { return proof(q, 'QC'); }).sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); });
-  return coreHash(coreDomainCanonical([repairMode ? 'repair' : 'count', proof(source,repairMode ? 'QC' : 'SlipSetor'), related]));
+  var linked = repairMode && source.setorId && linkedSource ? proof(linkedSource,'SlipSetor') : null;
+  var value = coreDomainCanonical([repairMode ? 'repair' : 'count', proof(source,repairMode ? 'QC' : 'SlipSetor'), related, linked]);
+  return typeof sign === 'function' ? sign(value) : coreHash(value);
 }
 function coreQcGroupKey(source, repairMode, setorRows) {
   if (!source) return '';
@@ -1255,6 +1257,10 @@ function createCore(store, env) {
   var insideWrite = false, skipAutoCompletion = false;
 
   function fail(msg) { throw new Error(msg); }
+  function qcSourceRevision(source, rows, repair, linkedSource) {
+    if (env.enforceClientVersion && typeof env.signQcRevision !== 'function') fail('Server perlu diperbarui sebelum pemeriksaan QC dibuka.');
+    return coreQcSourceRevision(source, rows, repair, env.signQcRevision, linkedSource);
+  }
   function nowIso() { return env.now().toISOString(); }
   function today() { return coreYmd(env.now()); }
   function tglOk(s) { s = String(s || ''); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : ''; }
@@ -1455,15 +1461,22 @@ function createCore(store, env) {
     po.forEach(function (p) { p.agg = agg[p.id]; p.workflow = wf[p.id]; if (wf[p.id] && wf[p.id].cutting) p.cutting = wf[p.id].cutting; });
     earned.forEach(function (r) { if (upahDitahan(wf[r.poId], r)) { r.issues = r.issues.concat(wf[r.poId].issues); r.available = 0; r.needsReview = true; } r.revision = corePayrollRevision(r); });
     if (coreIsAdmin(me) || me.divisi === 'qc') {
-      var proofSetById = {}, proofQcBySource = {}, proofRepairs = {}, proofLegacyByPo = {};
+      var proofSetById = {}, proofQcBySource = {}, proofRepairs = {}, proofLegacyByPo = {}, publicGroups = {};
+      /* Publish cohort membership without a low-entropy hash of its tariff.
+         A representative source ID is stable and conveys no price to QC. */
+      function publicQcGroup(r, repair) {
+        var linked = proofSetById[r.setorId], internal = coreQcGroupKey(r,repair,linked ? [linked] : []);
+        if (!publicGroups[internal]) publicGroups[internal] = 'qc-group:' + (repair ? 'repair:' : 'count:') + r.id;
+        return publicGroups[internal];
+      }
       setor.forEach(function (r) { proofSetById[r.id] = r; });
       qc.forEach(function (r) {
         if (r.setorId) (proofQcBySource[r.setorId] || (proofQcBySource[r.setorId] = [])).push(r);
         else if (coreLegacyInfo(r,'qc')) (proofLegacyByPo[r.poId] || (proofLegacyByPo[r.poId] = [])).push(r);
         if (r.repairQcId) (proofRepairs[r.repairQcId] || (proofRepairs[r.repairQcId] = [])).push(r);
       });
-      setor.forEach(function (r) { r.qcRevision = coreQcSourceRevision(r,(proofQcBySource[r.id] || []).concat(proofLegacyByPo[r.poId] || []),false); r.qcGroupKey = coreQcGroupKey(r,false); });
-      qc.forEach(function (r) { r.qcRevision = coreQcSourceRevision(r,proofRepairs[r.id] || [],true); r.qcGroupKey = coreQcGroupKey(r,true,proofSetById[r.setorId] ? [proofSetById[r.setorId]] : []); });
+      setor.slice().sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); }).forEach(function (r) { r.qcRevision = qcSourceRevision(r,(proofQcBySource[r.id] || []).concat(proofLegacyByPo[r.poId] || []),false); r.qcGroupKey = publicQcGroup(r,false); });
+      qc.slice().sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); }).forEach(function (r) { r.qcRevision = qcSourceRevision(r,proofRepairs[r.id] || [],true,proofSetById[r.setorId]); r.qcGroupKey = publicQcGroup(r,true); });
     }
 
     var admin = coreIsAdmin(me);
@@ -1589,9 +1602,9 @@ function createCore(store, env) {
       out.po = po.filter(function (p) { return p.status === 'aktif' || pending[p.id]; });
       var shown = {}; out.po.forEach(function (p) { shown[p.id] = 1; });
       var hide = function (r) { var o = copy(r); o.upah = 0; o.upahId = o.upahId ? 'x' : ''; return o; };
-      out.setor = setor.filter(function (r) { return shown[r.poId]; }).map(hide);
-      out.kirim = kirim.filter(function (r) { return shown[r.poId]; }).map(hide);
-      out.qc = qc.filter(function (r) { return shown[r.poId]; });
+      out.setor = setor.filter(function (r) { return shown[r.poId]; }).map(function (r) { var o = hide(r); if (r.status === 'diterima') delete o.revision; return o; });
+      out.kirim = kirim.filter(function (r) { return shown[r.poId]; }).map(function (r) { var o = hide(r); delete o.revision; return o; });
+      out.qc = qc.filter(function (r) { return shown[r.poId]; }).map(hide);
       out.gudang = gudang.filter(function (r) { return shown[r.poId]; });
     } else {
       out.po = [];
@@ -2978,7 +2991,7 @@ function createCore(store, env) {
         var base = mode ? qcById[input.repairQcId] : null, slip = setById[mode && base ? base.setorId : input.setorId], source = mode ? base : slip;
         if (!source || source.poId !== poId || mode && source.repairQcId || !mode && source.status !== 'diterima') fail('Sumber QC harus berasal dari hitungan diterima pada PO yang sama.');
         if (mode && input.setorId && input.setorId !== base.setorId) fail('Hitungan asal perbaikan tidak cocok.');
-        if (input.expectedRevision !== coreQcSourceRevision(source,allQc,mode)) fail('Sumber atau hasil QC berubah sejak formulir dibuka. Muat ulang dan periksa kembali.');
+        if (input.expectedRevision !== qcSourceRevision(source,allQc,mode,slip)) fail('Sumber atau hasil QC berubah sejak formulir dibuka. Muat ulang dan periksa kembali.');
         var key = coreQcGroupKey(source,mode,sources);
         if (groupKey && key !== groupKey) fail('Pisahkan kelompok QC menurut maklon dan tarif sumber yang sama.'); groupKey = key;
         var basis = mode ? coreQcMaps(base,slip,[]).perbaikan : coreMap(slip.ukuran);
