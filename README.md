@@ -2,6 +2,12 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.36 — pencarian dan riwayat slip
+
+- Kolom pencarian dalam pemilih PO/produk mengikuti tinggi input, sehingga ikon tetap di dalam kolom dan tidak menyisakan ruang kosong besar.
+- Slip mingguan ditampilkan sebagai riwayat pekerjaan ringkas pada layar admin, maklon, dan tukang potong. Dokumen A4 tersedia melalui Lihat slip; cetak dan PDF tetap memakai pekerja serta periode yang dipilih.
+- Catatan yang perlu ditinjau tetap terpisah dari pekerjaan terverifikasi. Perhitungan upah, potongan kasbon, dan catatan pembayaran tidak diubah.
+
 ## Rilis 1.5.35 — pesanan dipisah per invoice
 
 - Pesanan supplier ditampilkan per identitas invoice. Model dalam satu invoice tetap bersama; invoice baru tidak bergabung dengan pesanan lama meskipun supplier, nama invoice, atau tanggalnya sama. Riwayat yang memiliki nama grup eksplisit tetap dikelompokkan sesuai catatan lama; order tanpa identitas/nama grup berdiri sendiri.
