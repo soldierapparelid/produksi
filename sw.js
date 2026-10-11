@@ -2,7 +2,7 @@
    bila jaringan lambat, salinan perangkat tetap bisa dibuka. Data usaha di
    IndexedDB dan permintaan Apps Script tidak dibaca atau diubah di sini. */
 var AWALAN = 'pk-produksi-app-';
-var RAKITAN = '20261011-antrean-varian-1534';
+var RAKITAN = '20261011-invoice-terpisah-1535';
 var CACHE = AWALAN + RAKITAN;
 var HALAMAN = './index.html';
 var FILES = [HALAMAN, './manifest.webmanifest', './manifest-potong.webmanifest', './manifest-jahit.webmanifest', './manifest-qc.webmanifest', './logo-192.png', './logo-512.png'];

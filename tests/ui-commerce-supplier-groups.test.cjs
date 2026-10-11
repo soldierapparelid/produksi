@@ -30,11 +30,11 @@ function openGroupIds(markup) {
   return [...markup.matchAll(/data-a="commerceInvoiceOpen" data-ids="([^"]*)"/g)].map(x=>x[1].split(','));
 }
 
-test('supplier identity joins different dates and invoice names without rewriting original orders',()=>{
+test('the same supplier keeps differently named legacy invoices separate without rewriting original orders',()=>{
   const h=harness(),orders=[supplierOrder('first','supplier-a',{tanggalOrder:'2026-01-02',grupNama:'First invoice'}),supplierOrder('second','supplier-a',{tanggalOrder:'2026-10-03',grupNama:'Another invoice'})];
   h.seed('pembelian',{orders});const before=h.json("commerceData('pembelian').orders"),groups=h.json("commerceOrderGroups(commerceData('pembelian').orders)");
-  assert.equal(groups.length,1);assert.deepEqual(groups[0].orders.map(o=>o.id),['first','second']);assert.deepEqual(h.json("commerceData('pembelian').orders"),before);
-  const card=h.run("commerceGroupCard(commerceOrderGroups(commerceData('pembelian').orders)[0])");assert.equal((card.match(/<button\b/g)||[]).length,2);assert.match(card,/>Buka pesanan<\/button>/);assert.match(card,/>Tambah order<\/button>/);assert.match(card,/2026-01-02 – 2026-10-03/);assert.deepEqual(openGroupIds(card),[['first','second']]);assert.equal(h.requests.length,0);
+  assert.equal(groups.length,2);assert.deepEqual(groups.map(g=>g.orders.map(o=>o.id)),[['first'],['second']]);assert.deepEqual(h.json("commerceData('pembelian').orders"),before);
+  const card=h.run("commerceGroupCard(commerceOrderGroups(commerceData('pembelian').orders)[0])");assert.equal((card.match(/<button\b/g)||[]).length,2);assert.match(card,/>Buka invoice<\/button>/);assert.match(card,/>Invoice baru<\/button>/);assert.match(card,/First invoice/);assert.match(card,/2026-01-02/);assert.ok(!card.includes('2026-10-03'));assert.deepEqual(openGroupIds(card),[['first']]);assert.equal(h.requests.length,0);
 });
 
 test('identical invoice names and dates never merge different suppliers, even with the same display name',()=>{
@@ -48,36 +48,40 @@ test('missing supplier identity remains a separate order while an explicit produ
   assert.equal(groups.length,3);assert.deepEqual(groups.map(g=>g.orders.map(o=>o.id)),[['unknown-1'],['unknown-2'],['known','from-product']]);
 });
 
-test('searching one matching order keeps every visible order of that supplier in the opened group',()=>{
-  const h=harness(),orders=[supplierOrder('needle','s1',{productName:'Unique matching model',tanggalOrder:'2026-10-01'}),supplierOrder('sibling','s1',{productName:'Different model',tanggalOrder:'2026-08-02'}),supplierOrder('unrelated','s2')];h.seed('pembelian',{orders});
+test('searching one matching model keeps its whole invoice but excludes another invoice of the same supplier',()=>{
+  const h=harness(),orders=[supplierOrder('needle','s1',{productName:'Unique matching model',tanggalOrder:'2026-10-01'}),supplierOrder('sibling','s1',{productName:'Different model',tanggalOrder:'2026-08-02'}),supplierOrder('unrelated','s1',{grupNama:'Different invoice'})];h.seed('pembelian',{orders});
   h.run("S.f.q='unique matching';commerceOrderList(commerceData('pembelian').orders)");const markup=h.run('S.listFn()');assert.deepEqual(openGroupIds(markup),[['needle','sibling']]);assert.match(markup,/Total Rp2000/);assert.ok(!markup.includes('unrelated'));assert.equal(h.requests.length,0);
 });
 
-test('pagination counts suppliers and never splits a large supplier group across pages',()=>{
-  const h=harness(),large=Array.from({length:61},(_,i)=>supplierOrder('large-'+i,'s-large')),others=Array.from({length:50},(_,i)=>supplierOrder('other-'+i,'s-'+i));h.seed('pembelian',{orders:[...large,...others]});
+test('pagination counts invoices and never splits a large invoice across pages',()=>{
+  const h=harness(),large=Array.from({length:61},(_,i)=>supplierOrder('large-'+i,'same-supplier',{invoiceId:'large-invoice'})),others=Array.from({length:50},(_,i)=>supplierOrder('other-'+i,'same-supplier',{invoiceId:'other-invoice-'+i}));h.seed('pembelian',{orders:[...large,...others]});
   const markup=h.run("commerceOrderList(commerceData('pembelian').orders)"),groups=openGroupIds(markup);assert.equal(groups.length,50);assert.deepEqual(groups[0],large.map(o=>o.id));assert.match(markup,/1 tersisa/);assert.ok(!groups.flat().includes('other-49'));
   h.run("S.f['commerceLimit-pembelian']=100");const all=openGroupIds(h.run('S.listFn()'));assert.equal(all.length,51);assert.equal(new Set(all.flat()).size,111);assert.deepEqual(all[0],large.map(o=>o.id));
 });
 
-test('opening a supplier with more than 20 orders retains every order, totals and detail entry',()=>{
-  const h=harness(),orders=Array.from({length:45},(_,i)=>supplierOrder('order-'+i,'same-supplier',{productName:'Unique model '+i,grupNama:i%2?'InvoiceA':'InvoiceB',tanggalOrder:i%2?'2026-10-02':'2026-09-01'}));h.seed('pembelian',{orders});
+test('opening one invoice with more than 20 models retains every model, totals and detail entry',()=>{
+  const h=harness(),orders=Array.from({length:45},(_,i)=>supplierOrder('order-'+i,'same-supplier',{invoiceId:'one-large-invoice',productName:'Unique model '+i,tanggalOrder:i%2?'2026-10-02':'2026-09-01'}));h.seed('pembelian',{orders:[...orders,supplierOrder('unrelated','same-supplier',{invoiceId:'another-invoice'})]});
   h.run('commerceInvoiceShow('+JSON.stringify(orders.map(o=>o.id))+')');assert.deepEqual(h.json('S.invoice.ids'),orders.map(o=>o.id));const invoice=h.run('lastSheet');assert.equal((invoice.match(/data-a="commerceOrderDetail"/g)||[]).length,45);assert.match(invoice,/Total<\/dt><dd class="b">Rp45000/);assert.match(invoice,/45 model · 450 pcs/);assert.match(invoice,/Unique model 44/);assert.equal(h.requests.length,0);
 });
 
-test('a supplier image above 20 orders opens an empty explicit selection for the correct supplier without fetching or writing',()=>{
+test('an invoice image above 20 models opens a bounded selection retaining all of that invoice and no other invoice',()=>{
   const h=harness(),orders=Array.from({length:21},(_,i)=>supplierOrder('image-'+i,'wanted-supplier'));
-  h.seed('pembelian',{orders:[supplierOrder('other','first-supplier'),...orders]});
+  h.seed('pembelian',{orders:[supplierOrder('other','wanted-supplier',{grupNama:'Other invoice'}),...orders]});
   h.run('commerceGroupPaint=function(){};A.commerceShareOpen({getAttribute:function(){return '+JSON.stringify(orders.map(o=>o.id).join(','))+';}})');
-  assert.match(h.run('lastSheet'),/Pilih order supplier/);assert.match(h.run('lastSheet'),/<option value="wanted-supplier" selected>Supplier wanted-supplier<\/option>/);
-  assert.deepEqual(h.json('currentForm._commerceGroupIds'),[],'no arbitrary first 20 orders are silently selected');assert.equal(h.json('currentForm._commerceGroupRows').filter(o=>o.supplierSnapshot.id==='wanted-supplier').length,21);
-  assert.match(h.json('messages').at(-1).text,/maksimal 20 order.*gambar/);assert.equal(h.run('S.share'),undefined);assert.equal(h.requests.length,0);
+  assert.match(h.run('lastSheet'),/Pilih model invoice/);assert.equal(h.run('currentForm._commerceGroupInvoiceKey'),h.run("commerceInvoiceKey(commerceFind('pembelian','orders','image-0'))"));
+  assert.deepEqual(h.json('currentForm._commerceGroupIds'),orders.slice(0,20).map(o=>o.id));assert.deepEqual(h.json('currentForm._commerceGroupRows.map(o=>o.id)'),orders.map(o=>o.id),'the 21st model remains available for an explicit replacement in the selection');
+  assert.throws(()=>h.run('commerceGroupSelection(currentForm._commerceGroupRows,'+JSON.stringify(orders.map(o=>o.id))+')'),/20/);assert.equal(h.json('commerceGroupSelection(currentForm._commerceGroupRows,currentForm._commerceGroupIds)').length,20);
+  assert.match(h.json('messages').at(-1).text,/maksimal 20 model.*gambar/);assert.equal(h.run('S.share'),undefined);assert.equal(h.requests.length,0);
 });
 
-test('payment above 40 outstanding supplier orders asks for an explicit subset before entering or submitting an amount',()=>{
-  const h=harness(),orders=Array.from({length:41},(_,i)=>supplierOrder('payment-'+i,'wanted-supplier'));
-  h.seed('pembelian',{orders:[supplierOrder('other','first-supplier'),...orders]});
+test('payment above 20 or 40 outstanding invoice models requires a bounded subset before entering or submitting an amount',()=>{
+  for(const count of [21,41]){
+  const h=harness(),orders=Array.from({length:count},(_,i)=>supplierOrder('payment-'+i,'wanted-supplier'));
+  h.seed('pembelian',{orders:[supplierOrder('other','wanted-supplier',{grupNama:'Other invoice'}),...orders]});
   h.run('commerceGroupPaint=function(){};A.commerceGroupPayOpen({getAttribute:function(k){return k==="data-ids"?'+JSON.stringify(orders.map(o=>o.id).join(','))+':"Supplier wanted-supplier";}})');
-  assert.match(h.run('lastSheet'),/Pilih order supplier/);assert.match(h.run('lastSheet'),/<option value="wanted-supplier" selected>Supplier wanted-supplier<\/option>/);
-  assert.deepEqual(h.json('currentForm._commerceGroupIds'),[]);assert.equal(h.json('currentForm._commerceGroupRows').filter(o=>o.supplierSnapshot.id==='wanted-supplier').length,41);
-  assert.ok(!h.run('lastSheet').includes('name="jumlah"'),'no payment amount form for an oversized set');assert.equal(h.run('currentForm._commerceGroupOrders'),undefined);assert.match(h.json('messages').at(-1).text,/maksimal 20 order.*pembayaran/);assert.equal(h.requests.length,0);
+  assert.match(h.run('lastSheet'),/Pilih model invoice/);assert.equal(h.run('currentForm._commerceGroupInvoiceKey'),h.run("commerceInvoiceKey(commerceFind('pembelian','orders','payment-0'))"));
+  assert.deepEqual(h.json('currentForm._commerceGroupIds'),orders.slice(0,20).map(o=>o.id));assert.deepEqual(h.json('currentForm._commerceGroupRows.map(o=>o.id)'),orders.map(o=>o.id));
+  assert.throws(()=>h.run('commerceGroupSelection(currentForm._commerceGroupRows,'+JSON.stringify(orders.map(o=>o.id))+')'),/20/);
+  assert.ok(!h.run('lastSheet').includes('name="jumlah"'),'no payment amount form for an oversized set');assert.equal(h.run('currentForm._commerceGroupOrders'),undefined);assert.match(h.json('messages').at(-1).text,/maksimal 20 model.*pembayaran/);assert.equal(h.requests.length,0);
+  }
 });
