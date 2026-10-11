@@ -284,6 +284,8 @@ button.item:hover, a.item:hover { background: var(--surface-2); }
 .cgroup > .corder-act { padding-left: 14px; }
 .cgroup .corder { margin-left: 14px; border-left: 2px solid var(--line); }
 .cgroup .corder:last-child { border-bottom: 0; }
+.cinv-act { padding: 12px 14px; gap: 8px; align-items: center; }
+.cinv .corder:last-child { border-bottom: 0; }
 
 /* kartu PO */
 .po { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; text-align: left; min-width: 0; width: 100%; }
@@ -429,7 +431,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261011-baca-tahan-gangguan-1526';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261011-nota-gabungan-1528';</script>
 <script>
 (function () {
 'use strict';
@@ -451,7 +453,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.25';
+var APP_VERSION = '1.5.27';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6065,7 +6067,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.26';
+var UI_VERSION = '1.5.28';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -6318,6 +6320,75 @@ var Api = (function () {
   var BACA_SUSUL = /^(bootstrap|sync|getState|getCommerceState)$/;
   var BACA_ULANG = /^(getGambar|cekGambar|getHistoryCorrection|previewLegacyMigration|getCommerceImages|previewCommerceImport)$/;
   var SUSUL_MS = 5000;
+
+  /* Jembatan: jalur kedua ke server yang sama. Jawaban doPost diantar Google lewat alamat terpisah (macros/echo) dan bisa
+     hilang di sana. Halaman kecil dari server (doGet ?jembatan=1) dimuat di bingkai tersembunyi dan meneruskan permintaan
+     lewat google.script.run, yang jawabannya kembali langsung. Dipakai hanya bila server menyatakan boleh (bootstrap
+     .jembatan === 1, diingat di pk_jembatan) dan aplikasi tidak sedang dibingkai situs lain. Pesan hanya diterima dari
+     dalam bingkai itu sendiri. Bila jembatan belum siap atau tidak menjawab, jalur biasa (fetch) yang dipakai. */
+  var ASAL_JEMBATAN = /^https:\/\/n-[a-z0-9-]+-script\.googleusercontent\.com$/;
+  var JEMBATAN_TUNGGU = 8000, JEMBATAN_SIAP_TUNGGU = 4000, JEMBATAN_MUAT_MAKS = 15000, JEMBATAN_UMUR = 30 * 60000;
+  var J = { frame: null, win: null, asal: '', siap: false, mati: false, dengar: false, mulai: 0, gagal: 0, n: 0, tunggu: {}, antre: [] };
+  function jembatanDari(w) {
+    var induk = J.frame && J.frame.contentWindow; if (!induk || !w) return false;
+    try { for (var i = 0; i < 5 && w; i++) { if (w === induk) return true; if (w.parent === w) break; w = w.parent; } } catch (e) {}
+    return false;
+  }
+  function jembatanPesan(ev) {
+    var d = ev && ev.data; if (!d || typeof d !== 'object' || !ASAL_JEMBATAN.test(String(ev.origin || '')) || !jembatanDari(ev.source)) return;
+    if (d.pk === 'jembatan-siap') {
+      J.win = ev.source; J.asal = ev.origin; J.siap = true;
+      var antre = J.antre; J.antre = []; antre.forEach(function (fn) { fn(); });
+    } else if (d.pk === 'api' && J.tunggu[d.id]) { var fn = J.tunggu[d.id]; delete J.tunggu[d.id]; fn(d); }
+  }
+  function jembatanMulai() {
+    if (gas || !remoteUrl || J.frame || J.mati) return;
+    if (typeof document === 'undefined' || !document.createElement || typeof window.addEventListener !== 'function') return;
+    try { if (window.top !== window.self) { J.mati = true; return; } } catch (e) { J.mati = true; return; }
+    if (!J.dengar) { J.dengar = true; window.addEventListener('message', jembatanPesan); }
+    var pasang = function () {
+      if (J.frame || J.mati || !remoteUrl || !document.body) return;
+      var f = document.createElement('iframe');
+      f.setAttribute('aria-hidden', 'true'); f.setAttribute('tabindex', '-1'); f.setAttribute('title', 'Sambungan server');
+      f.setAttribute('style', 'position:absolute;left:-9999px;top:0;width:0;height:0;border:0');
+      f.src = remoteUrl + '?jembatan=1';
+      J.frame = f; J.mulai = Date.now(); document.body.appendChild(f);
+    };
+    if (document.body) pasang(); else if (typeof document.addEventListener === 'function') document.addEventListener('DOMContentLoaded', pasang);
+  }
+  function jembatanBuang() {
+    if (J.frame && J.frame.parentNode) J.frame.parentNode.removeChild(J.frame);
+    J.frame = null; J.win = null; J.asal = ''; J.siap = false; J.antre = [];
+    var tunggu = J.tunggu; J.tunggu = {}; Object.keys(tunggu).forEach(function (k) { tunggu[k]({ ok: false, e: 'jembatan' }); });
+  }
+  function jembatanKeadaan() {
+    if (!J.frame || J.mati) return 'tidak';
+    /* halaman jembatan yang terlalu lama terbuka diganti yang baru selagi tidak ada permintaan yang ditunggu */
+    if (J.siap && Date.now() - J.mulai > JEMBATAN_UMUR && !Object.keys(J.tunggu).length) { jembatanBuang(); jembatanMulai(); }
+    if (J.siap) return 'siap';
+    return J.frame && Date.now() - J.mulai < JEMBATAN_MUAT_MAKS ? 'muat' : 'tidak';
+  }
+  function jembatanSaatSiap(fn) { J.antre.push(fn); }
+  /* selesai(d): d.ok + d.s (teks jawaban), atau d.ok false (+ d.belum bila permintaan pasti belum sampai ke server) */
+  function jembatanKirim(body, selesai) {
+    var id = 'j' + (++J.n);
+    J.tunggu[id] = selesai;
+    try { J.win.postMessage({ pk: 'api', id: id, body: body }, J.asal); }
+    catch (e) { delete J.tunggu[id]; setTimeout(function () { selesai({ ok: false, belum: true, e: 'jembatan' }); }, 0); return function () {}; }
+    return function () { delete J.tunggu[id]; };
+  }
+  function jembatanHasil(baik) {
+    if (baik) { J.gagal = 0; return; }
+    J.gagal++;
+    /* jembatan yang tidak menjawab dibuat lagi di belakang layar; kalau terus gagal, perangkat ini memakai jalur biasa saja */
+    if (J.gagal >= 6) { jembatanBuang(); J.mati = true; }
+    else if (!Object.keys(J.tunggu).length) { jembatanBuang(); jembatanMulai(); }
+  }
+  function jembatanIzin(res) {
+    if (!res || !res.ok || !res.data) return;
+    if (res.data.jembatan === 1) { if (LS.get('pk_jembatan') !== '1') LS.set('pk_jembatan', '1'); jembatanMulai(); }
+    else { if (LS.get('pk_jembatan') && LS.del) LS.del('pk_jembatan'); jembatanBuang(); }
+  }
   function call(action, payload) {
     var body = JSON.stringify({ action: action, payload: payload || {} });
     return new Promise(function (resolve, reject) {
@@ -6349,9 +6420,13 @@ var Api = (function () {
           .withFailureHandler(failure)
           .api(body);
       } else if (remoteUrl) {
-        var susul = BACA_SUSUL.test(action), maks = susul ? 6 : (BACA_ULANG.test(action) ? 3 : 1);
-        var dikirim = 0, jalan = 0, kendali = [], jeda = null;
-        controller = { abort: function () { clearTimeout(jeda); kendali.forEach(function (k) { try { k.abort(); } catch (e) {} }); } };
+        var susul = BACA_SUSUL.test(action), baca = susul || BACA_ULANG.test(action), aman = baca || action === 'hangat', maks = susul ? 6 : (baca ? 3 : 1);
+        var dikirim = 0, jalan = 0, kendali = [], jeda = null, jedaJ = null, tungguJ = null, lepasJ = null, jDiam = false, lewatFetch = false;
+        var bersih = function () {
+          clearTimeout(jeda); clearTimeout(jedaJ); clearTimeout(tungguJ); tungguJ = null;
+          if (lepasJ) { lepasJ(); lepasJ = null; if (jDiam) jembatanHasil(false); }
+        };
+        controller = { abort: function () { bersih(); kendali.forEach(function (k) { try { k.abort(); } catch (e) {} }); } };
         var kirim = function () {
           if (settled || dikirim >= maks) return;
           dikirim++; jalan++;
@@ -6364,14 +6439,43 @@ var Api = (function () {
             .then(function (r) { if (!r.ok) throw new Error('http'); if (!settled) clearTimeout(jeda); return r.json(); })
             .then(function (res) {
               jalan--; if (settled) return;
-              clearTimeout(jeda); kendali.forEach(function (lain) { if (lain !== k) { try { lain.abort(); } catch (e) {} } });
+              bersih(); kendali.forEach(function (lain) { if (lain !== k) { try { lain.abort(); } catch (e) {} } });
+              if (action === 'bootstrap') jembatanIzin(res);
               success(res);
             }, function (error) {
               jalan--; if (settled || jalan > 0) return;   /* masih ada permintaan lain yang ditunggu */
-              if (dikirim < maks) kirim(); else failure(error);
+              if (dikirim < maks) kirim(); else if (!lepasJ) { bersih(); failure(error); }
             });
         };
-        kirim();
+        var mulaiFetch = function () { if (settled || lewatFetch) return; lewatFetch = true; kirim(); };
+        var mulaiJembatan = function () {
+          if (settled || lepasJ) return;
+          lepasJ = jembatanKirim(body, function (d) {
+            lepasJ = null; clearTimeout(jedaJ); if (settled) return;
+            var res = null; if (d && d.ok) { try { res = JSON.parse(d.s); } catch (e) { res = null; } }
+            if (res) {
+              jembatanHasil(true); bersih(); kendali.forEach(function (lain) { try { lain.abort(); } catch (e) {} });
+              if (action === 'bootstrap') jembatanIzin(res);
+              success(res); return;
+            }
+            jembatanHasil(false);
+            if (aman || (d && d.belum)) {   /* aman diulang, atau permintaan pasti belum sampai ke server: jalur biasa */
+              if (!lewatFetch) mulaiFetch(); else if (!jalan && dikirim >= maks) { bersih(); failure(new Error('jembatan')); }
+            } else { bersih(); failure(new Error('jembatan')); }   /* simpan: hasilnya tidak pasti, sama seperti sambungan putus */
+          });
+          /* jembatan diam: untuk permintaan yang aman diulang, jalur biasa ikut dicoba; jawaban pertama yang dipakai */
+          if (aman) jedaJ = setTimeout(function () { jDiam = true; mulaiFetch(); }, JEMBATAN_TUNGGU);
+        };
+        var keadaan = jembatanKeadaan();
+        if (keadaan === 'siap') mulaiJembatan();
+        else if (keadaan === 'muat' && !aman) {
+          /* simpan saat jembatan masih dimuat: ditunggu sebentar; kalau belum siap juga, jalur biasa (tetap satu kali kirim) */
+          tungguJ = setTimeout(function () { tungguJ = null; mulaiFetch(); }, JEMBATAN_SIAP_TUNGGU);
+          jembatanSaatSiap(function () { if (settled || tungguJ === null) return; clearTimeout(tungguJ); tungguJ = null; mulaiJembatan(); });
+        } else {
+          mulaiFetch();
+          if (keadaan === 'muat') jembatanSaatSiap(mulaiJembatan);
+        }
       } else {
         ensureLocal();
         setTimeout(function () {
@@ -6384,7 +6488,7 @@ var Api = (function () {
   }
   return {
     /* dipanggil sekali setelah penyimpanan perangkat siap dibaca */
-    init: function () { readDiv(); if (!gas) readInvite(); },
+    init: function () { readDiv(); if (!gas) { readInvite(); if (LS.get('pk_jembatan') === '1') jembatanMulai(); } },
     call: call,
     mode: function () { return gas ? 'gas' : (remoteUrl ? 'remote' : 'demo'); },
     local: function () { ensureLocal(); return local; },
@@ -6393,9 +6497,11 @@ var Api = (function () {
     connect: function (input) {
       var m = String(input || '').match(/\/macros\/s\/([A-Za-z0-9_-]{20,})/) || String(input || '').match(/k=([A-Za-z0-9_-]{20,})/) || String(input || '').trim().match(/^([A-Za-z0-9_-]{20,})$/);
       if (!m) return false;
-      LS.set('pk_api', m[1]); remoteUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec'; return true;
+      LS.set('pk_api', m[1]); remoteUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec';
+      jembatanBuang(); if (LS.get('pk_jembatan') === '1') jembatanMulai();
+      return true;
     },
-    disconnect: function () { LS.del('pk_api'); remoteUrl = ''; },
+    disconnect: function () { LS.del('pk_api'); remoteUrl = ''; jembatanBuang(); },
     /* link undangan dibuka saat aplikasi sudah terbuka: alamatnya hanya berubah di bagian #, halaman tidak dimuat ulang */
     rehash: function () { if (gas || !/[#&]k=[A-Za-z0-9_-]{20,}/.test(String(location.hash || ''))) return false; readDiv(); readInvite(); return true; },
     div: function () { return lockDiv; },
@@ -9038,7 +9144,7 @@ function commerceGroupCard(g) {
   hidup.forEach(function (o) { total += Number(o.totalHarga) || 0; qty += Number(o.totalQty) || 0; got += Number(o.totalReceived) || 0; if (o.paymentReview) periksa++; else { paid += Number(o.totalPaid) || 0; sisa += Math.max(0, Number(o.balance) || 0); } });
   var ids = hidup.map(function (o) { return o.id; }).join(','), bayar = hidup.filter(commerceBisaBayar);
   return '<div class="cgroup"><div class="cgroup-h"><span class="grow"><b>' + esc(g.nama) + '</b><br><span class="small muted">' + tgl(g.tanggal) + ' · ' + hidup.length + ' model · ' + nf(qty) + ' pcs · ' + rp(total) + '</span><br><span class="small muted">Diterima ' + nf(got) + '/' + nf(qty) + ' pcs' + (periksa ? ' · ' + periksa + ' order perlu diperiksa' : '') + '</span></span><span class="right"><span class="small muted">Sisa bayar</span><br><b>' + rp(sisa) + '</b><br><span class="small muted">Total ' + rp(total) + '</span><br><span class="small muted">Sudah dibayar ' + rp(paid) + '</span></span></div>' +
-    '<div class="row wrap corder-act">' + (bayar.length > 1 ? '<button class="btn sm pri" data-a="commerceGroupPayOpen" data-ids="' + esc(bayar.map(function (o) { return o.id; }).join(',')) + '" data-nama="' + esc(g.nama) + '">Bayar grup</button>' : '') + (ids ? '<button class="btn sm" data-a="commerceShareOpen" data-ids="' + esc(ids) + '">' + ic('img', 's') + 'Gambar gabungan</button>' : '') + (hidup.length && isAdmin() ? commerceTambahModelBtn(hidup[0], 'sm') : '') + '</div>' +
+    '<div class="row wrap corder-act">' + (ids ? '<button class="btn sm pri" data-a="commerceInvoiceOpen" data-ids="' + esc(ids) + '">Nota gabungan</button>' : '') + (bayar.length > 1 ? '<button class="btn sm" data-a="commerceGroupPayOpen" data-ids="' + esc(bayar.map(function (o) { return o.id; }).join(',')) + '" data-nama="' + esc(g.nama) + '">Bayar grup</button>' : '') + (ids ? '<button class="btn sm" data-a="commerceShareOpen" data-ids="' + esc(ids) + '">' + ic('img', 's') + 'Gambar gabungan</button>' : '') + (hidup.length && isAdmin() ? commerceTambahModelBtn(hidup[0], 'sm') : '') + '</div>' +
     g.orders.map(commerceOrderCard).join('') + '</div>';
 }
 function commerceOrderList(orders) {
@@ -9057,6 +9163,7 @@ A.commerceGroupPayOpen = function (el) {
   var f = commerceForm('Bayar grup — ' + (el.getAttribute('data-nama') || 'supplier'), 'pembelian', hid('id', newId()) +
     '<dl class="kv"><dt>Total ' + orders.length + ' order</dt><dd class="b">' + rp(orders.reduce(function (n, o) { return n + (Number(o.totalHarga) || 0); }, 0)) + '</dd><dt>Sudah dibayar (DP)</dt><dd class="b">' + rp(orders.reduce(function (n, o) { return n + (Number(o.totalPaid) || 0); }, 0)) + '</dd><dt>Sisa tagihan</dt><dd class="b">' + rp(sisa) + '</dd></dl>' +
     '<div class="note">Satu pembayaran untuk <b>' + orders.length + ' order</b>. Jumlahnya dibagi ke tiap order menurut sisa tagihannya. Isi sesuai uang yang dibayarkan sekarang (DP, cicilan, atau pelunasan).</div>' +
+    (S.invoice ? '' : '<div><button class="btn sm" data-a="commerceInvoiceDariBayar">Salah DP, jumlah, atau harga? Buka Nota gabungan</button></div>') +
     '<div class="card flush"><div class="list">' + orders.map(function (o) { return '<div class="item"><span class="grow">' + esc([o.productName || o.id, (o.productSnapshot || {}).model, (o.productSnapshot || {}).warna].filter(Boolean).join(' ')) + '<br><span class="small muted">Total ' + rp(o.totalHarga) + ' · sudah dibayar ' + rp(o.totalPaid) + '</span></span><span class="right small">Sisa <b>' + rp(o.balance) + '</b></span></div>'; }).join('') + '</div></div>' +
     fTanggal('Tanggal bayar','tanggal') + fNum('Jumlah bayar (Rp)','jumlah',sisa,'step="1"') + fSelect('Metode','metode',[['transfer','Transfer'],['cash','Tunai'],['qris','QRIS'],['lainnya','Lainnya']],'transfer') + fCatatan(''), 'commerceGroupPaySave', 'Simpan pembayaran grup');
   f._commerceGroupOrders = orders.map(function (o) { return { id: o.id, revision: o.revision, balance: Number(o.balance) }; });
@@ -9219,6 +9326,87 @@ function commerceKeepPicture(f, res) {
   S.img[key] = { ver: ver, data: data }; Idb.put('img', key, ver + '|' + data);
 }
 
+/* ---------- Nota gabungan ----------
+   Satu layar untuk satu invoice ke supplier, mengikuti "Nota Gabungan" di aplikasi sebelumnya: model dan variannya,
+   riwayat pembayaran dengan Ubah dan Hapus, Tambah pembayaran, dan gambar untuk supplier. Tiap tombol membuka formulir
+   yang sudah ada; begitu formulir itu tersimpan dan tertutup, layar ini digambar ulang dengan angka terbaru. */
+function commerceInvoiceOrders(ids) { return (ids || []).map(function (k) { return commerceFind('pembelian','orders',k); }).filter(function (o) { return o && !commerceBatal(o); }); }
+function commerceInvoiceNama(o) { return [o.productName || o.grupNama || o.id, (o.productSnapshot || {}).model, (o.productSnapshot || {}).warna].filter(Boolean).join(' '); }
+/* pembayaran yang masih berlaku, terlama di atas; bagian-bagian dari satu pembayaran gabungan dijadikan satu baris */
+function commerceInvoiceBayar(orders) {
+  var out = [], grup = {};
+  orders.forEach(function (o) {
+    (o.payments || []).forEach(function (e) {
+      if (e.voided) return;
+      var g = e.groupId ? grup[e.groupId] : null;
+      if (!g) { g = { tanggal: e.tanggal, jumlah: 0, metode: e.metode || '', catatan: e.catatan || '', model: [], orderId: o.id, eventId: e.id || '', groupId: e.groupId || '', kunci: !e.id || !!e.sourceReview }; out.push(g); if (e.groupId) grup[e.groupId] = g; }
+      g.jumlah += Number(e.jumlah) || 0; g.model.push(commerceInvoiceNama(o));
+    });
+  });
+  return out.sort(function (a, b) { return String(a.tanggal).localeCompare(String(b.tanggal)); });
+}
+function commerceInvoiceHtml() {
+  var s = S.invoice || { ids: [] }, orders = commerceInvoiceOrders(s.ids), owner = me().divisi === 'owner';
+  if (!orders.length) return sheetHtml('Nota gabungan', emptyBox('Order di nota ini sudah tidak ada di daftar. Tutup, lalu buka lagi dari daftar order.'));
+  var first = orders[0], sup = commerceFind('pembelian','suppliers',commerceOrderSupplierId(first)) || {}, supNama = sup.nama || first.supplierName || 'Supplier';
+  var total = 0, paid = 0, sisa = 0, qty = 0, got = 0, periksa = 0, invoice = {};
+  orders.forEach(function (o) { total += Number(o.totalHarga) || 0; qty += Number(o.totalQty) || 0; got += Number(o.totalReceived) || 0; if (o.grupNama) invoice[o.grupNama] = 1; if (o.paymentReview) periksa++; else { paid += Number(o.totalPaid) || 0; sisa += Math.max(0, Number(o.balance) || 0); } });
+  var namaInvoice = Object.keys(invoice).length === 1 ? Object.keys(invoice)[0] : '', ids = orders.map(function (o) { return o.id; }).join(',');
+  var bayar = orders.filter(commerceBisaBayar), riwayat = commerceInvoiceBayar(orders), lama = orders.filter(commerceArsip).length;
+  var kepala = '<div class="card col"><div class="row wrap"><div class="grow"><h3>' + esc(supNama) + '</h3><p class="small muted">' + esc([namaInvoice, sup.kontak, sup.alamat].filter(Boolean).join(' · ')) + '</p></div><span class="small muted">' + nf(orders.length) + ' model · ' + nf(qty) + ' pcs</span></div>' +
+    '<dl class="kv"><dt>Total</dt><dd class="b">' + rp(total) + '</dd><dt>Sudah dibayar (DP)</dt><dd class="b">' + rp(paid) + '</dd><dt>Sisa bayar</dt><dd class="b">' + rp(sisa) + '</dd><dt>Barang diterima</dt><dd>' + nf(got) + ' dari ' + nf(qty) + ' pcs' + (qty > got ? ' · belum datang ' + nf(qty - got) + ' pcs' : '') + '</dd></dl>' +
+    (periksa ? '<div class="note warn">' + nf(periksa) + ' order masih perlu diperiksa; pembayarannya belum ikut dihitung di atas.</div>' : '') + '</div>';
+  var model = '<div class="card flush cinv"><div class="sec-h"><h3>Model yang diorder</h3></div>' + orders.map(function (o) {
+    var attrs = commerceRecordAttr('pembelian', o.id), q = Number(o.totalQty) || 0;
+    var aksi = (commerceBisaEdit(o) ? '<button class="btn sm" data-a="commerceOrderOpen" data-id="' + esc(o.id) + '">Ubah jumlah / harga</button>' : (commerceArsip(o) && owner ? '<button class="btn sm" data-a="commerceSalinLamaOpen"' + attrs + '>Jadikan bisa diedit</button>' : '')) +
+      (!o.receiptReview && Number(o.totalReceived) < q ? '<button class="btn sm" data-a="commerceReceiptOpen"' + attrs + '>Terima barang</button>' : '') +
+      '<button class="btn sm ghost" data-a="commerceOrderDetail" data-id="' + esc(o.id) + '">Rincian</button>';
+    return '<div class="corder"><div class="item">' + commerceThumb(commerceFind('pembelian','products',o.produkId), o.productName || o.grupNama) + '<span class="grow"><b>' + esc(commerceInvoiceNama(o)) + '</b>' +
+      '<br><span class="small muted">' + esc((o.items || []).map(function (it) { return (it.nama || '—') + ' (' + nf(it.jumlah) + ')'; }).join(', ')) + '</span>' +
+      '<br><span class="small muted">' + tgl(o.tanggalOrder) + ' · ' + nf(q) + ' pcs × ' + rp(o.hargaSatuan) + ' · diterima ' + nf(o.totalReceived) + '/' + nf(q) + '</span>' + (commerceArsip(o) ? '<br><span class="chip warn">Dari aplikasi lama, rinciannya terkunci</span>' : '') + '</span>' +
+      '<span class="right"><b>' + rp(o.totalHarga) + '</b><br><span class="small muted">Dibayar ' + rp(o.totalPaid) + '</span><br><span class="small muted">Sisa ' + rp(o.balance) + '</span></span></div><div class="row wrap corder-act">' + aksi + '</div></div>';
+  }).join('') + (isAdmin() ? '<div class="row wrap cinv-act">' + commerceTambahModelBtn(first, 'sm') + '</div>' : '') + '</div>';
+  var tambah = bayar.length > 1 ? '<button class="btn pri" data-a="commerceGroupPayOpen" data-ids="' + esc(bayar.map(function (o) { return o.id; }).join(',')) + '" data-nama="' + esc(supNama) + '">' + ic('plus', 's') + 'Tambah pembayaran</button>'
+    : (bayar.length ? '<button class="btn pri" data-a="commercePaymentOpen"' + commerceRecordAttr('pembelian', bayar[0].id) + '>' + ic('plus', 's') + 'Tambah pembayaran</button>' : '');
+  var pembayaran = '<div class="card flush"><div class="sec-h"><h3>Riwayat pembayaran</h3></div>' + (riwayat.length ? '<div class="list">' + riwayat.map(function (r) {
+    var attrs = commerceRecordAttr('pembelian', r.orderId) + ' data-event="' + esc(r.eventId) + '"';
+    return '<div class="item"><span class="grow"><b>' + rp(r.jumlah) + '</b> <span class="small muted">' + tgl(r.tanggal) + '</span><br><span class="small muted">' + esc([r.metode, r.catatan].filter(Boolean).join(' · ') || '-') + '</span>' +
+      '<br><span class="small muted">' + esc(r.model.length > 1 ? 'Dibagi ke ' + r.model.length + ' model' : r.model[0] || '') + '</span></span>' +
+      (owner && !r.kunci ? '<button class="btn sm" data-a="commerceEventEdit"' + attrs + '>Ubah</button><button class="btn sm ghost" data-a="commerceInvoiceHapus"' + attrs + '>Hapus</button>' : '') + '</div>';
+  }).join('') + '</div>' : emptyBox('Belum ada pembayaran.')) +
+    '<div class="row wrap cinv-act">' + tambah + (!tambah && !periksa && sisa <= 0 ? '<span class="chip ok">Lunas</span>' : '') + '</div></div>';
+  var petunjuk = '<p class="small muted">Semua tentang invoice ini ada di layar ini. Salah jumlah atau harga: tekan <b>Ubah jumlah / harga</b> di modelnya. Salah DP atau tanggalnya: tekan <b>Ubah</b> atau <b>Hapus</b> di pembayarannya. DP berikutnya: <b>Tambah pembayaran</b>, isi tanggal dan jumlahnya.</p>' +
+    (lama ? '<div class="note">' + nf(lama) + ' model berasal dari aplikasi lama. Tekan <b>Jadikan bisa diedit</b> di model itu dulu; sesudah itu jumlah, harga, dan tanggal ordernya bisa diubah di sini.</div>' : '');
+  return sheetHtml('Nota gabungan — ' + (namaInvoice || supNama), '<div class="col">' + petunjuk + kepala + model + pembayaran + '</div>',
+    '<button class="btn" data-a="close">Tutup</button><button class="btn pri" data-a="commerceShareOpen" data-ids="' + esc(ids) + '">' + ic('img') + 'Gambar untuk supplier</button>');
+}
+function commerceInvoiceShow(ids) {
+  S.invoice = { ids: (ids || []).slice(0, 20) };
+  openSheet(commerceInvoiceHtml, { live: true, cls: 'wide', onClose: function () { S.invoice = null; } });
+}
+A.commerceInvoiceOpen = function (el) { var ids = String(el.getAttribute('data-ids') || '').split(',').filter(Boolean); if (ids.length) commerceInvoiceShow(ids); };
+/* dari formulir Bayar grup: formulirnya ditutup dulu supaya angkanya tidak tertinggal saat ada yang diubah di nota */
+A.commerceInvoiceDariBayar = function () {
+  var f = topForm(), ids = f._commerceGabungIds || (f._commerceGroupOrders || []).map(function (o) { return o.id; });
+  if (!ids || !ids.length || f._commerceSending) return;
+  closeSheet(); commerceInvoiceShow(ids);
+};
+/* Hapus pembayaran dari nota: pembayaran gabungan dihapus dari semua order sekaligus */
+A.commerceInvoiceHapus = function (el) {
+  if (me().divisi !== 'owner') return toast('Hanya owner yang dapat menghapus pembayaran.', true);
+  var row = commerceRecord('pembelian', el.getAttribute('data-id')); if (!row) return;
+  var e = (row.payments || []).filter(function (x) { return x.id === el.getAttribute('data-event'); })[0]; if (!e || e.voided) return toast('Catatan ini sudah tidak berlaku. Muat ulang daftar.', true);
+  var grup = e.groupId ? commerceGrupBagian(e.groupId) : [], gabungan = grup.length > 1, total = gabungan ? grup.reduce(function (n, g) { return n + g.jumlah; }, 0) : Number(e.jumlah) || 0, rev = {};
+  grup.forEach(function (g) { rev[g.order.id] = g.order.revision; });
+  var f = commerceForm('Hapus pembayaran', 'pembelian', hid('id', newId()) + '<div class="note warn">Pembayaran <b>' + rp(total) + '</b> tanggal ' + tgl(e.tanggal) + (gabungan ? ' (dibagi ke ' + nf(grup.length) + ' model)' : '') + ' dihapus dari hitungan, jadi sisa bayar bertambah sebesar itu. Riwayatnya tetap tersimpan sebagai catatan yang dikoreksi.</div>', 'commerceInvoiceHapusSave', 'Hapus pembayaran');
+  f._commerceHapus = { orderId: row.id, revision: row.revision, eventId: e.id, groupId: gabungan ? e.groupId : '', rev: rev, tanggal: String(e.tanggal || '').slice(0, 10), metode: e.metode || 'transfer' };
+};
+A.commerceInvoiceHapusSave = function (el) {
+  var f = topForm(), v = formVals(f), h = f._commerceHapus; if (!h || f._commerceLocked) return;
+  if (h.groupId) return commerceMutation('pembelian', 'gantiCommerceGroupPayment', { id: v.id, module: 'pembelian', groupId: h.groupId, expectedRevisions: h.rev, tanggal: h.tanggal, jumlah: 0, metode: h.metode, catatan: 'Dihapus: salah catat' }, f, el);
+  return commerceMutation('pembelian', 'voidCommerceEvent', { id: v.id, module: 'pembelian', parentId: h.orderId, eventId: h.eventId, expectedRevision: h.revision, tanggal: todayYmd(), catatan: 'Dihapus: salah catat' }, f, el);
+};
+
 /* Riwayat bayar: semua pembayaran pembelian yang masih berlaku, terbaru di atas. Pembayaran gabungan (satu kali bayar untuk
    beberapa order) dijadikan satu baris dengan jumlah utuhnya. */
 function commerceRiwayatRows(orders) {
@@ -9312,7 +9500,9 @@ function commerceAfterSave(intent, res) {
   /* order lama baru saja disalin: langsung buka order barunya supaya bisa diedit */
   if (intent.action === 'salinCommerceOrderLama' && res && res.record) {
     if (res.penerimaanDilewati) toast(nf(res.penerimaanDilewati) + ' penerimaan lama tidak ikut disalin karena variannya tidak dikenali. Catat ulang lewat tombol Terima.');
-    var idSalin = res.record.id; if (typeof closeAll === 'function') closeAll();
+    var idSalin = res.record.id, diNota = S.invoice ? S.invoice.ids.indexOf(intent.payload.orderId) : -1;
+    if (diNota >= 0) { S.invoice.ids[diNota] = idSalin; refresh(); return; }
+    if (typeof closeAll === 'function') closeAll();
     openSheet(function () { return commerceDetail('pembelian', idSalin); }, { live: true, cls: 'wide' }); return;
   }
   /* DP gabungan yang dicatat dari pemilih gabungan: gambar untuk supplier langsung dibuat dengan angka yang baru */
@@ -9326,6 +9516,11 @@ function commerceAfterSave(intent, res) {
     }
   }
   /* order baru: langsung tampilkan gambar yang dikirim ke supplier, seperti "Order Tersimpan!" di aplikasi sebelumnya */
+  /* model baru yang ditambahkan dari Nota gabungan langsung masuk ke nota itu (supplier yang sama) */
+  if (rec && intent.action === 'saveCommerceOrder' && intent.payload.expectedRevision == null && S.invoice) {
+    var asalNota = commerceInvoiceOrders(S.invoice.ids)[0];
+    if (asalNota && commerceOrderSupplierId(asalNota) === commerceOrderSupplierId(rec) && S.invoice.ids.indexOf(rec.id) < 0 && S.invoice.ids.length < 20) { S.invoice.ids.push(rec.id); refresh(); return; }
+  }
   if (rec && intent.action === 'saveCommerceOrder' && intent.payload.expectedRevision == null && typeof commerceShareShow === 'function') commerceShareShow([rec.id], true);
 }
 A.commerceAddOrderLine=function(el){var f=topForm(),box=$('[data-commerce-lines]',f);if($$('[data-commerce-line]',box).length>=100)return toast('Maksimal 100 varian.',true);box.insertAdjacentHTML('beforeend',commerceOrderLine({}));R.commerce(f);};
@@ -9445,7 +9640,7 @@ A.commerceGroupOpen=function(){
   if(!isAdmin())return;var rows=(commerceData('pembelian').orders||[]).filter(function(r){return !commerceBatal(r);}).sort(function(a,b){return String(b.tanggalOrder).localeCompare(String(a.tanggalOrder));}),map={},skipped=0;
   rows.forEach(function(r){var s=r.supplierSnapshot||{};if(s.id)map[s.id]=s.nama||r.supplierName||s.id;else skipped++;});var ids=Object.keys(map);if(!ids.length)return toast('Belum ada order dengan identitas supplier yang dapat dicetak gabungan.',true);
   var body='<div class="col" data-form="commerceGroup">'+fSelect('Supplier','supplier',ids.map(function(id){return[id,map[id]];}),ids[0],'data-c="commerceGroupSupplier"')+'<p class="small muted">Pilih order yang mau digabung (paling banyak 20), lalu tekan Buat gambar. Untuk mencatat DP atau cicilan sekaligus bagi order yang dicentang, tekan Bayar DP: jumlahnya dibagi ke tiap order menurut sisa tagihannya. Gambarnya memuat foto model, varian dan jumlahnya, tanggal order, DP yang sudah dibayar, dan sisa bayar, dan bisa langsung dikirim lewat WhatsApp. Pencatatan uang tidak digabung.</p>'+(skipped?'<div class="note warn">'+skipped+' order belum mempunyai identitas supplier lengkap. Gunakan cetak satuan pada detail order tersebut.</div>':'')+'<div class="card flush"><div class="list" data-commerce-group-list></div></div><div class="note" data-commerce-group-total></div></div>';
-  openSheet(function(){return sheetHtml('Gambar gabungan pembelian',body,'<button class="btn" data-a="commerceGroupPdf">Unduh PDF</button><button class="btn" data-a="commerceGroupBayar">' + ic('wallet') + 'Bayar DP</button><button class="btn pri" data-a="commerceGroupShare">' + ic('img') + 'Buat gambar</button>');},{cls:'wide'});var f=topForm();f._commerceScope=commerceScope();f._commerceGroupRows=JSON.parse(JSON.stringify(rows));f._commerceGroupIds=commerceGroupAwal(f,ids[0]);commerceGroupPaint(f);
+  openSheet(function(){return sheetHtml('Gambar gabungan pembelian',body,'<button class="btn" data-a="commerceGroupPdf">Unduh PDF</button><button class="btn" data-a="commerceGroupInvoice">Nota gabungan</button><button class="btn" data-a="commerceGroupBayar">' + ic('wallet') + 'Bayar DP</button><button class="btn pri" data-a="commerceGroupShare">' + ic('img') + 'Buat gambar</button>');},{cls:'wide'});var f=topForm();f._commerceScope=commerceScope();f._commerceGroupRows=JSON.parse(JSON.stringify(rows));f._commerceGroupIds=commerceGroupAwal(f,ids[0]);commerceGroupPaint(f);
 };
 C.commerceGroupSupplier=function(el){var f=el.closest('[data-form]');f._commerceGroupIds=commerceGroupAwal(f,formVals(f).supplier);commerceGroupPaint(f);};
 /* pilihan awal: order supplier itu yang belum selesai, supaya tidak perlu mencentang satu per satu */
@@ -9462,6 +9657,7 @@ A.commerceGroupBayar=function(){
     topForm()._commerceGabungIds=ids;
   }catch(e){toast(e.message,true);}
 };
+A.commerceGroupInvoice=function(){try{var rows=commerceGroupFormRows(topForm());closeSheet();commerceInvoiceShow(rows.map(function(r){return r.id;}));}catch(e){toast(e.message,true);}};
 A.commerceGroupShare=function(){try{var rows=commerceGroupFormRows(topForm());commerceShareShow(rows.map(function(r){return r.id;}),false);}catch(e){toast(e.message,true);}};
 C.commerceGroupSelect=function(el){var f=el.closest('[data-form]'),id=el.getAttribute('data-id'),ids=f._commerceGroupIds||[];if(el.checked){if(ids.length>=20){el.checked=false;return toast('Maksimal 20 order dalam satu dokumen.',true);}if(ids.indexOf(id)<0)ids.push(id);}else ids=ids.filter(function(x){return x!==id;});f._commerceGroupIds=ids;commerceGroupPaint(f);};
 function commerceGroupFormRows(f){if(!isAdmin()||f._commerceScope!==commerceScope())throw new Error('Sesi berubah. Buka kembali pilihan cetak.');return commerceGroupSelection(f._commerceGroupRows||[],f._commerceGroupIds||[]);}

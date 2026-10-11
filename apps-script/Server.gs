@@ -437,14 +437,40 @@ function pkRun_(text) {
     var store = pkStore_();
     return store.withReadCacheBatch(function () {
       var core = createCore(store, pkEnv_());
-      return { ok: true, data: core.handle(String(reqObj.action || ''), reqObj.payload || {}) };
+      var data = core.handle(String(reqObj.action || ''), reqObj.payload || {});
+      /* aplikasi di GitHub Pages boleh memakai jembatan (lihat pkJembatan_); angka lain atau tidak ada = jangan dipakai */
+      if (reqObj.action === 'bootstrap' && data && typeof data === 'object') data.jembatan = PK_JEMBATAN_;
+      return { ok: true, data: data };
     });
   } catch (err) {
     return { ok: false, error: String((err && err.message) || err) };
   }
 }
 function api(text) { return JSON.stringify(pkRun_(text)); }
+/* Jembatan untuk aplikasi di GitHub Pages. Jawaban doPost diantar Google lewat alamat terpisah
+   (script.googleusercontent.com/macros/echo); pada 11 Okt 2026 separuh jawaban hilang di sana walau eksekusinya
+   selesai. Halaman kecil tanpa tampilan ini dimuat aplikasi di dalam bingkai tersembunyi dan meneruskan permintaan
+   lewat google.script.run, yang jawabannya kembali langsung. Hanya pesan dari alamat aplikasi yang dilayani, dan
+   balasan hanya dikirim ke alamat itu. Fungsi yang dipanggil tetap api(), sama dengan aplikasi yang dibuka dari Apps Script.
+   PK_JEMBATAN_ = 0 mematikan pemakaian jembatan di semua perangkat tanpa mengganti tampilan. */
+var PK_JEMBATAN_ = 1;
+var PK_ASAL_APLIKASI_ = ['https://soldierapparelid.github.io'];
+function pkJembatan_() {
+  var js = '(function(){var ASAL=' + JSON.stringify(PK_ASAL_APLIKASI_) + ';' +
+    'window.addEventListener("message",function(ev){var d=ev.data;' +
+    'if(ASAL.indexOf(ev.origin)<0||!ev.source||!d||d.pk!=="api"||typeof d.body!=="string")return;' +
+    'var asal=ev.origin,sumber=ev.source,id=d.id;' +
+    'function balas(m){m.pk="api";m.id=id;try{sumber.postMessage(m,asal);}catch(x){}}' +
+    'try{google.script.run.withSuccessHandler(function(s){balas({ok:true,s:s});})' +
+    '.withFailureHandler(function(er){balas({ok:false,e:String((er&&er.message)||er)});}).api(d.body);}' +
+    'catch(x){balas({ok:false,belum:true,e:String((x&&x.message)||x)});}});' +
+    'for(var i=0;i<ASAL.length;i++){try{window.top.postMessage({pk:"jembatan-siap"},ASAL[i]);}catch(x){}}})();';
+  return HtmlService.createHtmlOutput('<!doctype html><html><head><meta charset="utf-8"></head><body><script>' + js + '<\/script></body></html>')
+    .setTitle('Sambungan')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
 function doGet(e) {
+  if (e && e.parameter && String(e.parameter.jembatan || '') === '1') return pkJembatan_();
   var nama = 'Produksi';
   var d = String((e && e.parameter && e.parameter.d) || '').toLowerCase();
   var label = { potong: 'Potong', jahit: 'Jahit', qc: 'QC' }[d];
