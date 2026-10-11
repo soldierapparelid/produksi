@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.37 — hitung fisik ringkas dan QC gabungan per PO
+
+- Hitung fisik menampilkan jumlah laporan, jumlah yang sudah dihitung, dan sisa yang belum dilaporkan di atas isian. Ukuran tanpa laporan serta rincian progres disimpan dalam bagian yang dapat dibuka saat diperlukan, supaya nyaman dipakai di HP.
+- Periksa QC langsung membuka hasil hitung satu PO, dijumlahkan per ukuran. Beberapa slip dengan penjahit dan tarif sama dapat diperiksa sekaligus; sumber dengan penjahit atau tarif berbeda tetap dipisahkan. Tombol Semua bagus mempercepat pengisian setelah pemeriksaan.
+- Hasil tetap dicatat pada sumber hitung aslinya menurut tanggal dan identitas sumber, dengan alokasi bagus, offline, perbaikan, lalu reject. Riwayat slip, tarif, pembayaran terdahulu, dan hubungan perbaikan tetap dipertahankan.
+- Simpan QC gabungan memvalidasi semua sumber dan revisinya sebelum satu penulisan. Pengiriman ulang, perubahan dari perangkat lain, sumber lama yang belum jelas, dan respons simpan terputus diperiksa agar barang tidak terhitung dua kali. Tidak ada migrasi atau penggantian data produksi.
+
 ## Rilis 1.5.36 — pencarian dan riwayat slip
 
 - Kolom pencarian dalam pemilih PO/produk mengikuti tinggi input, sehingga ikon tetap di dalam kolom dan tidak menyisakan ruang kosong besar.
