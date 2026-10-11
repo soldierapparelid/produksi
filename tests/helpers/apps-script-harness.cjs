@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const root = path.resolve(__dirname, '../..');
 const core = fs.readFileSync(path.join(root, 'src/core.js'), 'utf8');
 const adapter = fs.readFileSync(path.join(root, 'apps-script/Server.gs'), 'utf8');
@@ -69,7 +70,7 @@ function harness(initial = {}) {
     CacheService: { getScriptCache: () => cache },
     SpreadsheetApp: { getActiveSpreadsheet: () => book, flush: () => events.push(['flush']) },
     LockService: { getScriptLock: () => ({ waitLock() { assert.equal(held, false); held = true; events.push(['lock']); }, releaseLock() { held = false; events.push(['unlock']); } }) },
-    Utilities: { getUuid: () => (++serial).toString(16).padStart(16, '0').padEnd(32, '0'), formatDate: date => date.toISOString().slice(0, 10) }
+    Utilities: { getUuid: () => (++serial).toString(16).padStart(16, '0').padEnd(32, '0'), formatDate: date => date.toISOString().slice(0, 10), computeHmacSha256Signature: (value, key) => [...crypto.createHmac('sha256', key).update(value, 'utf8').digest()].map(b => b > 127 ? b - 256 : b) }
   });
   vm.runInContext(core + '\n' + adapter, context);
   function run(code) { const value = vm.runInContext(code, context); return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
