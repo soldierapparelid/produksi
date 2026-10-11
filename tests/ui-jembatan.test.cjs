@@ -65,7 +65,7 @@ test('only the bridge page inside our own frame is believed',async()=>{
 test('a save goes over the bridge once and never falls back by itself',async()=>{
   const t=alat(),w=t.siap();
   let done=t.run("Api.call('catatSetor',{token:'s',id:'a1'})");
-  assert.equal(t.calls.length,0);assert.equal(t.pesan.length,1);assert.deepEqual(JSON.parse(t.pesan[0].m.body),{action:'catatSetor',payload:{token:'s',id:'a1'}});
+  assert.equal(t.calls.length,0);assert.equal(t.pesan.length,1);assert.deepEqual(JSON.parse(t.pesan[0].m.body),{action:'catatSetor',payload:{token:'s',id:'a1',clientVersion:''}});
   assert.equal(t.ada(8000),false,'no second path for a save');
   t.balas(w,{ok:true,s:teks({id:'a1'})});assert.equal((await done).id,'a1');assert.equal(t.timers.size,0);
   done=t.run("Api.call('catatSetor',{token:'s',id:'a2'}).catch(function(e){return e;})");

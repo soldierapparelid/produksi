@@ -160,7 +160,7 @@ test('a late sewing job can be given a new target from its own row; an order nea
   assert.match(lembar, /data-a="targetSave" data-kosong="1">Tanpa target/); assert.match(lembar, /class="btn pri" data-a="targetSave">Simpan/);
   vm.runInContext(`A.targetSave({getAttribute:function(){return null;}});A.targetSave({getAttribute:function(k){return k==='data-kosong'?'1':null;}});isian.target='';A.targetSave({getAttribute:function(){return null;}});`, c);
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(json(c, 'log.req'), [['ubahTargetJahit', { poId: 'p2', maklonId: 'atep', target: '2026-10-25' }], ['ubahTargetJahit', { poId: 'p2', maklonId: 'atep', target: '' }]]);
+  assert.deepEqual(json(c, 'log.req'), [['ubahTargetJahit', { poId: 'p2', maklonId: 'atep', target: '2026-10-25', expectedRevisions:{} }], ['ubahTargetJahit', { poId: 'p2', maklonId: 'atep', target: '', expectedRevisions:{} }]]);
   assert.equal(json(c, 'log.tutup'), 2); assert.match(json(c, 'log.toast').join('|'), /Target diubah\.\|Target dihapus\.|!Isi tanggal targetnya\./);
   assert.match(html, /data-a="targetOpen" data-id="' \+ esc\(po\.id\) \+ '" data-m="' \+ esc\(mid\) \+ '"/, 'the per-sewer table of a PO offers the same dialog');
 });

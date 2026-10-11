@@ -73,7 +73,18 @@ function harness(initial = {}) {
   });
   vm.runInContext(core + '\n' + adapter, context);
   function run(code) { const value = vm.runInContext(code, context); return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
-  function request(action, payload = {}) { return JSON.parse(run(`api(${JSON.stringify(JSON.stringify({ action, payload }))})`)); }
+  function request(action, payload = {}) {
+    // Ordinary API fixtures model a freshly opened form. Explicit stale/missing
+    // proofs are preserved so concurrency/security cases can exercise refusal.
+    payload={clientVersion:run('APP_VERSION'),expectedVersion:run('pkStore_().version()'),...payload};
+    const target=action==='savePO'&&payload.po?.id?['PO',payload.po.id]:action==='setStatusPO'?['PO',payload.id]:action==='prosesSetor'?['SlipSetor',payload.id]:action==='ubahHarga'?[payload.sheet,payload.id]:action==='saveStok'&&payload.stok?.id&&!payload.stok.baru?['StokBahan',payload.stok.id]:null;
+    if(target&&!Object.hasOwn(payload,'expectedRevision')) {
+      const table=JSON.stringify(target[0]),id=JSON.stringify(target[1]);
+      payload.expectedRevision=run(`(function(){var r=pkStore_().read(${table}).find(function(r){return r.id===${id};});return r?coreDomainRevision(${table},r):undefined;})()`);
+    }
+    if(action==='ubahTargetJahit'&&!Object.hasOwn(payload,'expectedRevisions')) payload.expectedRevisions=run(`(function(){var out={};pkStore_().read('SlipKirim').forEach(function(r){if(r.poId===${JSON.stringify(payload.poId)}&&r.maklonId===${JSON.stringify(payload.maklonId)})out[r.id]=coreDomainRevision('SlipKirim',r);});return out;})()`);
+    return JSON.parse(run(`api(${JSON.stringify(JSON.stringify({ action, payload }))})`));
+  }
   function cold() { run('PK_STORE_ = null; PK_PROPS_ = null;'); }
   return { context, sheets, properties, cached, events, run, request, cold, isLocked: () => held };
 }

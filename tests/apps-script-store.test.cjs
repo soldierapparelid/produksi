@@ -253,20 +253,22 @@ test('real API core+Sheets adapter completes count/QC/payroll and preserves paym
   }
   const worker = call('saveUser', { user: { nama: 'Penjahit', divisi: 'jahit' } });
   const cutter = call('saveUser', { user: { nama: 'Potong', divisi: 'potong' } });
-  call('saveStok',{stok:{baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
+  call('saveStok',{stok:{id:'fixture-stock',baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
   const prepared=call('savePOWithRencana',{po:{newId:'po00001',nama:'Kaos',ukuran:{},ukuranAktif:['M']},rencana:{id:'fixture-plan',bahanList:[{nama:'Fixture cloth',qty:1,satuan:'kg'}],rol:1}}).rencana;
   call('createPotong', { potong: { id: 'cut0001', poId: 'po00001', userId: cutter.id, ukuran: { M: 10 }, tarif: 500, rencanaId:prepared.id,expectedRencanaRevision:prepared.revision } });
   call('createKirim', { kirim: { id: 'send001', poId: 'po00001', maklonId: worker.id, ukuran: { M: 10 }, upah: 2000 } });
   call('createSetor', { setor: { id: 'count01', poId: 'po00001', maklonId: worker.id, ukuran: { M: 10 } } });
   call('createQC', { qc: { id: 'qc00001', poId: 'po00001', setorId: 'count01', ukuran: { M: 8 }, offline: 2, offlineUkuran: { M: 2 } } });
-  const slip = call('createUpah', { upah: { id: 'pay0001', pegawaiId: worker.id, itemIds: ['setor:count01:M'] } });
+  const payroll = call('getState').payroll.find(r => r.id === 'setor:count01:M');
+  const payment = { upah: { id: 'pay0001', pegawaiId: worker.id, itemIds: [payroll.id], expectedRevisions: { [payroll.id]: payroll.revision } } };
+  const slip = call('createUpah', payment);
   assert.equal(slip.totalQty, 8); assert.equal(slip.totalUpah, 16000);
   const state = call('getState');
   assert.equal(state.payroll.find(r => r.sourceId === 'count01').available, 0);
   assert.equal(state.upah[0].items[0].total, 8); assert.equal(state.po[0].workflow.complete, true);
   assert.equal(state.warehouse[0].total, 8);
   const savedCount = h.sheets.SlipUpah.getLastRow();
-  call('createUpah', { upah: { id: 'pay0001', pegawaiId: worker.id, itemIds: ['setor:count01:M'] } });
+  call('createUpah', payment);
   assert.equal(h.sheets.SlipUpah.getLastRow(), savedCount, 'dedupe must read real sheet after lock');
   assert.equal(h.isLocked(), false);
 });

@@ -57,7 +57,7 @@ test('the owner records a cut and picks stock rolls in one step: kilos follow th
   assert.equal(f.raw('RencanaPotong').length, plans + 1); assert.equal(f.raw('Potong').length, 1);
   /* the same form sent again returns the saved cut; another material list under the same cut id is refused */
   assert.equal(f.good('createPotong', f.cut()).id, 'direct-cut-001');
-  f.bad('createPotong', f.cut({}, { id: 'direct-cut-00X_cut' }), /persiapan lain/);
+  f.bad('createPotong', f.cut({}, { id: 'direct-cut-00X_cut' }), /permintaan berbeda/);
   assert.equal(f.raw('RencanaPotong').length, plans + 1); assert.equal(f.raw('Potong').length, 1);
 });
 

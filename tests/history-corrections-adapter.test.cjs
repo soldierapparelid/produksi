@@ -5,7 +5,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {harness}=require('./helpers/apps-script-harness.cjs');
 const root=path.resolve(__dirname,'..');
 const correctionCode=['reconcile-legacy.js','history-corrections.js'].map(f=>fs.readFileSync(path.join(root,'src',f),'utf8')).join('\n');
-function financialRows(rows) { return JSON.stringify(rows.map(({issues,...amounts})=>amounts)); }
+function financialRows(rows) { return JSON.stringify(rows.map(({issues,revision,...amounts})=>amounts)); }
 
 function fixture() {
   const h=harness({Potong:[['total','custom column','id','ukuran']],SlipUpah:[['itemIds','id','custom column']],KoreksiRiwayat:[['reason','id','custom column','after']]});

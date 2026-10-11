@@ -52,7 +52,7 @@ test('a later target replaces the latest one only; an earlier target also pulls 
   assert.equal(f.good('ubahTargetJahit', { ...KEY, target: '2026-08-15' }).diubah, 2);
   assert.deepEqual(f.targets(), { 'target-send-01': '2026-08-15', 'target-send-02': '2026-08-15', 'target-send-03': '2026-09-05' });
   /* nothing but the target column moved */
-  const strip = rows => rows.map(r => ({ ...r, target: '' }));
+  const strip = rows => rows.map(({mutationHash,mutationActor,...r}) => ({ ...r, target: '' }));
   assert.deepEqual(strip(f.raw('SlipKirim')), strip(before));
 });
 

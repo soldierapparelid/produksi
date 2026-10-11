@@ -37,8 +37,9 @@ test('one invoice funds an owner-prepared cut, two sewing workers, physical coun
   good('createQC',{qc:{id:'qc_team_b',poId:'po_team_01',setorId:reportB.id,ukuran:{L:5},tanggal:'2026-10-08'}},qc);
   const done=good('getState'),po=done.po.find(p=>p.id==='po_team_01');assert.equal(po.workflow.complete,true);assert.ok(po.tuntasPada);
   const ids=done.payroll.filter(r=>r.pegawaiId==='sewuser1'&&r.available>0).map(r=>r.id);
-  const wage=good('createUpah',{upah:{id:'wage_team_a',pegawaiId:'sewuser1',tanggal:'2026-10-08',itemIds:ids}});assert.equal(wage.totalQty,15);assert.equal(wage.totalUpah,30000);
-  good('createUpah',{upah:{id:'wage_team_a',pegawaiId:'sewuser1',tanggal:'2026-10-08',itemIds:ids}});
+  const expectedRevisions=Object.fromEntries(done.payroll.filter(r=>ids.includes(r.id)).map(r=>[r.id,r.revision]));
+  const wage=good('createUpah',{upah:{expectedRevisions,id:'wage_team_a',pegawaiId:'sewuser1',tanggal:'2026-10-08',itemIds:ids}});assert.equal(wage.totalQty,15);assert.equal(wage.totalUpah,30000);
+  good('createUpah',{upah:{expectedRevisions,id:'wage_team_a',pegawaiId:'sewuser1',tanggal:'2026-10-08',itemIds:ids}});
   const final=good('getState');assert.equal(final.upah.length,1);assert.equal(final.stokRingkas.find(r=>r.nama==='Dryfit Hitam').saldo,90);
   assert.equal(final.payroll.filter(r=>r.pegawaiId==='sewuser1').reduce((n,r)=>n+r.available,0),0);
   const mine=good('getState',{},sewerA);assert.ok(mine.payroll.every(r=>r.pegawaiId==='sewuser1'));assert.equal(mine.stok,undefined);
