@@ -23,6 +23,36 @@ function harness(){
 function reply(module,data,version=10){return {module,actor:{id:'owner',divisi:'owner'},version,...data};}
 const turn=()=>new Promise(r=>setImmediate(r));
 
+test('purchase totals use server paid/balance only and never confidently sum held or cancelled orders',()=>{
+ const h=harness();h.seed('pembelian',{orders:[{id:'a',status:'dp',totalHarga:10000,totalPaid:3000,balance:7000,dp:999999,payments:[{jumlah:999999}]},{id:'b',status:'lunas',totalHarga:5000,totalPaid:5000,balance:0},{id:'held',status:'review',paymentReview:true,totalHarga:700,totalPaid:0,balance:0},{id:'cancel',status:'batal',totalHarga:90000,totalPaid:90000,balance:0}]});
+ assert.deepEqual(h.json("commercePurchaseTotals(commerceData('pembelian').orders)"),{total:15000,paid:8000,balance:7000,count:2,review:1,cancelled:1});
+ const markup=h.run("commerceOrderKpi(commerceData('pembelian').orders)");assert.match(markup,/DP \/ sudah dibayar/);assert.match(markup,/Rp8000/);assert.match(markup,/1 order perlu diperiksa dan belum dijumlahkan/);assert.ok(!markup.includes('999999'));
+ assert.match(h.run("commercePurchaseSummaryHtml([commerceRecord('pembelian','held')])"),/Perlu diperiksa/);
+});
+test('payment history keeps settled and corrected evidence, groups only by group ID, and escapes text',()=>{
+ const h=harness(),base={status:'lunas',totalHarga:500,totalPaid:500,balance:0,productName:'Topi',totalQty:1,totalReceived:1,items:[],events:[]};
+ h.seed('pembelian',{orders:[{...base,id:'a',payments:[{id:'a1',tanggal:'2026-10-10',jumlah:300,groupId:'group-old',voided:true,catatan:'<img src=x onerror=bad>'},{id:'a2',tanggal:'2026-10-11',jumlah:300,groupId:'group-new'},{id:'a3',tanggal:'2026-10-11',jumlah:200,catatan:'same'}]},{...base,id:'b',payments:[{id:'b1',tanggal:'2026-10-10',jumlah:200,groupId:'group-old',voided:true},{id:'b2',tanggal:'2026-10-11',jumlah:200,groupId:'group-new'},{id:'b3',tanggal:'2026-10-11',jumlah:300,catatan:'same'}]}]});
+ const rows=h.json("commerceInvoiceBayar(commerceData('pembelian').orders,true)");assert.equal(rows.length,4);const old=rows.find(r=>r.groupId==='group-old'),now=rows.find(r=>r.groupId==='group-new');assert.equal(old.recorded,500);assert.equal(old.active,0);assert.equal(old.voided,true);assert.equal(now.active,500);assert.equal(now.model.length,2);assert.equal(rows.filter(r=>!r.groupId).length,2,'same date/note do not merge distinct payments');
+ const markup=h.run("commerceRiwayatBayar(commerceData('pembelian').orders)");assert.match(markup,/Total dibayar <b>Rp1000/);assert.match(markup,/Dikoreksi — tidak dihitung/);assert.match(markup,/&lt;img/);assert.ok(!markup.includes('<img src=x'));
+ const card=h.run("commerceOrderCard(commerceRecord('pembelian','a'))");assert.match(card,/Riwayat \/ rincian/);assert.ok(!card.includes('data-a="commercePaymentOpen"'),'fully paid order keeps history without a new payment button');
+});
+test('group DP opens blank, shows each balance and previews partial versus full payment without writes',()=>{
+ const h=harness();h.seed('pembelian',{orders:[{id:'a',revision:'ra',status:'dp',productName:'A',totalHarga:10000,totalPaid:3000,balance:7000},{id:'b',revision:'rb',status:'dp',productName:'B',totalHarga:5000,totalPaid:1000,balance:4000}]});
+ h.run("var originalDollar=$;$=function(sel,f){return sel==='[data-commerce-group-payment-preview]'?f.preview:originalDollar(sel,f);};currentForm.preview={textContent:''};A.commerceGroupPayOpen({getAttribute:function(k){return k==='data-ids'?'a,b':'Supplier';}})");
+ const body=h.run('lastSheet');assert.match(body,/name="jumlah" value=""/);assert.match(body,/Total Rp10000 · sudah dibayar Rp3000/);assert.match(body,/Total Rp5000 · sudah dibayar Rp1000/);assert.match(h.run('currentForm.preview.textContent'),/Rp11000/);
+ h.run("currentForm.values={jumlah:'2000'};R.commerce(currentForm)");assert.match(h.run('currentForm.preview.textContent'),/Pembayaran sebagian Rp2000 · Sisa setelah pembayaran Rp9000/);
+ h.run("currentForm.values.jumlah='11000';R.commerce(currentForm)");assert.match(h.run('currentForm.preview.textContent'),/Pelunasan Rp11000 · Sisa setelah pembayaran Rp0/);
+ h.run("currentForm.values.jumlah='11001';R.commerce(currentForm)");assert.match(h.run('currentForm.preview.textContent'),/melebihi/);assert.equal(h.requests.length,0);
+});
+test('editing a model from its group refreshes the same invoice and never creates another order or payment',async()=>{
+ const h=harness(),o={id:'old1',revision:'r1',legacy:true,status:'dp',produkId:'p1',productName:'Topi',supplierSnapshot:{id:'s1'},supplierName:'Supplier',grupNama:'Invoice',tanggalOrder:'2026-10-01',items:[{id:'i1',nama:'M',jumlah:5}],hargaSatuan:1000,totalQty:5,totalReceived:0,totalHarga:5000,totalPaid:1000,balance:4000,payments:[{id:'dp1',jumlah:1000}],events:[]},other={...o,id:'o2',revision:'r2',legacy:false,totalPaid:0,balance:5000,payments:[]};
+ h.seed('pembelian',{suppliers:[],products:[],orders:[o,other]});h.run("commerceInvoiceShow(['old1','o2']);A.commerceOrderOpen({getAttribute:function(){return 'old1';}})");
+ h.form({id:'old1',revision:'r1',produkId:'p1',hargaSatuan:'1200',tanggalOrder:'2026-10-02',grupNama:'Invoice',catatan:'Koreksi'},'pembelian',[{id:'i1',values:{lineName:'M',lineQty:'5'}}]);
+ const saving=h.run('A.commerceOrderSave(null)'),changed={...o,revision:'r3',hargaSatuan:1200,totalHarga:6000,balance:5000,orderEditCount:1};assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceOrder');assert.equal(h.requests[0].payload.record.initialPayment,undefined);
+ h.requests[0].resolve({record:changed,commerce:reply('pembelian',{suppliers:[],products:[],orders:[changed,other]},11)});await saving;
+ assert.deepEqual(h.json('S.invoice.ids'),['old1','o2']);assert.equal(h.run('drops'),1);assert.equal(h.requests.length,1);assert.equal(h.run('commerceData("pembelian").orders.length'),2);assert.match(h.run('commerceInvoiceHtml()'),/Total<\/dt><dd class="b">Rp11000/);assert.match(h.run('commerceInvoiceHtml()'),/Sudah dibayar \(DP\)<\/dt><dd class="b">Rp1000/);assert.match(h.run('commerceInvoiceHtml()'),/data-a="commerceOrderOpen" data-id="old1">Edit/);assert.match(h.run('commerceInvoiceHtml()'),/data-a="commerceTambahModel"/);
+});
+
 test('dashboard cards do not fetch commerce or include commerce in login',()=>{
   const h=harness(),markup=h.run('commerceHomeCards()');assert.equal(h.requests.length,0);for(const title of ['HPP produk','Pembelian produk','Nota penjualan'])assert.match(markup,new RegExp(title));
   assert.match(html,/berandaCatatan\(\)[^\n]+commerceHomeCards\(\)/);assert.ok(!html.slice(html.indexOf('function beginSessionLoad'),html.indexOf('function beginSessionLoad')+2500).includes('getCommerceState'));
@@ -104,7 +134,7 @@ test('the order list follows the earlier app: four totals, variants and paid amo
   assert.match(kpi,/Order aktif<\/span><span class="v">2</);assert.match(kpi,/Belum bayar<\/span><span class="v money">Rp6000</,'cancelled and held amounts are not added');assert.match(kpi,/di luar 1 order yang perlu diperiksa/);assert.match(kpi,/Sudah diterima<\/span><span class="v">15</);assert.match(kpi,/Belum diterima<\/span><span class="v">15</);
   const card=id=>h.run("commerceOrderCard(commerceFind('pembelian','orders',"+JSON.stringify(id)+"))");
   const open=card('open');assert.match(open,/Kaos Oversize Hitam/);assert.match(open,/\(2 varian\)/);assert.match(open,/M \(6\), L \(4\)/);assert.match(open,/3\/10 diterima/);assert.match(open,/Dibayar Rp4000/);assert.match(open,/Sisa Rp6000/);
-  assert.match(open,/data-a="commercePaymentOpen" data-m="pembelian" data-id="open">Bayar/);assert.match(open,/data-a="commerceReceiptOpen" data-m="pembelian" data-id="open">Terima/);
+  assert.match(open,/data-a="commercePaymentOpen" data-m="pembelian" data-id="open">Tambah DP \/ pembayaran/);assert.match(open,/data-a="commerceReceiptOpen" data-m="pembelian" data-id="open">Terima/);
   for(const id of ['done','cancelled','held']){const c=card(id);assert.ok(!c.includes('commercePaymentOpen'),id+' offers no payment');assert.ok(!c.includes('commerceReceiptOpen'),id+' offers no receipt');}
   h.run("S.listFn=null;S.sub.commercePurchase='orders';var listed=VIEWS['pembelian-produk']();");assert.match(h.run('listed'),/class="grid g-kpi"[\s\S]*class="corder"/);
   h.run("S.sub.commercePurchase='products';var masters=VIEWS['pembelian-produk']();");assert.ok(!h.run('masters').includes('g-kpi'));
@@ -166,7 +196,7 @@ test('each order offers Edit and Hapus where allowed; a removed order leaves the
   const h=harness(),orders=shopOrders();orders.push({...orders[1],id:'old',revision:'ro',legacy:true,status:'dp',totalPaid:1000,balance:9000},{...orders[1],id:'oldclean',revision:'rc',legacy:true});
   h.seed('pembelian',{suppliers:[],products:[],orders});const card=id=>h.run("commerceOrderCard(commerceFind('pembelian','orders',"+JSON.stringify(id)+"))");
   assert.match(card('o1'),/data-a="commerceOrderOpen" data-id="o1">Edit/);assert.match(card('o1'),/data-a="commerceCancelOpen" data-m="pembelian" data-id="o1">Hapus/);
-  for(const id of ['o3','o5','old']){assert.ok(!card(id).includes('>Edit<'),id+' is not editable');}assert.match(card('old'),/>Hapus</,'the owner can remove an imported order from the list');assert.match(card('oldclean'),/>Hapus</);assert.ok(!card('oldclean').includes('>Edit<'));
+  for(const id of ['o3','o5']){assert.ok(!card(id).includes('>Edit<'),id+' is not editable');}assert.match(card('old'),/>Hapus</,'the owner can remove an imported order from the list');assert.match(card('oldclean'),/>Hapus</);assert.match(card('oldclean'),/>Edit</);assert.match(card('old'),/>Edit</);
   h.run("S.listFn=null;S.sub.commercePurchase='orders';var normal=VIEWS['pembelian-produk']();S.f['commerceStatus-pembelian']='batal';var removed=S.listFn();S.f['commerceStatus-pembelian']='';");
   assert.ok(!h.run('normal').includes('data-id="o3"'),'removed orders are not in the normal list');assert.match(h.run('removed'),/data-id="o3"/);
   const el=id=>`{getAttribute:function(k){return k==='data-m'?'pembelian':${JSON.stringify(id)};}}`;
@@ -197,7 +227,7 @@ test('cash nota records tendered money separately from applied payment and chang
   const h=harness();h.form({id:'note-fixed',revision:'',date:'2026-10-08',customerName:'Buyer',customerType:'walkin',phone:'',address:'',discountPercent:'0',shipping:'0',notes:'',dp:'200',metode:'cash'},'nota',[{id:'i',values:{lineName:'Shirt',size:'M',color:'Blue',qty:'1',price:'150',discPercent:'0'}}]);h.run('A.commerceNotaSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.record.initialPayment.jumlah,150);assert.equal(h.requests[0].payload.record.initialPayment.tenderedAmount,200);
 });
 test('historic receipt holds remain visible and do not offer fabricated receipt allocation or editing',()=>{
-  const h=harness();h.seed('pembelian',{orders:[{id:'old',legacy:true,receiptReview:true,needsReview:true,reviewReasons:['Unknown source item'],productName:'Product',items:[{id:'i',nama:'M',jumlah:10}],events:[{id:'old-receipt'}],payments:[],receipts:[],totalHarga:100,totalPaid:0,balance:100,totalReceived:2}]});const body=h.run("commerceDetail('pembelian','old')");assert.match(body,/Unknown source item/);assert.ok(!body.includes('data-a="commerceReceiptOpen"'));assert.ok(!body.includes('data-a="commerceOrderOpen"'));assert.match(body,/commercePaymentOpen/);
+  const h=harness();h.seed('pembelian',{orders:[{id:'old',legacy:true,receiptReview:true,needsReview:true,reviewReasons:['Unknown source item'],productName:'Product',items:[{id:'i',nama:'M',jumlah:10}],events:[{id:'old-receipt'}],payments:[],receipts:[],totalHarga:100,totalPaid:0,balance:100,totalReceived:2}]});const body=h.run("commerceDetail('pembelian','old')");assert.match(body,/Unknown source item/);assert.ok(!body.includes('data-a="commerceReceiptOpen"'));assert.ok(body.includes('data-a="commerceOrderOpen"'));assert.match(body,/commercePaymentOpen/);
 });
 test('void and cancellation controls are owner-only; admin retains payment entry',()=>{
   const h=harness();h.seed('nota',{notes:[{id:'n',customer:{name:'B'},items:[],payments:[{id:'p',jumlah:1}],events:[{id:'p'}],total:2,totalPaid:1,balance:1}]});let body=h.run("commerceDetail('nota','n')");assert.match(body,/commerceVoidOpen/);h.run("S.state.me.divisi='admin'");h.seed('nota',{notes:[{id:'n',customer:{name:'B'},items:[],payments:[{id:'p',jumlah:1}],events:[{id:'p'}],total:2,totalPaid:1,balance:1}]});body=h.run("commerceDetail('nota','n')");assert.ok(!body.includes('commerceVoidOpen'));assert.match(body,/commercePaymentOpen/);
@@ -302,24 +332,18 @@ test('the HPP list leaves out models whose PO was deleted and shows the automati
   h.run("S.sub.hppSemua='1';");body=h.run('VIEWS.hpp()');assert.match(body,/<b>Dihapus<\/b>/);assert.match(body,/Sembunyikan lagi/);
   assert.match(html,/dihitung dari potongan ukuran '\+esc\(basis\.ukuran\)\+' saja/);
 });
-test('an old-app purchase order offers "Jadikan bisa diedit" to the owner, and the copy is opened once it is saved',()=>{
-  const h=harness();h.run('var ditutup=0;function closeAll(){ditutup++;}');
-  h.seed('pembelian',{suppliers:[],products:[],orders:[
-    {id:'lama1',revision:'rl',legacy:true,needsReview:true,status:'review',productName:'Topi Lama',supplierName:'Reseller A',supplierSnapshot:{id:'s1'},grupNama:'Orderan 2',tanggalOrder:'2026-08-31',items:[{id:'i1',nama:'hitam',jumlah:300}],totalQty:300,totalHarga:14400,totalPaid:9000,balance:5400,totalReceived:0,hargaSatuan:48,payments:[{id:'p1',kind:'payment',tanggal:'2026-09-07',jumlah:5000,sourceReview:true},{id:'p2',kind:'payment',tanggal:'2026-09-26',jumlah:4000,sourceReview:true},{id:'p0',kind:'payment',tanggal:'2026-09-01',jumlah:1,voided:true}],receipts:[]},
-    {id:'baru1',revision:'rb',status:'pending',productName:'Topi Baru',supplierName:'Reseller A',supplierSnapshot:{id:'s1'},tanggalOrder:'2026-10-10',items:[{id:'i2',nama:'hitam',jumlah:10}],totalQty:10,totalHarga:100,totalPaid:0,balance:100,totalReceived:0,hargaSatuan:10}]});
-  const kartu=id=>h.run(`commerceOrderCard(commerceRecord('pembelian','${id}'))`);
-  assert.match(kartu('lama1'),/data-a="commerceSalinLamaOpen" data-m="pembelian" data-id="lama1">Jadikan bisa diedit/);assert.ok(!kartu('lama1').includes('data-a="commerceOrderOpen"'));
-  assert.ok(!kartu('baru1').includes('commerceSalinLamaOpen'));assert.match(kartu('baru1'),/data-a="commerceOrderOpen" data-id="baru1">Edit/);
-  const el="{getAttribute:function(k){return k==='data-m'?'pembelian':'lama1';}}";
-  h.run(`A.commerceSalinLamaOpen(${el})`);const form=h.run('lastSheet');
-  assert.match(form,/Jadikan order ini bisa diedit/);assert.match(form,/2 kali · Rp9000 \(2026-09-07, 2026-09-26\)/);assert.match(form,/name="grupNama"[^>]*value="Orderan 2"/);assert.match(form,/name="orderId" value="lama1"/);
-  h.run("currentForm.values={id:'new5',orderId:'lama1',revision:'rl',grupNama:' Invoice Topi '};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();currentForm._commerceIntent=null;A.commerceSalinLamaSave(null)");
-  assert.equal(h.requests[0].action,'salinCommerceOrderLama');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{id:'new5',orderId:'lama1',expectedRevision:'rl',grupNama:'Invoice Topi',withState:true});
-  /* once saved, the other sheets close and the new order opens; skipped old receipts are mentioned */
-  h.run("lastSheet='';commerceAfterSave({action:'salinCommerceOrderLama',payload:{}},{record:{id:'baru1'},penerimaanDilewati:2})");
-  assert.equal(h.run('ditutup'),1);assert.match(h.json('messages').at(-1).text,/2 penerimaan lama tidak ikut disalin/);assert.match(h.run('lastSheet'),/Detail order produk/);
-  h.run(`S.state.me.divisi='admin';A.commerceSalinLamaOpen(${el})`);assert.match(h.json('messages').at(-1).text,/Hanya owner/);
-  assert.match(html,/commerceArsip\(o\) && me\(\)\.divisi === 'owner' \? '<button class="btn sm" data-a="commerceSalinLamaOpen"/,'the button is drawn for the owner only');
+test('owner edits a legacy order directly with the same ID; no copy or payment write is made',()=>{
+  const h=harness(),o={id:'old1',revision:'r1',legacy:true,needsReview:true,receiptReview:true,produkId:'p1',productName:'Topi',supplierSnapshot:{id:'s1'},tanggalOrder:'2026-08-31',items:[{id:'i1',nama:'Hitam',jumlah:10}],totalQty:10,totalHarga:10000,totalPaid:3000,balance:7000,totalReceived:4,hargaSatuan:1000,payments:[{id:'pay1',jumlah:3000}],receipts:[]};
+  h.seed('pembelian',{suppliers:[{id:'s1',nama:'S'}],products:[{id:'p1',nama:'Topi',supplierId:'s1'}],orders:[o]});
+  const el="{getAttribute:function(){return 'old1';}}";
+  assert.match(h.run("commerceOrderCard(commerceRecord('pembelian','old1'))"),/data-a="commerceOrderOpen" data-id="old1">Edit/);
+  assert.ok(!h.run("commerceOrderCard(commerceRecord('pembelian','old1'))").includes('Jadikan bisa diedit'));
+  h.run("A.commerceOrderOpen("+el+")");const body=h.run('lastSheet');
+  assert.match(body,/Edit order produk/);assert.match(body,/order yang sama/);assert.match(body,/Penerimaan lama belum terhubung/);assert.match(body,/name="id" value="old1"/);assert.match(body,/name="revision" value="r1"/);assert.ok(!body.includes('name="dp"'));
+  assert.match(body,/name="produkId" value="p1"/);assert.ok(!body.includes('<select name="produkId"'));assert.ok(!body.includes('name="supplierPick"'));assert.ok(!body.includes('Supplier baru'));assert.ok(!body.includes('Produk baru'));assert.match(body,/Supplier dan produk tetap mengikuti order asal/);
+  h.form({id:'old1',revision:'r1',produkId:'p1',hargaSatuan:'1100',tanggalOrder:'2026-09-01',grupNama:'Invoice 1',catatan:'Koreksi harga'},'pembelian',[{id:'i1',values:{lineName:'Hitam',lineQty:'10'}}]);
+  h.run('A.commerceOrderSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceOrder');assert.equal(h.requests[0].payload.record.id,'old1');assert.equal(h.requests[0].payload.expectedRevision,'r1');assert.equal(h.requests[0].payload.record.initialPayment,undefined);
+  h.run("S.state.me.divisi='admin';lastSheet='';");h.seed('pembelian',{suppliers:[],products:[],orders:[o]});h.run("A.commerceOrderOpen("+el+")");assert.equal(h.run('lastSheet'),'');assert.match(h.json('messages').at(-1).text,/owner/);
 });
 test('payments are listed as a history with a group payment as one line, and the forms say total, paid and remaining',()=>{
   const h=harness(),order=(id,extra)=>Object.assign({id,revision:'r'+id,supplierName:'Reseller A',supplierSnapshot:{id:'s1',nama:'Reseller A'},status:'dp'},extra);
@@ -329,7 +353,7 @@ test('payments are listed as a history with a group payment as one line, and the
     order('o3',{productName:'Topi C',status:'batal',totalHarga:100,totalPaid:0,balance:100,payments:[{id:'d',kind:'payment',tanggal:'2026-10-11',jumlah:50,metode:'cash'}]})]});
   assert.deepEqual(h.json("commerceRiwayatRows(commerceData('pembelian').orders).map(function(r){return [r.tanggal,r.jumlah,r.model.join('+'),r.orderId];})"),[['2026-10-10',1000,'Topi A+Topi B','o1'],['2026-10-09',400,'Topi A','o1']],'corrected payments and removed orders are left out');
   const daftar=h.run("commerceRiwayatBayar(commerceData('pembelian').orders)");
-  assert.match(daftar,/2 pembayaran<\/span><span class="right">Total dibayar <b>Rp1400<\/b>/);assert.match(daftar,/Pembayaran gabungan untuk 2 model: Topi A, Topi B/);assert.match(daftar,/Reseller A · Invoice Okt/);
+  assert.match(daftar,/3 pembayaran<\/span><span class="right">Total dibayar <b>Rp1400<\/b>/);assert.match(daftar,/Pembayaran gabungan untuk 2 model: Topi A, Topi B/);assert.match(daftar,/Reseller A · Invoice Okt/);
   assert.match(html,/\['orders','Order'\],\['payments','Riwayat bayar'\],\['products','Produk'\]/);
   /* the group card and the payment forms spell out total, paid and what is left */
   const kartu=h.run("commerceGroupCard(commerceOrderGroups(commerceData('pembelian').orders.slice(0,2))[0])");
@@ -349,7 +373,7 @@ test('a model whose cost was already saved opens ready to be corrected, and the 
   let teks=hitung({jahitMode:'auto',hargaJahit:'5000',biayaLain:'5000'});
   assert.match(teks,/<b>HPP Rp44530 \/ pcs<\/b>/);assert.match(teks,/kain Rp33430 \+ potong Rp1100 \+ jahit Rp5000 \+ biaya lain Rp5000/);assert.match(teks,/Yang tersimpan sekarang Rp89530\. Tekan Simpan biaya model untuk menggantinya/);
   teks=hitung({jahitMode:'auto',hargaJahit:'5000',biayaLain:'50000'});assert.match(teks,/<b>HPP Rp89530 \/ pcs<\/b>/);assert.ok(!teks.includes('Yang tersimpan sekarang'));
-  teks=hitung({jahitMode:'manual',hargaJahit:'6000',biayaLain:''});assert.match(teks,/<b>HPP Rp40530 \/ pcs<\/b>/);
+  teks=hitung({jahitMode:'manual',hargaJahit:'6000',biayaLain:''});assert.match(teks,/Biaya lain belum valid/);assert.ok(!teks.includes('Rp40530'));
 });
 test('several models go into one invoice: the order form takes an invoice name and "Tambah model" opens it for the same group',()=>{
   const h=harness(),order=(id,extra)=>Object.assign({id,revision:'r'+id,supplierName:'Reseller A',supplierSnapshot:{id:'s1',nama:'Reseller A'},totalPaid:0,totalReceived:0,status:'pending'},extra);
@@ -432,20 +456,20 @@ test('the combined note is one screen for an invoice: models, payments with chan
   h.run("var shown=[],closed=0;commerceShareShow=function(ids,fresh){shown.push([ids,fresh]);};function closeSheet(){closed++;}");
   const el=(id,event)=>`{getAttribute:function(k){return k==='data-id'?${JSON.stringify(id)}:k==='data-event'?${JSON.stringify(event)}:'pembelian';}}`,segar="currentForm._commerceSending=false;currentForm._commerceIntent=null;currentForm._commerceLocked=false;";
   /* the group card leads to it */
-  assert.match(h.run("commerceGroupCard(commerceOrderGroups(commerceData('pembelian').orders.slice(0,2))[0])"),/data-a="commerceInvoiceOpen" data-ids="o1,o2">Nota gabungan<\/button>/);
+  assert.match(h.run("commerceGroupCard(commerceOrderGroups(commerceData('pembelian').orders.slice(0,2))[0])"),/data-a="commerceInvoiceOpen" data-ids="o1,o2">Edit grup \/ nota<\/button>/);
   h.run("A.commerceInvoiceOpen({getAttribute:function(){return 'o1,o2,o3,o4';}})");const nota=h.run('lastSheet');
   assert.match(nota,/Nota gabungan — Invoice Okt/);assert.ok(!nota.includes('Topi D'),'a removed order is left out');
   assert.match(nota,/<dt>Total<\/dt><dd class="b">Rp30000<\/dd><dt>Sudah dibayar \(DP\)<\/dt><dd class="b">Rp1400<\/dd><dt>Sisa bayar<\/dt><dd class="b">Rp28600<\/dd><dt>Barang diterima<\/dt><dd>4 dari 30 pcs · belum datang 26 pcs<\/dd>/);
   /* each model: change quantity and price here; an old-app model is first made editable */
-  assert.match(nota,/data-a="commerceOrderOpen" data-id="o1">Ubah jumlah \/ harga<\/button>/);assert.match(nota,/data-a="commerceSalinLamaOpen" data-m="pembelian" data-id="o3">Jadikan bisa diedit<\/button>/);assert.ok(!nota.includes('data-a="commerceOrderOpen" data-id="o3"'));
+  assert.match(nota,/data-a="commerceOrderOpen" data-id="o1">Edit jumlah \/ harga \/ varian \/ tanggal<\/button>/);assert.match(nota,/data-a="commerceOrderOpen" data-id="o3">Edit jumlah \/ harga \/ varian \/ tanggal<\/button>/);assert.ok(!nota.includes('Jadikan bisa diedit'));
   assert.match(nota,/1 model berasal dari aplikasi lama/);assert.match(nota,/data-a="commerceTambahModel" data-tambah="1" data-supplier="s1" data-grup="Invoice Okt"/);
   /* payments: oldest first, a combined payment is one line, corrected ones are gone, each can be changed or deleted */
   assert.deepEqual(h.json("commerceInvoiceBayar(commerceInvoiceOrders(['o1','o2','o3','o4'])).map(function(r){return [r.tanggal,r.jumlah,r.model.length,r.orderId,r.eventId,r.groupId];})"),[['2026-10-09',400,1,'o1','b',''],['2026-10-10',1000,2,'o1','a','g1']]);
-  assert.match(nota,/<b>Rp1000<\/b> <span class="small muted">2026-10-10<\/span>[\s\S]*Dibagi ke 2 model/);assert.ok(!nota.includes('Rp999'));
+  assert.match(nota,/<b>Rp1000<\/b> <span class="small muted">2026-10-10<\/span>[\s\S]*Dibagi ke 2 model/);assert.match(nota,/Rp999/);assert.match(nota,/Dikoreksi — tidak dihitung/);
   assert.match(nota,/data-a="commerceEventEdit" data-m="pembelian" data-id="o1" data-event="b">Ubah<\/button><button class="btn sm ghost" data-a="commerceInvoiceHapus" data-m="pembelian" data-id="o1" data-event="b">Hapus<\/button>/);
   /* the next payment is shared by every order that still owes, and the picture covers the whole note */
-  assert.match(nota,/data-a="commerceGroupPayOpen" data-ids="o1,o2,o3" data-nama="Reseller A">Tambah pembayaran<\/button>/);assert.match(nota,/data-a="commerceShareOpen" data-ids="o1,o2,o3">Gambar untuk supplier<\/button>/);
-  h.run("S.invoice={ids:['o1']}");assert.match(h.run('commerceInvoiceHtml()'),/data-a="commercePaymentOpen" data-m="pembelian" data-id="o1">Tambah pembayaran<\/button>/,'one order left to pay: the ordinary payment form');
+  assert.match(nota,/data-a="commerceGroupPayOpen" data-ids="o1,o2,o3" data-nama="Reseller A">Tambah DP \/ pembayaran<\/button>/);assert.match(nota,/data-a="commerceShareOpen" data-ids="o1,o2,o3">Gambar untuk supplier<\/button>/);
+  h.run("S.invoice={ids:['o1']}");assert.match(h.run('commerceInvoiceHtml()'),/data-a="commercePaymentOpen" data-m="pembelian" data-id="o1">Tambah DP \/ pembayaran<\/button>/,'one order left to pay: the ordinary payment form');
   h.run("S.invoice={ids:['o4']}");assert.match(h.run('commerceInvoiceHtml()'),/sudah tidak ada di daftar/);
   /* delete one payment */
   h.run(`A.commerceInvoiceHapus(${el('o1','b')})`);assert.match(h.run('lastSheet'),/Hapus pembayaran/);assert.match(h.run('lastSheet'),/Pembayaran <b>Rp400<\/b> tanggal 2026-10-09 dihapus dari hitungan/);
