@@ -233,6 +233,52 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     views.forEach(function(v,i){if(shares[i])stored.push({id:'gp_'+coreCommerceHash([key,v.id]).slice(0,40),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
     checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
   };
+  /* Order dari data lama (atau yang masih "perlu diperiksa") rinciannya terkunci. "Jadikan order biasa" (owner): isinya
+     disalin menjadi order baru buatan aplikasi ini (produk, varian, harga, tanggal, nama invoice), dan pembayaran serta
+     penerimaan yang masih berlaku ikut disalin dengan tanggal aslinya sebagai catatan biasa yang bisa diubah. Order lamanya
+     tidak dihapus dan isinya tidak diubah: ia diarsipkan utuh bersama catatan aslinya sebagai bukti, dan bisa dikembalikan.
+     Penerimaan lama yang variannya tidak dikenali tidak disalin (jumlahnya dilaporkan), supaya tidak ada hubungan yang ditebak. */
+  actions.salinCommerceOrderLama=function(p){
+    var me=writable(p,true),key=id(p.id),sourceKey=id(p.orderId),row=find('pembelian','order',sourceKey);if(!row)fail('Catatan tidak ditemukan.');
+    var v=view(row),old=coreCommerceData(row),sudah=find('pembelian','order',key);
+    function jawab(baru,dilewati){var out=reply('pembelian',baru,p,me);out.penerimaanDilewati=dilewati;return out;}
+    function rencana(total,items){
+      var batas={},terima={},paid=0,rows=[],dilewati=0;items.forEach(function(i){batas[i.id]=coreNum(i.jumlah);});
+      v.events.forEach(function(e){
+        if(e.voided||(e.kind!=='payment'&&e.kind!=='receipt'))return;
+        var n=coreNum(e.jumlah),d;
+        if(e.kind==='payment'){
+          if(!Number.isSafeInteger(n)||n<=0)fail('Nominal pembayaran lama tidak sah. Order ini belum bisa disalin otomatis.');
+          paid+=n;if(paid>total)fail('Pembayaran lama melebihi total order. Order ini belum bisa disalin otomatis; buat order baru lalu isi pembayarannya.');
+          d={tanggal:date(e.tanggal),catatan:text(String(e.catatan||'').slice(0,500),500),jumlah:n,metode:text(String(e.metode||'lainnya').slice(0,40),40,true)};
+        }else{
+          if(!e.itemId||batas[e.itemId]===undefined||!Number.isSafeInteger(n)||n<=0||coreNum(terima[e.itemId])+n>batas[e.itemId]){dilewati++;return;}
+          terima[e.itemId]=coreNum(terima[e.itemId])+n;d={tanggal:date(e.tanggal),catatan:text(String(e.catatan||'').slice(0,500),500),itemId:e.itemId,jumlah:n,kondisi:text(String(e.kondisi||'').slice(0,100),100)};
+        }
+        rows.push({id:'sl_'+coreCommerceHash([key,e.id||[e.kind,e.tanggal,n]]).slice(0,40),module:'pembelian',parentId:key,kind:e.kind,data:JSON.stringify(d),dibuat:'',dibuatOleh:me.id,sourceHash:''});
+      });
+      return {rows:rows,dilewati:dilewati};
+    }
+    function tulis(rows){if(!rows.length)return;var st=now();rows.forEach(function(e){e.dibuat=st;});checkRows('CommerceEvent',rows);store.appendMany('CommerceEvent',rows);}
+    function arsipkan(){var r=find('pembelian','order',sourceKey),d=coreCommerceData(r);if(d.cancelled)return;d.cancelled=true;d.cancelReason='Disalin menjadi order baru yang bisa diedit';d.cancelledBy=me.id;d.cancelledAt=now();d.cancelKeepsEvents=true;r=Object.assign({},r,{data:JSON.stringify(d),revision:coreCommerceHash(d),diubah:now()});checkRows('CommerceRecord',[r]);store.update('CommerceRecord',r.id,r);}
+    if(sudah){
+      /* kiriman ulang: lengkapi yang belum sempat tertulis, tidak ada yang ditulis dua kali */
+      var sd=coreCommerceData(sudah);if(sd._salinDari!==sourceKey||sudah.dibuatOleh!==me.id)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');
+      var ulang=rencana(coreNum(sd.totalHarga),sd.items||[]),ada={};store.read('CommerceEvent').forEach(function(e){ada[e.id]=true;});
+      tulis(ulang.rows.filter(function(e){return !ada[e.id];}));arsipkan();return jawab(find('pembelian','order',key),ulang.dilewati);
+    }
+    expected(row,p);if(v.cancelled)fail('Catatan sudah dibatalkan.');
+    if(!row.sourceHash&&!v.needsReview)fail('Order ini sudah bisa diubah lewat tombol Edit.');
+    /* varian lama yang tidak punya identitas (atau identitasnya ganda) diberi identitas baru; penerimaan lama yang menunjuk
+       varian tak dikenal memang tidak ikut disalin */
+    var pakai={},barang=(v.items||[]).map(function(i,n){var iid=typeof i.id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(i.id)&&!pakai[i.id]?i.id:'it_'+coreCommerceHash([key,n]).slice(0,24);pakai[iid]=true;return {id:iid,nama:i.nama,jumlah:i.jumlah};});
+    var data=normalize('order',{id:key,produkId:old.produkId,items:barang,hargaSatuan:old.hargaSatuan,tanggalOrder:old.tanggalOrder,grupNama:p.grupNama===undefined?String(old.grupNama||''):p.grupNama,catatan:[String(old.catatan||'').trim(),'Disalin dari data aplikasi lama'].filter(Boolean).join(' · ').slice(0,1000)},null);
+    var plan=rencana(data.totalHarga,data.items),stamp=now(),tanda=coreCommerceHash({kind:'order',salin:sourceKey,key:key});
+    data._createHash=tanda;data._createActor=me.id;data._lastMutation={hash:tanda,actor:me.id};data._salinDari=sourceKey;
+    var baru={id:coreCommerceKey('pembelian','order',key),module:'pembelian',kind:'order',parentId:'',data:JSON.stringify(data),revision:coreCommerceHash([data,stamp,me.id]),dibuat:stamp,dibuatOleh:me.id,diubah:stamp,sourceHash:''};
+    checkRows('CommerceRecord',[baru]);store.append('CommerceRecord',baru);tulis(plan.rows);arsipkan();
+    return jawab(baru,plan.dilewati);
+  };
   actions.cancelCommerceRecord=function(p){var me=writable(p,true),module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');var row=find(module,module==='nota'?'nota':'order',id(p.id)),v=view(row),reason=text(p.catatan,500,true);if(v.cancelled){if(v.cancelledBy===me.id&&v.cancelReason===reason)return reply(module,row,p,me);fail('Catatan sudah dibatalkan.');}expected(row,p);
     /* arsip (owner, purchase orders from the old data or still marked "perlu diperiksa"): the order leaves the list as it is.
        Its old payments and receipts are neither corrected nor recalculated; they stay as evidence and come back with restoreCommerceRecord. */
