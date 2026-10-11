@@ -47,6 +47,29 @@ test('editing legacy details cannot fabricate an orphan receipt link or bypass u
  const g=fixture(),bad=backup();bad.soldier_pembelian_produk.orders[0].pembayaran[0].jumlah='unknown';const preview=g.good('previewCommerceImport',{backup:bad});g.good('applyCommerceImport',{backup:bad,sourceHash:preview.sourceHash,planHash:preview.planHash});const held=g.state().orders[0];assert.equal(held.paymentReview,true);
  g.bad('saveCommerceOrder',{record:{...held,items:[{id:'line-1',nama:'M',jumlah:5}]},expectedRevision:held.revision},/Nominal pembayaran/);
 });
+
+test('owner can confirm a missing legacy variant ID only without fabricating receipt links, preserving the same order and DP',()=>{
+ const f=fixture(),b=backup();b.soldier_pembelian_produk.orders[0].penerimaan=[];
+ const p=f.good('previewCommerceImport',{backup:b});f.good('applyCommerceImport',{backup:b,sourceHash:p.sourceHash,planHash:p.planHash});
+ const old=f.state().orders[0],events=JSON.stringify(f.raw('CommerceEvent')),sources=JSON.stringify(f.raw('CommerceSource')),stored=f.raw('CommerceRecord').find(r=>r.kind==='order');
+ assert.equal(old.receiptReview,true);assert.equal(old.totalReceived,0);assert.deepEqual(old.receipts,[]);
+ const confirm={record:{...old,items:[{...old.items[0],id:'confirmed-original-variant'}]},expectedRevision:old.revision};
+ f.bad('saveCommerceOrder',confirm,/owner/,'fixture-admin-token-001');f.bad('saveCommerceOrder',{...confirm,expectedRevision:'stale'},/berubah/);
+ f.bad('saveCommerceOrder',{...confirm,record:{...confirm.record,items:[{id:'confirmed-original-variant',nama:'Guessed variant',jumlah:5}]}},/Nama|urutan/);
+ const fixed=f.good('saveCommerceOrder',confirm).record;
+ assert.equal(fixed.id,old.id);assert.equal(fixed.legacy,true);assert.equal(fixed.receiptReview,false);assert.equal(fixed.totalReceived,0);assert.deepEqual(fixed.receipts,[]);assert.equal(fixed.totalPaid,old.totalPaid);assert.equal(fixed.balance,old.balance);assert.deepEqual(fixed.payments,old.payments);
+ assert.equal(JSON.stringify(f.raw('CommerceEvent')),events);assert.equal(JSON.stringify(f.raw('CommerceSource')),sources);assert.equal(f.raw('CommerceRecord').find(r=>r.kind==='order').sourceHash,stored.sourceHash);assert.equal(f.state().orders.length,1);
+ assert.equal(f.good('saveCommerceOrder',confirm).record.orderEditCount,1,'repeat confirmation reuses the same order and audit');
+ const received=f.good('appendCommerceReceipt',{id:'confirmed-receipt',orderId:fixed.id,expectedRevision:fixed.revision,itemId:'confirmed-original-variant',jumlah:3,tanggal:'2026-10-11',kondisi:'baik'}).record;
+ assert.equal(received.totalReceived,3);assert.equal(received.totalPaid,old.totalPaid);assert.equal(received.balance,old.balance);assert.deepEqual(received.payments,old.payments);
+ /* A genuine orphan receipt remains review-only even after an owner supplies a new variant ID. */
+ const g=fixture(),orphan=backup(),preview=g.good('previewCommerceImport',{backup:orphan});g.good('applyCommerceImport',{backup:orphan,sourceHash:preview.sourceHash,planHash:preview.planHash});
+ const held=g.state().orders[0],heldEvents=JSON.stringify(g.raw('CommerceEvent')),safe=g.good('saveCommerceOrder',{record:{...held,items:[{id:'new-unlinked-variant',nama:'M',jumlah:5}]},expectedRevision:held.revision}).record;
+ assert.equal(safe.receiptReview,true);assert.equal(safe.receipts[0].itemId,'missing-item-id');
+ g.bad('appendCommerceReceipt',{id:'must-not-receive',orderId:safe.id,expectedRevision:safe.revision,itemId:'new-unlinked-variant',jumlah:1},/Hubungan/);
+ g.bad('gantiCommerceEvent',{id:'must-not-relink',module:'pembelian',parentId:safe.id,eventId:safe.receipts[0].id,expectedRevision:safe.revision,itemId:'new-unlinked-variant',jumlah:3},/Hubungan|diperiksa/);
+ assert.equal(JSON.stringify(g.raw('CommerceEvent')),heldEvents);
+});
 test('commerce is lazy and all read, PDF, write and import actions require live admin authentication',()=>{
  const f=fixture();f.h.run(`var savedRead=pkStore_,commerceReadLog=[];pkStore_=function(){var s=savedRead();if(!s.traced){var read=s.read;s.read=function(n){commerceReadLog.push(n);return read(n);};s.traced=true;}return s;};void 0;`);
  f.good('getState');assert.equal(f.h.run('commerceReadLog.some(function(n){return /^Commerce/.test(n);})'),false);
@@ -238,6 +261,24 @@ test('a group payment is divided by remaining balance in whole rupiah, written o
  assert.equal(fixed.commerce.orders.find(o=>o.id==='order02').balance,5000);assert.equal(fixed.commerce.orders.find(o=>o.id==='order01').balance,0);
 });
 
+test('group payments span order dates and products for one frozen supplier but reject different supplier identities',()=>{
+ const f=fixture();f.masters();
+ f.good('saveCommerceProduct',{record:{id:'product02',nama:'Second model',supplierId:'supplier01'}});
+ f.good('saveCommerceSupplier',{record:{id:'supplier02',nama:'Supplier Fixture'}});
+ f.good('saveCommerceProduct',{record:{id:'foreign-product',nama:'Other supplier model',supplierId:'supplier02'}});
+ const a=f.good('saveCommerceOrder',{record:f.order({id:'order-aug',tanggalOrder:'2026-08-31',grupNama:'Invoice Agustus'})}).record;
+ const b=f.good('saveCommerceOrder',{record:f.order({id:'order-oct',produkId:'product02',tanggalOrder:'2026-10-11',grupNama:'Invoice Oktober'})}).record;
+ const foreign=f.good('saveCommerceOrder',{record:f.order({id:'other-supplier-order',produkId:'foreign-product'})}).record;
+ const before=JSON.stringify(f.raw('CommerceEvent'));
+ f.bad('appendCommerceGroupPayment',{id:'different-suppliers',orderIds:[a.id,foreign.id],expectedRevisions:{[a.id]:a.revision,[foreign.id]:foreign.revision},tanggal:'2026-10-11',jumlah:10000},/supplier yang sama/);
+ assert.equal(JSON.stringify(f.raw('CommerceEvent')),before,'same supplier display name is not evidence of the same identity');
+ const request={id:'cross-date-group',orderIds:[a.id,b.id],expectedRevisions:{[a.id]:a.revision,[b.id]:b.revision},tanggal:'2026-10-11',jumlah:10000,metode:'transfer',catatan:'DP beberapa model lintas tanggal',withState:true};
+ const paid=f.good('appendCommerceGroupPayment',request),orders=paid.commerce.orders.filter(o=>o.id===a.id||o.id===b.id);
+ assert.equal(orders.reduce((n,o)=>n+o.totalPaid,0),10000);assert.equal(orders.reduce((n,o)=>n+o.balance,0),90000);assert.equal(f.raw('CommerceEvent').length,2);assert.ok(orders.every(o=>o.payments[0].groupId===request.id));
+ f.good('appendCommerceGroupPayment',request);assert.equal(f.raw('CommerceEvent').length,2);
+ f.bad('appendCommerceGroupPayment',{...request,orderIds:[a.id,b.id,foreign.id]},/supplier yang sama/);assert.equal(f.raw('CommerceEvent').length,2,'retry cannot quietly expand the original payment to another supplier');
+});
+
 test('correcting a partially voided group uses only live parents, never revives a voided share, and binds retries to the exact intent',()=>{
  const f=fixture();f.masters();const orders=['group-o1','group-o2','group-o3'].map(id=>f.good('saveCommerceOrder',{record:f.order({id,items:[{id:'only',nama:'M',jumlah:3}]})}).record);
  const paid=f.good('appendCommerceGroupPayment',{id:'original-group',orderIds:orders.map(o=>o.id),expectedRevisions:Object.fromEntries(orders.map(o=>[o.id,o.revision])),tanggal:'2026-10-09',jumlah:30000,metode:'transfer',withState:true});
@@ -369,4 +410,37 @@ test('a recorded payment or receipt is changed in one step: the old entry stays 
  f.bad('gantiCommerceEvent',{...terima,jumlah:4},/melebihi sisa varian/);
  s=f.good('gantiCommerceEvent',terima).record;assert.equal(s.totalReceived,2);assert.deepEqual(s.receivedByItem,{size01:2});
  assert.deepEqual(s.receipts.map(e=>[e.id,e.jumlah,!!e.voided]),[['recv-edit-01',3,true],['recv-edit-02',2,false]]);
+});
+
+test('partial receipt 290 of 300 can be corrected and completed by 10 with all history retained and DP unchanged',()=>{
+ const f=fixture();f.masters();let order=f.good('saveCommerceOrder',{record:f.order({items:[{id:'size-M',nama:'M',jumlah:300}],hargaSatuan:1000,initialPayment:{jumlah:100000,metode:'transfer'}})}).record;
+ const payments=JSON.stringify(order.payments),receive={id:'receive-290',orderId:order.id,expectedRevision:order.revision,tanggal:'2026-10-09',itemId:'size-M',jumlah:290,kondisi:'baik',catatan:'Datang sebagian'};
+ order=f.good('appendCommerceReceipt',receive).record;assert.equal(order.totalReceived,290);assert.equal(order.totalQty-order.totalReceived,10);assert.equal(order.totalPaid,100000);assert.equal(order.balance,200000);const originalEvents=f.raw('CommerceEvent');
+ f.good('appendCommerceReceipt',receive);assert.equal(f.raw('CommerceEvent').length,1);
+ f.bad('appendCommerceReceipt',{...receive,id:'too-many',expectedRevision:order.revision,jumlah:11},/melebihi/);
+ const correct={id:'receive-correct-285',parentId:order.id,eventId:'receive-290',expectedRevision:order.revision,tanggal:'2026-10-10',itemId:'size-M',jumlah:285,kondisi:'baik',catatan:'Hitung ulang pertama'};
+ f.bad('gantiCommerceEvent',correct,/owner/,'fixture-admin-token-001');f.bad('gantiCommerceEvent',{...correct,expectedRevision:'stale'},/berubah/);
+ order=f.good('gantiCommerceEvent',correct).record;assert.equal(order.totalReceived,285);assert.equal(order.receivedByItem['size-M'],285);assert.equal(order.totalQty-order.totalReceived,15);assert.equal(order.receipts.find(e=>e.id==='receive-290').voided,true);
+ f.good('gantiCommerceEvent',correct);assert.equal(f.raw('CommerceEvent').length,3);
+ for(const changed of [{jumlah:286},{itemId:'other-size'},{tanggal:'2026-10-11'},{kondisi:'cacat'},{catatan:'different'},{eventId:'receive-correct-285'}])f.bad('gantiCommerceEvent',{...correct,...changed},/sudah digunakan/);
+ const finalCount={id:'receive-correct-290',parentId:order.id,eventId:'receive-correct-285',expectedRevision:order.revision,tanggal:'2026-10-10',itemId:'size-M',jumlah:290,kondisi:'baik',catatan:'Hitungan final'};
+ f.bad('gantiCommerceEvent',{...finalCount,jumlah:301},/melebihi/);order=f.good('gantiCommerceEvent',finalCount).record;assert.equal(order.totalReceived,290);
+ const rest={id:'receive-last-10',orderId:order.id,expectedRevision:order.revision,tanggal:'2026-10-11',itemId:'size-M',jumlah:10,kondisi:'baik',catatan:'Sisa pesanan'};
+ order=f.good('appendCommerceReceipt',rest).record;assert.equal(order.totalReceived,300);assert.equal(order.totalQty-order.totalReceived,0);assert.equal(order.receiptReview,false);assert.deepEqual(order.receivedByItem,{'size-M':300});
+ assert.deepEqual(order.receipts.map(e=>[e.id,e.jumlah,!!e.voided]),[['receive-290',290,true],['receive-correct-285',285,true],['receive-correct-290',290,false],['receive-last-10',10,false]]);
+ assert.equal(JSON.stringify(order.payments),payments);assert.equal(order.totalPaid,100000);assert.equal(order.balance,200000);const finalEvents=f.raw('CommerceEvent');assert.equal(finalEvents.length,6);assert.deepEqual(finalEvents.find(e=>e.id==='receive-290'),originalEvents[0]);
+ f.good('appendCommerceReceipt',rest);f.good('gantiCommerceEvent',finalCount);f.good('gantiCommerceEvent',correct);assert.equal(f.raw('CommerceEvent').length,6,'all original requests replay without receipt duplication');
+ f.bad('appendCommerceReceipt',{...rest,id:'one-too-many',expectedRevision:order.revision,jumlah:1},/melebihi/);f.bad('gantiCommerceEvent',{...finalCount,id:'concurrent-correction'},/berubah/);
+});
+
+test('event correction retry must match both the immutable source and complete void/replacement pair',()=>{
+ const f=fixture();f.masters();let order=f.good('saveCommerceOrder',{record:f.order()}).record;
+ order=f.good('appendCommercePayment',{id:'original-DP',parentId:order.id,expectedRevision:order.revision,tanggal:'2026-10-09',jumlah:10000,metode:'transfer'}).record;
+ const correct={id:'corrected-DP',parentId:order.id,eventId:'original-DP',expectedRevision:order.revision,tanggal:'2026-10-10',jumlah:12000,metode:'cash',catatan:'Koreksi bukti'};
+ f.good('gantiCommerceEvent',correct);for(const change of [{jumlah:13000},{metode:'transfer'},{tanggal:'2026-10-11'},{catatan:'different'},{eventId:'corrected-DP'}])f.bad('gantiCommerceEvent',{...correct,...change},/sudah digunakan/);
+ assert.equal(f.raw('CommerceEvent').length,3);f.good('gantiCommerceEvent',correct);assert.equal(f.raw('CommerceEvent').length,3);
+ /* A standalone payment that happens to have this ID is not evidence that a correction finished. */
+ f.bad('gantiCommerceEvent',{...correct,id:'original-DP',eventId:'corrected-DP',jumlah:10000,metode:'transfer',tanggal:'2026-10-09',catatan:''},/sudah digunakan/);
+ f.h.run("pkStore_().lock(function(){var s=pkStore_();s.replaceAll('CommerceEvent',s.read('CommerceEvent').filter(function(e){return e.kind!=='void';}));});void 0;");
+ const incomplete=JSON.stringify(f.raw('CommerceEvent'));f.bad('gantiCommerceEvent',correct,/sudah digunakan/);assert.equal(JSON.stringify(f.raw('CommerceEvent')),incomplete,'an incomplete correction never returns a false successful retry or writes another receipt');
 });

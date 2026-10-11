@@ -252,3 +252,9 @@ Tes integrasi memakai adaptor asli dengan mock Sheets yang meniru rentang fisik,
 7. Setelah validasi project uji selesai, pasang tiga file yang sama ke project tujuan menggunakan prosedur deployment yang berlaku. Perbarui versi deployment Apps Script yang memang dipakai link `/exec`; menyimpan kode editor saja belum memperbarui deployment versi tetap. Pastikan respons state memuat `workflowVersion: 2` dan UI/PWA memakai versi yang sesuai. Publikasi GitHub Pages hanya memperbarui halaman/PWA; publikasi itu tidak memperbarui project Apps Script.
 
 Pemasangan kode tidak menjalankan impor atau memindahkan catatan aplikasi lama secara otomatis. Penyesuaian schema saat aplikasi diakses dapat menambahkan tab/kolom; karena itu backup dan pengujian salinan dilakukan lebih dahulu. Jangan mengasumsikan data aplikasi lama tersinkron langsung dengan aplikasi ini.
+
+## Rilis 1.5.31 — pesanan supplier dan penerimaan
+
+Pembelian ditampilkan satu kartu per identitas supplier, meliputi tanggal dan invoice berbeda. Buka pesanan untuk menambah order atau DP, mengedit rincian jumlah/harga/tanggal, dan melihat riwayat pembayaran. Tanggal serta catatan setiap order tetap tersimpan.
+
+Riwayat barang menampilkan penerimaan bertahap, jumlah yang masih kurang, serta koreksi oleh owner. Contoh: diterima 290 dari 300 berarti sisa 10; penerimaan berikutnya dicatat sebagai tambahan, bukan total ulang. Koreksi menyimpan bukti sebelumnya tanpa mengubah pembayaran. Pembayaran grup dibatasi pada supplier yang sama; pengiriman ulang koreksi dengan isi berbeda ditolak.

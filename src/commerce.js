@@ -178,17 +178,24 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
   actions.gantiCommerceEvent=function(p){
     var me=writable(p,true),module=p.module||'pembelian';if(['pembelian','nota'].indexOf(module)<0)fail('Modul tidak dikenal.');
     var key=id(p.id),parent=id(p.parentId||p.orderId),sourceId=id(p.eventId),row=find(module,module==='nota'?'nota':'order',parent),record=view(row);
-    var sudah=store.read('CommerceEvent').filter(function(e){return e.id===key;})[0];
-    if(sudah){if(sudah.module!==module||sudah.parentId!==parent||sudah.dibuatOleh!==me.id)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return reply(module,row,p,me);}
-    expected(row,p);if(record.cancelled)fail('Catatan sudah dibatalkan.');
+    var allEvents=store.read('CommerceEvent'),sudah=allEvents.filter(function(e){return e.id===key;})[0];
     var source=record.events.filter(function(e){return e.id===sourceId;})[0];
-    if(!source||source.voided||(source.kind!=='payment'&&source.kind!=='receipt'))fail('Transaksi asal tidak ditemukan atau telah dibatalkan.');
-    if(source.sourceReview)fail('Catatan lama yang masih perlu diperiksa tidak dapat diubah.');
+    if(!source||(source.kind!=='payment'&&source.kind!=='receipt'))fail(sudah?'Identitas transaksi sudah digunakan untuk isi atau akun berbeda.':'Transaksi asal tidak ditemukan atau telah dibatalkan.');
     var kind=source.kind,d={tanggal:date(p.tanggal||source.tanggal),catatan:text(p.catatan,500)};
+    if(kind==='payment'){d.jumlah=num(p.jumlah,1e15,true,true);d.metode=text(p.metode||source.metode||'cash',40,true);}
+    else{if(module!=='pembelian')fail('Penerimaan hanya untuk pembelian.');d.itemId=id(p.itemId||source.itemId);d.jumlah=num(p.jumlah,1e8,true,true);d.kondisi=text(p.kondisi===undefined?String(source.kondisi||''):p.kondisi,100);}
+    if(sudah){
+      var correction=allEvents.filter(function(e){return e.id==='gv_'+coreCommerceHash([key,sourceId]).slice(0,40);})[0];
+      if(sudah.module!==module||sudah.parentId!==parent||sudah.kind!==kind||sudah.dibuatOleh!==me.id||coreCommerceHash(coreCommerceData(sudah))!==coreCommerceHash(d)||!correction||correction.module!==module||correction.parentId!==parent||correction.kind!=='void'||correction.dibuatOleh!==me.id||coreCommerceData(correction).eventId!==sourceId)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');
+      return reply(module,row,p,me);
+    }
+    expected(row,p);if(record.cancelled)fail('Catatan sudah dibatalkan.');
+    if(source.voided)fail('Transaksi asal tidak ditemukan atau telah dibatalkan.');
+    if(source.sourceReview)fail('Catatan lama yang masih perlu diperiksa tidak dapat diubah.');
     if(module==='nota'&&d.tanggal<String(record.date||'').slice(0,10))fail('Tanggal transaksi tidak boleh sebelum pesanan/nota.');
-    if(kind==='payment'){d.jumlah=num(p.jumlah,1e15,true,true);d.metode=text(p.metode||source.metode||'cash',40,true);
+    if(kind==='payment'){
       if(record.paymentReview||d.jumlah>record.balance+coreNum(source.jumlah))fail('Pembayaran melebihi sisa tagihan atau riwayat nominal perlu diperiksa.');}
-    else{if(module!=='pembelian')fail('Penerimaan hanya untuk pembelian.');d.itemId=id(p.itemId||source.itemId);d.jumlah=num(p.jumlah,1e8,true,true);d.kondisi=text(p.kondisi===undefined?String(source.kondisi||''):p.kondisi,100);
+    else{
       var item=(record.items||[]).filter(function(i){return i.id===d.itemId;})[0];if(record.receiptReview||!item)fail('Hubungan varian penerimaan perlu diperiksa; tidak boleh ditebak.');
       var diterima=coreNum(record.receivedByItem[d.itemId])-(source.itemId===d.itemId?coreNum(source.jumlah):0);
       if(d.jumlah>coreNum(item.jumlah)-diterima)fail('Penerimaan melebihi sisa varian pesanan.');}
@@ -203,12 +210,12 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     var d={tanggal:date(p.tanggal||String(ctx.env.now().toISOString()).slice(0,10)),catatan:text(p.catatan,500),metode:text(p.metode||'transfer',40,true)},amount=num(p.jumlah,1e15,true,true);
     function eventId(orderId){return 'gp_'+coreCommerceHash([key,orderId]).slice(0,40);}
     function answer(){var out={groupId:key};if(p.withState===true)out.commerce=stateOf('pembelian',me);return out;}
+    var views=rows.map(view),supplierId='';views.forEach(function(v){var sid=(v.supplierSnapshot||{}).id;if(!sid||supplierId&&sid!==supplierId)fail('Pembayaran grup harus memakai identitas supplier yang sama.');supplierId=sid;});
     var prior=store.read('CommerceEvent').filter(function(e){return e.module==='pembelian'&&e.kind==='payment'&&coreCommerceData(e).groupId===key;});
     if(prior.length){
       var same=prior.every(function(e){var x=coreCommerceData(e);return e.dibuatOleh===me.id&&seen[e.parentId]&&e.id===eventId(e.parentId)&&x.tanggal===d.tanggal&&x.metode===d.metode&&x.catatan===d.catatan;})&&prior.reduce(function(n,e){return n+coreNum(coreCommerceData(e).jumlah);},0)===amount;
       if(!same)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return answer();
     }
-    var views=rows.map(view);
     views.forEach(function(v){if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa. Keluarkan order itu dari pembayaran grup.');});
     var shares=coreCommerceSplit(amount,views.map(function(v){return v.balance;}));if(!shares)fail('Pembayaran grup harus lebih dari nol dan tidak melebihi sisa tagihan grup.');
     var stamp=now(),stored=[];views.forEach(function(v,i){if(shares[i])stored.push({id:eventId(v.id),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
