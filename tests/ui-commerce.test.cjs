@@ -164,12 +164,12 @@ test('an uncertain group payment is recognised by its group ID before any retry 
   const again=harness();again.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});again.form({},'pembelian');const q=again.run("commerceMutation('pembelian','appendCommerceGroupPayment',{id:'gp1',module:'pembelian',orderIds:['o1','o2'],expectedRevisions:{o1:'r1',o2:'r2'},tanggal:'2026-10-09',jumlah:9000,metode:'transfer',catatan:''},currentForm,null)");again.requests[0].reject(Object.assign(new Error('lost'),{uncertain:true}));await q;
   const same=again.run("A.commerceCheck({closest:function(){return currentForm;}})");again.requests[1].resolve(reply('pembelian',{suppliers:[],products:[],orders:shopOrders()},11));await same;assert.equal(again.run('drops'),0);assert.equal(again.run('currentForm._commerceRetry'),true);
 });
-test('the new-order form follows supplier, product, variants, details; products are limited to the chosen supplier',()=>{
+test('the new invoice form shares supplier and DP while each model keeps quantity and price; product choices stay supplier-scoped',()=>{
   const h=harness();h.seed('pembelian',{suppliers:[{id:'s1',nama:'Supplier A'},{id:'s2',nama:'Supplier B',aktif:false}],products:[{id:'p1',nama:'Kaos',model:'Oversize',supplierId:'s1',harga:45000},{id:'p2',nama:'Topi',supplierId:'s2'},{id:'p3',nama:'Lama',supplierId:'s1',aktif:false}],orders:[]});
   assert.match(h.run("commerceProductOptions('','')"),/Pilih supplier dulu/);const choices=h.run("commerceProductOptions('s1','')");assert.match(choices,/Kaos · Oversize/);assert.ok(!/Topi|Lama/.test(choices));
   assert.ok(!h.run("commerceSupplierOptions('')").includes('Supplier B'),'an inactive supplier is not offered for a new order');assert.match(h.run("commerceSupplierOptions('s2')"),/value="s2" selected/);
-  h.run("A.commerceOrderOpen({getAttribute:function(){return null;}})");const form=h.run('lastSheet');for(const part of ['1. Supplier','2. Produk dan harga','3. Varian','4. Detail order','name="supplierPick"','name="produkId"','data-kind="suppliers"','data-kind="products"','DP awal'])assert.ok(form.includes(part),part);
-  assert.ok(form.indexOf('1. Supplier')<form.indexOf('2. Produk dan harga')&&form.indexOf('3. Varian')<form.indexOf('4. Detail order'));
+  h.run("A.commerceOrderOpen({getAttribute:function(){return null;}})");const form=h.run('lastSheet');for(const part of ['data-commerce-models','Tambah model lain','Warna / ukuran (opsional)','name="supplierPick"','name="produkId"','data-kind="suppliers"','data-kind="products"','DP bersama','commerceBatchSave'])assert.ok(form.includes(part),part);
+  assert.equal((form.match(/name="supplierPick"/g)||[]).length,1);assert.equal((form.match(/name="dp"/g)||[]).length,1);assert.equal((form.match(/name="tanggalOrder"/g)||[]).length,1);
 });
 test('after a save the open order form adopts the new supplier or product, and a new order shows the supplier picture',()=>{
   const h=harness();h.seed('pembelian',{suppliers:[{id:'s1',nama:'Supplier A'}],products:[{id:'p9',nama:'Topi Baru',supplierId:'s1',harga:30000}],orders:[]});
