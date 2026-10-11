@@ -15,8 +15,8 @@ function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fSe
 function toast(t){messages.push(t);}function quiet(e){messages.push(e.message);}function dropForm(){closed++;}function openSlip(t,id){slips.push(id);}function act(el,p){return p;}function req(action,payload){return new Promise(function(resolve,reject){requests.push({action,payload,resolve,reject});});}
 `,c);vm.runInContext(part('function sizeGrid(sizes, o)','A.fillMax ='),c);vm.runInContext(part('function projectWorkflow(po)','function workflowFor(po)'),c);vm.runInContext(part('A.kirimOpen =','/* tutup lembar form tertentu'),c);return {c,run:s=>vm.runInContext(s,c)};}
 function value(markup,size){const re=new RegExp('data-size="'+size+'"[^>]*value="([^\"]*)"');const match=markup.match(re);assert.ok(match,size);return match[1];}
-test('444 cut minus 138 assigned prefills remaining M156 L150 XL0 and shows per-size context',()=>{
- const f=fixture();f.run("openKirim('po1','')");const out=f.c.rendered;assert.equal(value(out,'M'),'156');assert.equal(value(out,'L'),'150');assert.equal(value(out,'XL'),'0');assert.match(out,/Hasil potong 444 pcs/);assert.match(out,/Sudah ditugaskan 138 pcs/);assert.match(out,/Tersedia 306 pcs/);assert.match(out,/Potong 138 · ditugaskan 138 · sisa 0/);assert.match(out,/membagi ke beberapa maklon/);assert.equal(f.c.requests.length,0);
+test('444 cut minus 138 assigned prefills remaining M156 L150 and excludes fully assigned XL',()=>{
+ const f=fixture();f.run("openKirim('po1','')");const out=f.c.rendered;assert.equal(value(out,'M'),'156');assert.equal(value(out,'L'),'150');assert.doesNotMatch(out,/data-size="XL"/);assert.match(out,/Hasil potong 444 pcs/);assert.match(out,/Sudah ditugaskan 138 pcs/);assert.match(out,/Tersedia 306 pcs/);assert.match(out,/Potong 156 · ditugaskan 0 · sisa 156/);assert.match(out,/membagi ke beberapa maklon/);assert.equal(f.c.requests.length,0);
 });
 test('one size can be given to one sewer: the size button fills that size and clears the others',()=>{
  const f=fixture();f.run("openKirim('po1','')");const out=f.c.rendered;
@@ -28,9 +28,9 @@ test('one size can be given to one sewer: the size button fills that size and cl
 });test('owner may reduce prefilled quantities to split assignment and duplicate taps send only one request',async()=>{
  const f=fixture();f.run("openKirim('po1','')");const p=f.run('A.kirimSave(button)');f.run('A.kirimSave(button)');assert.equal(f.c.requests.length,1);assert.deepEqual(JSON.parse(JSON.stringify(f.c.requests[0].payload.kirim.ukuran)),{M:50});f.c.requests[0].resolve({id:'saved1'});await p;assert.equal(f.c.closed,1);assert.equal(f.c.slips.length,0,'no slip pops up after an assignment');assert.match(f.c.messages.join(' '),/Penugasan tersimpan\. Masih 306 pcs belum ditugaskan/);assert.match(f.c.rendered,/data-a="kirimSave">Simpan penugasan</,'the form is open again for the next sewer');assert.equal(f.c.form._kirimBusy,false);
 });
-test('fully assigned PO keeps all zero sizes visible and has no active save action',()=>{
- const f=fixture();f.run("setAssigned({M:156,L:150,XL:138});openKirim('po1','')");const out=f.c.rendered;for(const size of ['M','L','XL'])assert.equal(value(out,size),'0');assert.match(out,/Tersedia 0 pcs/);assert.match(out,/disabled>Semua sudah ditugaskan/);assert.doesNotMatch(out,/data-a="kirimSave"/);assert.equal(f.c.requests.length,0);
+test('fully assigned PO has no offered sizes or active save action',()=>{
+ const f=fixture();f.run("setAssigned({M:156,L:150,XL:138});openKirim('po1','')");const out=f.c.rendered;assert.doesNotMatch(out,/data-size="(?:M|L|XL)"/);assert.match(out,/Tersedia 0 pcs/);assert.match(out,/disabled>Tidak ada ukuran yang siap ditugaskan/);assert.doesNotMatch(out,/data-a="kirimSave"/);assert.equal(f.c.requests.length,0);
 });
 test('reopening uses updated authoritative remaining counts even when aggregate cache was previously rendered',()=>{
- const f=fixture();f.run("openKirim('po1','');setAssigned({M:100,XL:138});openKirim('po1','')");assert.equal(value(f.c.rendered,'M'),'56');assert.equal(value(f.c.rendered,'L'),'150');assert.equal(value(f.c.rendered,'XL'),'0');assert.match(f.c.rendered,/Tersedia 206 pcs/);f.run("form.sizes={M:156,L:150};A.kirimSave(button)");assert.equal(f.c.requests.length,0);assert.match(f.c.messages.join(' '),/melebihi hasil potong/);
+ const f=fixture();f.run("openKirim('po1','');setAssigned({M:100,XL:138});openKirim('po1','')");assert.equal(value(f.c.rendered,'M'),'56');assert.equal(value(f.c.rendered,'L'),'150');assert.doesNotMatch(f.c.rendered,/data-size="XL"/);assert.match(f.c.rendered,/Tersedia 206 pcs/);f.run("form.sizes={M:156,L:150};A.kirimSave(button)");assert.equal(f.c.requests.length,0);assert.match(f.c.messages.join(' '),/tidak lagi tersedia/);
 });
