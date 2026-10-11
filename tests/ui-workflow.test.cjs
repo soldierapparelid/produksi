@@ -38,16 +38,19 @@ test('the QC queue shows one card per PO with a row per counted slip, and says w
       {id:'s1',noSlip:'SS-1',poId:'p',maklonId:'a',status:'diterima',ukuran:{M:40},total:40,tanggal:'2026-10-01',diprosesPada:'2026-10-02T03:00:00.000Z'},
       {id:'s2',noSlip:'SS-2',poId:'p',maklonId:'a',status:'diterima',ukuran:{L:20},total:20,tanggal:'2026-10-08'},
       {id:'s3',noSlip:'SS-3',poId:'q',maklonId:'b',status:'diterima',ukuran:{M:10},total:10,tanggal:'2026-10-05'}];
-    D.po.p={id:'p',nama:'Kaos A',noPO:'PO-1',status:'aktif',total:{kirim:100,terima:60,sisaMaklon:30,diajukan:10},workflow:{issues:[],ukuran:{M:{readyQC:true},L:{readyQC:true}}}};
-    D.po.q={id:'q',nama:'Kaos B',noPO:'PO-2',status:'aktif',total:{kirim:10,terima:10,sisaMaklon:0,diajukan:0},workflow:{issues:[],ukuran:{M:{readyQC:true}}}};`, c);
-  assert.deepEqual(json(c, 'qcAntreanPO(antreanQC()).map(g=>({po:g.poId,pcs:g.pcs,slip:g.baris.map(x=>x.s.id)}))'), [{ po: 'p', pcs: 60, slip: ['s1', 's2'] }, { po: 'q', pcs: 10, slip: ['s3'] }]);
-  const kartu = vm.runInContext('qcKartuPO(qcAntreanPO(antreanQC())[0])', c);
-  assert.match(kartu, /Kaos A/); assert.match(kartu, />60<\/span><span class="xs muted">pcs · 2 hitungan</);
-  assert.match(kartu, /Sudah dihitung 60 dari 100 pcs yang ditugaskan · menunggu dihitung 10 · masih dijahit 30/);
-  assert.match(kartu, /Dihitung 2026-10-02<\/span> <span class="xs muted">Penjahit a · SS-1/); assert.match(kartu, /Dihitung 2026-10-08<\/span>/);
+    D.po.p={id:'p',nama:'Kaos A',noPO:'PO-1',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,target:40,kirim:40,diterima:40,rejectJahit:0,sisaMaklon:0,diajukan:0},L:{readyQC:true,target:60,kirim:60,diterima:20,rejectJahit:0,sisaMaklon:40,diajukan:10}}}};
+    D.po.q={id:'q',nama:'Kaos B',noPO:'PO-2',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,target:10,kirim:10,diterima:10,rejectJahit:0,sisaMaklon:0,diajukan:0}}}};
+    S.state.po=[D.po.p,D.po.q];`, c);
+  assert.deepEqual(json(c, 'qcPoGroups().map(g=>({po:g.po.id,pcs:g.ready,slip:g.batches.map(x=>x.s.id)}))'), [{ po: 'p', pcs: 60, slip: ['s1', 's2'] }, { po: 'q', pcs: 10, slip: ['s3'] }]);
+  const kartu = vm.runInContext('qcPoCardHtml(qcPoGroups()[0])', c);
+  assert.match(kartu, /Kaos A/); assert.match(kartu, />60<\/span><span class="xs muted">pcs siap QC</);
+  assert.match(kartu, /60 pcs sudah dihitung dalam 2 slip/);
+  assert.match(kartu, /30 pcs masih di maklon · 10 pcs laporan belum dihitung/);
+  assert.match(kartu, /Dihitung 2026-10-01 · Penjahit a/); assert.match(kartu, /Dihitung 2026-10-08/);
+  assert.match(kartu, /Hitung terakhir 2026-10-08/); assert.match(kartu, /SS-1/);
   assert.equal(kartu.split('data-a="qcSlipOpen"').length - 1, 2, 'each counted slip keeps its own Periksa button');
-  assert.match(vm.runInContext('qcKartuPO(qcAntreanPO(antreanQC())[1])', c), /jahitan sudah kembali semua/);
-  assert.match(html, /miniKpi\(\[\['Antrean', nf\(qcAntreanPO\(antre\)\.length\), 'PO · '/);
+  assert.match(vm.runInContext('qcPoCardHtml(qcPoGroups()[1])', c), /Seluruh jahitan sudah dihitung/);
+  assert.match(html, /miniKpi\(\[\['Antrean', nf\(groups\.length\), 'PO · '/);
 });
 
 test('historical QC ambiguity holds only its baseline count, while a new source stays selectable', () => {

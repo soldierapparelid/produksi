@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.27';
+var APP_VERSION = '1.5.30';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -5205,7 +5205,8 @@ function coreCommerceLean(value) { if(value&&value.gambar)value.hasPicture=true;
 function coreCommerceRecordView(row, events, records, lookup) {
   var value=coreCommerceCopy(coreCommerceData(row)), embedded=value._initialPayment, own=(lookup?lookup.events[row.module+'|'+value.id]||[]:events||[]).filter(function(e){return e.module===row.module&&e.parentId===value.id;});
   var revision=coreCommerceHash({record:row.revision,events:own.map(function(e){return [e.id,e.data];}).sort(function(a,b){return a[0].localeCompare(b[0]);})});
-  ['_createHash','_createActor','_lastMutation','_initialPayment'].forEach(function(k){delete value[k];});
+  value.orderEditCount=(value._orderChanges||[]).length;
+  ['_createHash','_createActor','_lastMutation','_initialPayment','_orderChanges'].forEach(function(k){delete value[k];});
   value.revision=revision; value.createdBy=row.dibuatOleh;value.createdAt=row.dibuat;value.updatedAt=row.diubah;value.legacy=!!row.sourceHash;
   if(row.kind!=='order'&&row.kind!=='nota')return value;
   var ledger=own.map(function(e){var d=coreCommerceCopy(coreCommerceData(e));d.id=e.id;d.kind=e.kind;d.createdBy=e.dibuatOleh;d.createdAt=e.dibuat;d.legacy=!!e.sourceHash;return d;});
@@ -5297,19 +5298,22 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       if(!(r.items instanceof Array)||!r.items.length||r.items.length>100)fail('Isi 1 sampai 100 baris barang.');var seen={};
       out.items=r.items.map(function(i){var x={id:id(i.id)};if(seen[x.id])fail('Identitas baris barang ganda.');seen[x.id]=true;
         if(kind==='order'){x.nama=text(i.nama,120,true);x.jumlah=num(i.jumlah,1e8,true,true);}else{x.name=text(i.name,120,true);x.size=text(i.size,40);x.color=text(i.color,60);x.qty=num(i.qty,1e8,true,true);x.price=num(i.price,1e12,false,true);x.discPercent=num(i.discPercent===undefined?0:i.discPercent,100,false,false);x.subtotal=Math.round(x.qty*x.price*(100-x.discPercent)/100);if(!Number.isSafeInteger(x.subtotal))fail('Subtotal terlalu besar.');}return x;});
-      if(kind==='order'){out.produkId=id(r.produkId);var product=find('pembelian','product',out.produkId),pd=coreCommerceData(product),supplier=find('pembelian','supplier',pd.supplierId),sd=coreCommerceData(supplier);if(!product||!supplier||pd.aktif===false||sd.aktif===false)fail('Produk atau supplier pembelian tidak ditemukan atau tidak aktif.');out.productSnapshot={id:pd.id,nama:pd.nama,model:pd.model||'',warna:pd.warna||'',supplierId:pd.supplierId};out.supplierSnapshot={id:sd.id,nama:sd.nama,kontak:sd.kontak||'',alamat:sd.alamat||''};out.grupNama=text(r.grupNama,100);out.hargaSatuan=num(r.hargaSatuan,1e12,false,true);out.tanggalOrder=date(r.tanggalOrder);out.totalHarga=out.items.reduce(function(n,i){return n+i.jumlah*out.hargaSatuan;},0);out.catatan=text(r.catatan,1000);if(!Number.isSafeInteger(out.totalHarga))fail('Total terlalu besar.');}
+      if(kind==='order'){out.produkId=id(r.produkId);var product=find('pembelian','product',out.produkId),pd=coreCommerceData(product),supplier=find('pembelian','supplier',pd.supplierId),sd=coreCommerceData(supplier),sameProduct=old&&old.produkId===out.produkId&&old.productSnapshot&&old.productSnapshot.id&&old.supplierSnapshot&&old.supplierSnapshot.id;if(!sameProduct&&(!product||!supplier||pd.aktif===false||sd.aktif===false))fail('Produk atau supplier pembelian tidak ditemukan atau tidak aktif.');out.productSnapshot=sameProduct?old.productSnapshot:{id:pd.id,nama:pd.nama,model:pd.model||'',warna:pd.warna||'',supplierId:pd.supplierId};out.supplierSnapshot=sameProduct?old.supplierSnapshot:{id:sd.id,nama:sd.nama,kontak:sd.kontak||'',alamat:sd.alamat||''};out.grupNama=text(r.grupNama,100);out.hargaSatuan=num(r.hargaSatuan,1e12,false,true);out.tanggalOrder=date(r.tanggalOrder);out.totalHarga=out.items.reduce(function(n,i){return n+i.jumlah*out.hargaSatuan;},0);out.catatan=text(r.catatan,1000);if(!Number.isSafeInteger(out.totalHarga))fail('Total terlalu besar.');}
       else{var c=r.customer||{};out.customer={name:text(c.name,120,true),phone:text(c.phone,60),address:text(c.address,400),type:c.type==='reseller'?'reseller':'walkin'};out.date=date(r.date);out.discountPercent=num(r.discountPercent===undefined?0:r.discountPercent,100,false,false);out.shipping=num(r.shipping===undefined?0:r.shipping,1e12,false,true);out.subtotal=out.items.reduce(function(n,i){return n+i.subtotal;},0);out.discountAmount=Math.round(out.subtotal*out.discountPercent/100);out.total=out.subtotal-out.discountAmount+out.shipping;out.notes=text(r.notes,1000);if(!Number.isSafeInteger(out.total))fail('Total terlalu besar.');}
       out.cancelled=old?!!old.cancelled:false;if(out.cancelled)fail('Catatan yang dibatalkan tidak dapat diubah.');
       if(previous){var current=view(previous);
         if(kind==='nota'){if(current.events.length||previous.sourceHash)fail('Pesanan/nota yang sudah mempunyai riwayat disimpan tetap. Koreksi melalui pembatalan event atau buat catatan baru.');}
-        /* A purchase order entered in this application may still be corrected after payments or receipts,
-           as the earlier application allowed, but never against what was already paid or received.
-           Imported orders and orders still held for review stay fixed. */
-        else if(previous.sourceHash||current.needsReview)fail('Pesanan dari data lama atau yang masih perlu diperiksa disimpan tetap. Koreksi transaksinya atau buat pesanan baru.');
-        else if(current.events.length){
+        /* Editing keeps the same order and immutable payment/receipt events. An unresolved receipt never
+           becomes a guessed variant link: its existing lines may only be retained or increased. */
+        else if(current.paymentReview)fail('Nominal pembayaran lama perlu diperiksa sebelum rincian order dapat diedit.');
+        else if(current.events.length||previous.sourceHash||current.receiptReview){
           if(out.produkId!==old.produkId)fail('Produk tidak dapat diganti setelah ada pembayaran atau penerimaan.');
           if(old.productSnapshot)out.productSnapshot=old.productSnapshot;if(old.supplierSnapshot)out.supplierSnapshot=old.supplierSnapshot;
-          var got=current.receivedByItem||{};Object.keys(got).forEach(function(k){if(!coreNum(got[k]))return;var kept=out.items.filter(function(i){return i.id===k;})[0];if(!kept||kept.jumlah<coreNum(got[k]))fail('Varian yang sudah diterima tidak boleh dihapus atau dikurangi di bawah jumlah yang diterima.');});
+          if(current.receiptReview){
+            if(out.items.length!==(old.items||[]).length)fail('Penerimaan lama belum terhubung. Pertahankan varian yang ada; jangan menambah atau menghapus varian.');
+            (old.items||[]).forEach(function(i,n){var kept=out.items[n];if(!kept||kept.nama!==i.nama||(i.id&&kept.id!==i.id)||kept.jumlah<coreNum(i.jumlah))fail('Penerimaan lama belum terhubung. Nama, urutan, dan jumlah minimum varian lama harus dipertahankan.');});
+          }
+          var got=current.receivedByItem||{};Object.keys(got).forEach(function(k){if(!coreNum(got[k]))return;var kept=out.items.filter(function(i){return i.id===k;})[0],known=(old.items||[]).some(function(i){return i.id===k;});if(current.receiptReview&&!known){if(kept)fail('Hubungan penerimaan lama tidak boleh ditebak dengan mengganti identitas varian.');return;}if(!kept||kept.jumlah<coreNum(got[k]))fail('Varian yang sudah diterima tidak boleh dihapus atau dikurangi di bawah jumlah yang diterima.');});
           if(out.totalHarga<current.totalPaid)fail('Total pesanan tidak boleh lebih kecil dari yang sudah dibayar.');
         }
       }
@@ -5323,7 +5327,15 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     var rawIntent=coreCommerceCopy(r);delete rawIntent.revision;var intent=coreCommerceHash({kind:kind,input:rawIntent,before:p.expectedRevision||''});
     if(old){var data=coreCommerceData(old);if(!p.expectedRevision&&data._createHash===intent&&data._createActor===actor)return reply(module,old,p,me);if(data._lastMutation&&data._lastMutation.hash===intent&&data._lastMutation.actor===actor)return reply(module,old,p,me);expected(old,p);}
     else if(p.expectedRevision)fail('Catatan asal tidak ditemukan.');
+    if(old&&kind==='order'&&(old.sourceHash||view(old).needsReview)&&me.divisi!=='owner')fail('Hanya owner yang dapat mengedit rincian order dari data lama atau yang perlu diperiksa.');
     var data=normalize(kind,r,old);if(kind==='nota'){if(old)data.noNota=coreCommerceData(old).noNota||key;else{var prefix='SA-'+data.date.replace(/-/g,'').slice(2)+'-',sequence=0;store.read('CommerceImport').forEach(function(row){sequence=Math.max(sequence,coreNum((coreCommerceData(row).summary||{}).notaCounter));});all().filter(function(row){return row.kind==='nota';}).forEach(function(row){var note=coreCommerceData(row),n=String(note.noNota||note.id||''),match=/^SA-\d{6}-(\d+)$/.exec(n);if(match)sequence=Math.max(sequence,Number(match[1]));});if(sequence>=999999)fail('Nomor nota tanggal ini penuh.');data.noNota=prefix+('000'+(sequence+1)).slice(-Math.max(3,String(sequence+1).length));}}
+    if(old&&kind==='order'){
+      var previousData=coreCommerceData(old),fields=['produkId','productSnapshot','supplierSnapshot','items','hargaSatuan','totalHarga','tanggalOrder','grupNama','catatan'],before={},after={};
+      fields.forEach(function(k){if(previousData[k]!==undefined)before[k]=previousData[k];if(data[k]!==undefined)after[k]=data[k];});
+      data._orderChanges=(previousData._orderChanges||[]).slice();
+      if(coreCommerceHash(before)!==coreCommerceHash(after))data._orderChanges.push({at:now(),by:actor,before:before,afterHash:coreCommerceHash(after)});
+      if(previousData._salinDari)data._salinDari=previousData._salinDari;
+    }
     if(old){var prev=coreCommerceData(old);data._createHash=prev._createHash;data._createActor=prev._createActor;if(prev._initialPayment)data._initialPayment=prev._initialPayment;}else{data._createHash=intent;data._createActor=actor;var pay=initial(r,kind,data,me);if(pay)data._initialPayment=pay;}
     data._lastMutation={hash:intent,actor:actor};var stamp=now(),row={id:coreCommerceKey(module,kind,key),module:module,kind:kind,parentId:'',data:JSON.stringify(data),revision:coreCommerceHash([data,stamp,actor]),dibuat:old?old.dibuat:stamp,dibuatOleh:old?old.dibuatOleh:actor,diubah:stamp,sourceHash:old?old.sourceHash:''};
     checkRows('CommerceRecord',[row]);if(old)store.update('CommerceRecord',old.id,row);else store.append('CommerceRecord',row);return reply(module,row,p,me);
@@ -5399,12 +5411,22 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     var semua=store.read('CommerceEvent').filter(function(e){return e.module==='pembelian';});
     var lama=semua.filter(function(e){return e.kind==='payment'&&coreCommerceData(e).groupId===groupId;});
     if(!lama.length)fail('Pembayaran gabungan tidak ditemukan.');
+    var awal=coreCommerceData(lama[0]),d={tanggal:date(p.tanggal||awal.tanggal),catatan:text(p.catatan,500),metode:text(p.metode||awal.metode||'transfer',40,true)};
+    var requestHash=coreCommerceHash({groupId:groupId,amount:amount,data:d,expectedRevisions:p.expectedRevisions||{}});
     var bekas={};lama.forEach(function(e){bekas[voidId(e.id)]=true;});
     var sudah=semua.filter(function(e){return bekas[e.id];});
-    if(sudah.length){if(sudah.some(function(e){return e.dibuatOleh!==me.id;}))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return answer();}
-    if(semua.some(function(e){return coreCommerceData(e).groupId===key;}))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');
-    var awal=coreCommerceData(lama[0]),d={tanggal:date(p.tanggal||awal.tanggal),catatan:text(p.catatan,500),metode:text(p.metode||awal.metode||'transfer',40,true)};
-    var seen={},rows=[];lama.forEach(function(e){if(seen[e.parentId])return;seen[e.parentId]=true;rows.push(find('pembelian','order',e.parentId));});
+    if(sudah.length){
+      if(sudah.some(function(e){var x=coreCommerceData(e);return e.dibuatOleh!==me.id||x.requestHash!==requestHash||x.correctionId!==key;}))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');
+      var parentDone={};sudah.forEach(function(e){parentDone[e.parentId]=true;});
+      var replacements=semua.filter(function(e){return e.kind==='payment'&&coreCommerceData(e).groupId===key;});
+      if(sudah.some(function(e){return coreCommerceData(e).correctionCount!==sudah.length;})||replacements.some(function(e){var x=coreCommerceData(e);return !parentDone[e.parentId]||e.dibuatOleh!==me.id||x.tanggal!==d.tanggal||x.metode!==d.metode||x.catatan!==d.catatan;})||replacements.reduce(function(n,e){return n+coreNum(coreCommerceData(e).jumlah);},0)!==amount)fail('Penyimpanan koreksi grup belum lengkap. Periksa riwayat sebelum membuat pembayaran lain.');
+      return answer();
+    }
+    if(semua.some(function(e){var x=coreCommerceData(e);return x.groupId===key||x.correctionId===key;}))fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');
+    var voided={};semua.forEach(function(e){if(e.kind==='void')voided[JSON.stringify([e.parentId,coreCommerceData(e).eventId])]=true;});
+    var active=lama.filter(function(e){return !voided[JSON.stringify([e.parentId,e.id])];});
+    if(!active.length)fail('Pembayaran gabungan ini sudah dikoreksi.');
+    var seen={},rows=[];active.forEach(function(e){if(seen[e.parentId])return;seen[e.parentId]=true;rows.push(find('pembelian','order',e.parentId));});
     var views=rows.map(view),bagian={};
     views.forEach(function(v){
       if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');
@@ -5416,7 +5438,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     var shares=amount?coreCommerceSplit(amount,views.map(function(v){return v.balance+bagian[v.id].reduce(function(n,e){return n+coreNum(e.jumlah);},0);})):views.map(function(){return 0;});
     if(!shares)fail('Pembayaran gabungan melebihi sisa tagihan order-ordernya.');
     var stamp=now(),hari=String(stamp).slice(0,10),stored=[];
-    views.forEach(function(v){bagian[v.id].forEach(function(e){stored.push({id:voidId(e.id),module:'pembelian',parentId:v.id,kind:'void',data:JSON.stringify({tanggal:hari,catatan:amount?'Pembayaran gabungan diubah':'Pembayaran gabungan dihapus',eventId:e.id}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});});
+    views.forEach(function(v){bagian[v.id].forEach(function(e){stored.push({id:voidId(e.id),module:'pembelian',parentId:v.id,kind:'void',data:JSON.stringify({tanggal:hari,catatan:amount?'Pembayaran gabungan diubah':'Pembayaran gabungan dihapus',eventId:e.id,correctionId:key,requestHash:requestHash,correctionCount:active.length}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});});
     views.forEach(function(v,i){if(shares[i])stored.push({id:'gp_'+coreCommerceHash([key,v.id]).slice(0,40),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
     checkRows('CommerceEvent',stored);store.appendMany('CommerceEvent',stored);return answer();
   };

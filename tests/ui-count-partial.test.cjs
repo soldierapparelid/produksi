@@ -40,7 +40,7 @@ test('a partial count of an old report is sent with its date and the message say
 test('counting everything, or good plus real rejects, leaves nothing waiting',async()=>{
   const f=fixture();f.run("form.sizes={M:320};form.rejects={M:12}");const p=f.run('A.terimaSave(button)');
   assert.equal(f.c.requests[0].payload.reject,12);f.c.requests[0].resolve({noSlip:'SS-2610-002'});await p;
-  assert.match(f.c.messages.join(' '),/Slip SS-2610-002 terbit\. QC dibuka setelah hitungan ukuran lengkap\./);
+  assert.match(f.c.messages.join(' '),/Slip SS-2610-002 terbit\. Hitungan ini sudah masuk Antrean QC\./);
 });
 
 test('more than the old report, a missing date or a future date is stopped on the device',()=>{
@@ -73,5 +73,5 @@ test('a new report from a sewer is counted as before, only with the count date a
   const f=fixture();f.run("form.values.id='native01';form.sizes={M:60};form.values.tanggal='2026-10-08'");const p=f.run('A.terimaSave(button)');
   assert.deepEqual(plain(f.c.requests[0].payload.ukuran),{M:60});assert.equal(f.c.requests[0].payload.tanggal,'2026-10-08');
   f.c.requests[0].resolve({noSlip:'SS-2610-003'});await p;
-  assert.match(f.c.messages.join(' '),/Slip SS-2610-003 terbit\. QC dibuka setelah hitungan ukuran lengkap\./);
+  assert.match(f.c.messages.join(' '),/Slip SS-2610-003 terbit\. Hitungan ini sudah masuk Antrean QC\./);
 });
