@@ -94,7 +94,7 @@ test('dashboard shows all sixty counted pieces as ready for QC while the rest of
   assert.match(vm.runInContext('qcEntryButton(po)', c), /disabled title="Belum ada setoran yang sudah dihitung dan menunggu QC">QC belum siap/);
 });
 
-test('QC chooser refreshes source and repair choices when returning after a save', () => {
+test('QC opens combined counts first and keeps remaining repair choices live', () => {
   const c = context();
   vm.runInContext(`var renders=[], options=[];
     function pos(n){return Math.max(0,Number(n)||0);} function T(){return {};}
@@ -104,14 +104,19 @@ test('QC chooser refreshes source and repair choices when returning after a save
     S.state.setor=[{id:'s',noSlip:'SS-001',poId:'p',maklonId:'w',status:'diterima',ukuran:{M:40},total:40}];
     D.po.p={id:'p',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,siapQC:40,target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0}}}};`, c);
   vm.runInContext(between('function qcBalance(', 'function poTahap('), c);
+  vm.runInContext(`var combinedPo='';function openCombinedQC(id){combinedPo=id;}`, c);
   vm.runInContext(between('function openQC(', 'A.qcRepairOpen ='), c);
   vm.runInContext(`openQC('p')`, c);
-  assert.equal(vm.runInContext('options[0].live', c), true);
-  assert.match(vm.runInContext('renders[0]()', c), /data-a="qcSlipOpen"/);
+  assert.equal(vm.runInContext('combinedPo', c), 'p');
+  assert.equal(vm.runInContext('renders.length', c), 0);
   vm.runInContext(`S.state.qc=[{id:'q',poId:'p',setorId:'s',maklonId:'w',tanggal:'2026-10-08',ukuran:{M:38},total:38,perbaikan:2,perbaikanUkuran:{M:2}}];D.po.p.workflow.ukuran.M.siapQC=0;`, c);
+  vm.runInContext(`openQC('p')`, c);
+  assert.equal(vm.runInContext('options[0].live', c), true);
   const refreshed = vm.runInContext('renders[0]()', c);
   assert.doesNotMatch(refreshed, /data-a="qcSlipOpen"/);
   assert.match(refreshed, /data-a="qcRepairOpen" data-id="q"/);
+  vm.runInContext(`S.state.qc.push({id:'repair',poId:'p',setorId:'s',repairQcId:'q',maklonId:'w',ukuran:{M:2},total:2,perbaikan:-2,perbaikanUkuran:{M:-2}});`, c);
+  assert.doesNotMatch(vm.runInContext('renders[0]()', c), /data-a="qcRepairOpen"/);
 });
 test('all-reject QC consumes the count; repaired goods do not reopen its QC queue', () => {
   const c = context();
