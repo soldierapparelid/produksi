@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.32 — penggunaan bersama dan status PO supplier
+
+- Formulir menyimpan revisi data saat dibuka. Edit PO, stok, tarif, hitung fisik, target jahit, dan pembayaran upah menolak data yang berubah di perangkat lain. Pengaturan serta aksi administratif umum memakai versi data pusat. Identitas pengiriman ulang terikat pada isi dan pengguna; tidak dipakai untuk menimpa perubahan yang lebih baru.
+- Penyimpanan Google Sheets memakai penanda persisten sebelum perubahan bisnis pertama. Kegagalan dan respons yang melintasi perubahan versi memaksa pembacaan ulang. Penggantian isi tabel tidak lagi mengosongkan data sebelum menulis penggantinya. Ini bukan transaksi atomik lintas tabel: proses impor tetap memakai jurnal pemulihannya dan hasil penyimpanan yang belum pasti harus diperiksa, bukan dikirim berulang secara otomatis.
+- Cache modul perdagangan ditandai perlu diperbarui saat versi pusat berubah. Pembacaan jaringan dibatasi agar sambungan lambat tidak memulai banyak permintaan serentak. Cache PWA hanya menangani berkas aplikasi miliknya; data perangkat tidak dihapus saat pembaruan.
+- Server menolak penyimpanan dari versi aplikasi lama. Pembaruan menunggu formulir dan penyimpanan selesai; aplikasi Apps Script menyediakan tombol menuju alamat versi aktif yang sama. Tidak ada penghapusan jarak jauh terhadap pintasan aplikasi di perangkat tim.
+- Pembelian produk menyediakan **Kelola PO → Nonaktifkan PO / Hapus PO ke arsip**. DP, pembayaran, penerimaan dan jejak perubahan tetap tersimpan. Filter Nonaktif serta Dihapus/arsip menyediakan tindakan pemulihan. Riwayat penerimaan tetap dapat mengoreksi tanggal/jumlah, termasuk penerimaan sebagian 290 dari 300.
+- Pengujian mencakup dua perangkat, respons terlambat, putus saat menyimpan, perubahan sesi saat gambar diproses, dan revisi formulir yang tertinggal. Jalankan seluruh pengujian dan build sebelum rilis. Deploy `Server.gs`, `Core.gs`, dan `Index.html` bersama; menerbitkan GitHub Pages saja tidak memperbarui server Apps Script.
+
 ## Struktur dan build
 
 - `src/core.js`: skema, perhitungan, otorisasi, dan aksi data bersama.
