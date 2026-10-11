@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.33';
+var APP_VERSION = '1.5.34';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -391,6 +391,27 @@ function coreActiveSizes(po) {
     seen[s]=true;
   }
   return {valid:true,ukuran:coreSizeOrder(sizes.slice())};
+}
+/* Assignment availability follows the same size contract as strictSizes.
+   Historical counts remain visible, but closed source sizes and inspected
+   sizes cannot become new sewing work merely because an old dispatch is absent. */
+function coreKirimAvailability(po, flow, defaultSizes) {
+  var out = { total: 0, ukuran: {} };
+  if (!po || po.status !== 'aktif' || !flow || !flow.ukuran || (flow.blockingIssues || flow.issues || []).length) return out;
+  var evidence = coreLegacyCuttingEvidence(po), active = evidence ? null : coreActiveSizes(po);
+  /* Worker responses omit source provenance. This size-only projection is
+     computed by coreWorkflow; write actions also recompute it from stored rows. */
+  if (!evidence && !active && flow.cutting && flow.cutting.verified === true && flow.cutting.ukuran instanceof Array) evidence = { valid: true, ukuran: flow.cutting.ukuran };
+  if (active && !active.valid) return out;
+  var allowed = active && active.valid ? active.ukuran.slice() : Object.keys(coreMap(po.ukuran));
+  if (evidence && evidence.valid) evidence.ukuran.forEach(function (size) { if (allowed.indexOf(size) < 0) allowed.push(size); });
+  if (!allowed.length) allowed = defaultSizes instanceof Array ? defaultSizes : [];
+  allowed.forEach(function (size) {
+    var u = flow.ukuran[size]; if (!u || coreNum(u.qcOk) + coreNum(u.qcOffline) + coreNum(u.qcReject) + coreNum(u.qcPerbaikan) > 0) return;
+    var n = Math.max(0, coreNum(u.potong) - coreNum(u.kirim));
+    if (n > 0) { out.ukuran[size] = n; out.total += n; }
+  });
+  return out;
 }
 function coreCuttingProjection(poRows, physicalCuts, lepas) {
   lepas = coreMap(lepas);
@@ -2201,8 +2222,8 @@ function createCore(store, env) {
     var po = openPO(k.poId);
     var maklon = findUser(String(k.maklonId || '')); if (!maklon || maklon.divisi !== 'jahit' || !maklon.aktif) fail('Pilih maklon jahit yang aktif.');
     var ukuran = strictSizes(k.ukuran, po, false);
-    var total = coreSumSizes(ukuran); var wf = poClean(po);
-    Object.keys(ukuran).forEach(function (s) { var u = wf.ukuran[s]; if (!u || ukuran[s] > u.potong - u.kirim) fail('Penugasan ' + s + ' melebihi hasil potong yang belum dikirim.'); if (u.qcOk + u.qcOffline + u.qcReject + u.qcPerbaikan > 0) fail('Ukuran ' + s + ' sudah masuk QC.'); });
+    var total = coreSumSizes(ukuran); var wf = poClean(po), available = coreKirimAvailability(po, wf, settings().ukuran);
+    Object.keys(ukuran).forEach(function (s) { var u = wf.ukuran[s]; if (u && u.qcOk + u.qcOffline + u.qcReject + u.qcPerbaikan > 0) fail('Ukuran ' + s + ' sudah masuk QC.'); if (ukuran[s] > coreNum(available.ukuran[s])) fail('Penugasan ' + s + ' melebihi hasil potong yang belum dikirim.'); });
     if (total <= 0) fail('Isi jumlah pcs yang dikirim.');
     var tanggal = tglOk(k.tanggal) || today();
     var st = settings();
