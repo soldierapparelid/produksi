@@ -352,6 +352,7 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 13.5px; font-vari
 .sheet-h { display: flex; align-items: center; gap: 8px; padding: 12px 8px 12px 16px; border-bottom: 1px solid var(--line); flex: none; }
 .sheet-h h2 { flex: 1 1 auto; min-width: 0; font-size: 19px; }
 .sheet-b { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; -webkit-overflow-scrolling: touch; }
+.sheet-b > .search { flex: none; }
 .sheet-f { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; gap: 10px; flex: none; }
 .sheet-f .btn { flex: 1 1 0; }
 @media (min-width: 720px) {
@@ -387,6 +388,16 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 13.5px; font-vari
 .kv { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 4px 10px; font-size: 14px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
+.weekly-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 14px 18px; margin: 0; }
+.weekly-summary-grid > div { min-width: 0; }
+.weekly-summary-grid dt { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.weekly-summary-grid dd { margin: 4px 0 0; font-size: 17px; overflow-wrap: anywhere; }
+.weekly-history .sec-h { flex-wrap: wrap; }
+.weekly-work-row { flex-wrap: wrap; align-items: flex-start; }
+.weekly-work-row > .grow { flex: 1 1 240px; }
+.weekly-work-row > .num { flex: 0 1 auto; max-width: 100%; margin-left: auto; text-align: right; overflow-wrap: anywhere; }
+.weekly-work-row .row { margin-top: 6px; }
+.weekly-work-row .xs { overflow-wrap: anywhere; }
 .total-big { font-family: var(--f-display); font-weight: 700; font-size: 26px; font-variant-numeric: tabular-nums; }
 .prog { height: 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
 .prog b { display: block; height: 100%; background: var(--accent); }
@@ -450,7 +461,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.35';
+var APP_VERSION = '1.5.36';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6251,7 +6262,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.35';
+var UI_VERSION = '1.5.36';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -11136,6 +11147,57 @@ function cicilanMingguIni(u) {
   if (((S.state || {}).upah || []).some(function (s) { return s.pegawaiId === u.id && coreNum(s.potongan) > 0 && String(s.tanggal) >= per.start && String(s.tanggal) <= per.end; })) return 0;
   return n;
 }
+/* The history and printable document share the same already-calculated model. */
+function weeklyUpahHistory(hasil) {
+  var model = hasil.model || {}, rows = model.rows || [];
+  function lines(value) { return esc(value == null ? '' : value).replace(/\n/g, '<br>'); }
+  var summary = '<div class="card weekly-summary"><dl class="weekly-summary-grid">' + (model.summary || []).map(function (r) {
+    return '<div><dt>' + esc(r.label) + '</dt><dd class="num' + (r.emphasis ? ' b' : '') + '">' + esc(r.value) + '</dd></div>';
+  }).join('') + '</dl></div>';
+  var work = '<div class="card flush weekly-history"><div class="sec-h"><h3>Riwayat pekerjaan</h3><span class="small muted">' + rows.length + ' catatan terverifikasi</span></div><div class="list">' + (rows.length ? rows.map(function (r) {
+    var detail = String(r[1] == null ? '' : r[1]).split('\n'), title = detail.shift();
+    return '<div class="item weekly-work-row"><div class="grow"><div class="xs muted">' + esc(r[0]) + '</div><div class="t">' + esc(title) + '</div>' +
+      (detail.length ? '<div class="d">' + detail.map(lines).join('<br>') + '</div>' : '') + '<div class="row wrap gap-s"><span class="chip">' + esc(r[2]) + '</span><span class="xs muted">Tarif / pcs ' + esc(r[3]) + '</span></div></div><span class="b num">' + esc(r[4]) + '</span></div>';
+  }).join('') : emptyBox('Belum ada pekerjaan terverifikasi pada periode ini.')) + '</div></div>';
+  var notes = (model.sections || []).map(function (section) {
+    return '<details class="card weekly-notes"><summary class="b">' + esc(section.title) + ' <span class="chip">' + (section.rows || []).length + '</span></summary><div class="list">' + (section.rows || []).map(function (row) {
+      return '<div class="item"><dl class="kv grow">' + (section.columns || []).map(function (column, i) { return '<dt>' + esc(column.label) + '</dt><dd>' + lines(row[i]) + '</dd>'; }).join('') + '</dl></div>';
+    }).join('') + '</div></details>';
+  }).join('');
+  return summary + work + notes;
+}
+function weeklySlipScope() { var u = (S.state || {}).me || {}; return JSON.stringify([S.token || '', u.id || '', u.divisi || '']); }
+function weeklySlipSelection(u, per) {
+  S.weeklySlipSelection = { scope: weeklySlipScope(), workerId: u.id, start: per.start, end: per.end, models: S.slipDok, request: S.slipPdfRequest };
+}
+function weeklySlipButton(u, per) { return '<button class="btn pri" data-a="weeklySlipOpen" data-id="' + esc(u.id) + '" data-start="' + esc(per.start) + '" data-end="' + esc(per.end) + '">' + ic('file') + 'Lihat slip</button>'; }
+A.weeklySlipOpen = function (el) {
+  var selected = S.weeklySlipSelection, actor = (S.state || {}).me || {};
+  if (!selected || selected.scope !== weeklySlipScope() || !selected.models || !selected.models.length || !selected.request ||
+    selected.workerId !== el.getAttribute('data-id') || selected.start !== el.getAttribute('data-start') || selected.end !== el.getAttribute('data-end') ||
+    !(['owner','admin'].indexOf(actor.divisi) >= 0 || (actor.id === selected.workerId && ['jahit','potong'].indexOf(actor.divisi) >= 0))) return toast('Pilih kembali pekerja dan minggu sebelum membuka slip.', true);
+  var previous = { models: S.slipDok, request: S.slipPdfRequest, preview: S.weeklySlipPreview }, context = JSON.parse(JSON.stringify(selected));
+  context.closed = false; S.weeklySlipPreview = context; S.slipDok = context.models; S.slipPdfRequest = context.request;
+  openSheet(function () {
+    if (context.closed || context.scope !== weeklySlipScope()) return sheetHtml('Slip mingguan', '<div class="note warn">Sesi berubah. Tutup dan buka kembali slip.</div>');
+    return sheetHtml(context.models[0].title, '<p class="small muted">' + esc(context.models[0].recipient) + ' · ' + esc(context.models[0].period) + '</p><div class="slip-pratinjau">' + slipLembar(context.models) + '</div>',
+      '<button class="btn" data-a="weeklySlipCetak">Cetak A4</button><button class="btn pri" data-a="weeklySlipPdf">' + (Api.mode() === 'demo' ? 'Simpan PDF' : 'Unduh PDF') + '</button>');
+  }, { cls: 'wide', live: true, onClose: function () {
+    context.closed = true; var same = context.scope === weeklySlipScope();
+    if (S.weeklySlipPreview === context) S.weeklySlipPreview = same && previous.preview && !previous.preview.closed ? previous.preview : null;
+    if (S.slipDok === context.models) S.slipDok = same ? previous.models : [];
+    if (S.slipPdfRequest === context.request) S.slipPdfRequest = same ? previous.request : null;
+  } });
+};
+function weeklySlipExport(action, el) {
+  var context = S.weeklySlipPreview;
+  if (!context || context.closed || context.scope !== weeklySlipScope()) return toast('Sesi atau slip berubah. Buka kembali slip.', true);
+  var models = S.slipDok, request = S.slipPdfRequest;
+  S.slipDok = context.models; S.slipPdfRequest = context.request;
+  try { return action(el); } finally { S.slipDok = models; S.slipPdfRequest = request; }
+}
+A.weeklySlipCetak = function (el) { return weeklySlipExport(A.slipDokCetak, el); };
+A.weeklySlipPdf = function (el) { return weeklySlipExport(A.slipDokPdf, el); };
 function upahMingguView(division) {
   slipPasangCss();
   var st = S.state; var pekerja = st.users.filter(function (u) { return division ? u.divisi === division : u.divisi === 'jahit' || u.divisi === 'potong'; });
@@ -11155,16 +11217,17 @@ function upahMingguView(division) {
   h += payrollNotice(u);
   var hasil = slipUpahMingguan(u, per.start, per.end);
   S.slipPdfRequest = { action: 'makeWeeklyPdf', payload: { pegawaiId: u.id, start: per.start, end: per.end } };
-  if (!hasil.n && !hasil.reviewCount) { S.slipDok = []; S.slipPdfRequest = null; return h + '<div class="card">' + emptyBox('Tidak ada pekerjaan ' + u.nama + ' pada ' + tglSlip(per.start) + ' — ' + tglSlip(per.end) + '.') + '</div>' + catatanDipangkas(); }
+  if (!hasil.n && !hasil.reviewCount) { S.slipDok = []; S.slipPdfRequest = null; S.weeklySlipSelection = null; return h + '<div class="card">' + emptyBox('Tidak ada pekerjaan ' + u.nama + ' pada ' + tglSlip(per.start) + ' — ' + tglSlip(per.end) + '.') + '</div>' + catatanDipangkas(); }
   S.slipDok = [hasil.model];
+  weeklySlipSelection(u, per);
   var kasbonAktif = kasbonAktifTukang(u.id), sisaKasbon = 0; kasbonAktif.forEach(function (k) { sisaKasbon += k.sisa; });
-  h += '<div class="card row wrap"><span class="grow"><span class="label">' + esc(u.nama) + ' · ' + hasil.n + ' catatan</span><br><span class="total-big">' + rp(hasil.bersih) + '</span><br><span class="small muted">' +
+  h += '<div class="card row wrap"><span class="grow"><span class="b">' + esc(u.nama) + '</span><br><span class="small muted">' + esc(hasil.model.period) + ' · ' + hasil.n + ' catatan</span><br><span class="small muted">' +
     (hasil.belum ? 'Masih ada alokasi upah belum dibayar.' : 'Tidak ada alokasi upah belum dibayar pada catatan terverifikasi.') + (hasil.reviewCount ? ' ' + hasil.reviewCount + ' catatan masih perlu diperiksa.' : '') +
     (hasil.potonganKasbon ? ' Sudah dipotong kasbon ' + rp(hasil.potonganKasbon) + '.' : '') + (sisaKasbon > 0 ? ' Sisa kasbon ' + rp(sisaKasbon) + '.' : '') + '</span></span>' +
     '<span class="row wrap gap-s">' + (hasil.belum ? '<button class="btn" data-a="upahOpen" data-id="' + esc(u.id) + '">' + ic('wallet') + 'Bayar upah</button>' : '') +
     (kasbonAktif.length ? '<button class="btn" data-a="cicilOpen" data-id="' + esc(kasbonAktif[0].id) + '" data-tgl="' + esc(todayYmd() >= per.start && todayYmd() <= per.end ? todayYmd() : per.end) + '">Potong kasbon</button>' : '') +
-    '<button class="btn" data-a="kasbonOpen" data-v="maklon:' + esc(u.id) + '">Catat kasbon</button>' + slipDocumentActions(true) + '</span></div>';
-  try { h += '<div class="slip-pratinjau">' + slipLembar([hasil.model]) + '</div>'; } catch (e) { h += '<div class="note bad">' + esc(e.message) + '</div>'; }
+    '<button class="btn" data-a="kasbonOpen" data-v="maklon:' + esc(u.id) + '">Catat kasbon</button>' + weeklySlipButton(u, per) + '</span></div>';
+  h += weeklyUpahHistory(hasil);
   return h + catatanDipangkas();
 }
 C.umOrang = function (el) { S.f.umOrang = el.value; render(); };
@@ -11278,14 +11341,15 @@ function slipMingguSaya() {
   var hasil = slipUpahMingguan(u, per.start, per.end);
   S.slipPdfRequest = { action: 'makeWeeklyPdf', payload: { pegawaiId: u.id, start: per.start, end: per.end } };
   var h = '<div class="tools"><select data-c="umPeriode" style="flex:1 1 220px" aria-label="Pilih minggu">' + opsi.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === f.umPeriode ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') + '</select>' +
-    '<button class="btn" data-a="umRentang">Rentang lain</button>' + slipDocumentActions(hasil.n || hasil.reviewCount) + '</div>';
+    '<button class="btn" data-a="umRentang">Rentang lain</button>' + '</div>';
   h += payrollNotice(u);
-  if (!hasil.n && !hasil.reviewCount) { S.slipDok = []; S.slipPdfRequest = null; return h + '<div class="card">' + emptyBox('Tidak ada pekerjaan Anda pada ' + tglSlip(per.start) + ' — ' + tglSlip(per.end) + '. Pilih minggu lain di atas (yang bertanda ✓ ada isinya).') + '</div>'; }
+  if (!hasil.n && !hasil.reviewCount) { S.slipDok = []; S.slipPdfRequest = null; S.weeklySlipSelection = null; return h + '<div class="card">' + emptyBox('Tidak ada pekerjaan Anda pada ' + tglSlip(per.start) + ' — ' + tglSlip(per.end) + '. Pilih minggu lain di atas (yang bertanda ✓ ada isinya).') + '</div>'; }
   S.slipDok = [hasil.model];
-  h += '<div class="card row wrap"><span class="grow"><span class="label">' + esc(tglSlip(per.start) + ' — ' + tglSlip(per.end)) + ' · ' + hasil.n + ' catatan</span><br><span class="total-big">' + rp(hasil.bersih) + '</span><br><span class="small muted">' +
-    (hasil.belum ? 'Masih ada alokasi upah belum dibayar.' : 'Tidak ada alokasi upah belum dibayar pada catatan terverifikasi.') + (hasil.reviewCount ? ' ' + hasil.reviewCount + ' catatan perlu diperiksa bersama owner.' : '') + '</span></span></div>';
-  try { h += '<div class="slip-pratinjau">' + slipLembar([hasil.model]) + '</div>'; } catch (e) { h += '<div class="note bad">' + esc(e.message) + '</div>'; }
-  return h + (st.trimmed ? '<p class="xs muted">Pekerjaan pada PO yang sudah lama selesai dan sudah dibayar tidak dimuat di perangkat ini.</p>' : '');
+  weeklySlipSelection(u, per);
+  h += '<div class="card row wrap"><span class="grow"><span class="b">' + esc(tglSlip(per.start) + ' — ' + tglSlip(per.end)) + '</span><br><span class="small muted">' + hasil.n + ' catatan · ' +
+    (hasil.belum ? 'Masih ada alokasi upah belum dibayar.' : 'Tidak ada alokasi upah belum dibayar pada catatan terverifikasi.') + (hasil.reviewCount ? ' ' + hasil.reviewCount + ' catatan perlu diperiksa bersama owner.' : '') + '</span></span>' + weeklySlipButton(u, per) + '</div>';
+  h += weeklyUpahHistory(hasil);
+  return h + catatanDipangkas();
 }
 VIEWS['p-upah'] = function () {
   return '<div class="head"><div class="grow"><h1>Upah potong</h1><div class="sub">Dihitung dari jumlah pcs yang Anda catat. Slip dibuat per minggu, Senin sampai Minggu.</div></div></div>' + upahSaya();
