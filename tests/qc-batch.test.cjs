@@ -127,3 +127,80 @@ test('linked legacy repair groups use the original QC tariff, not the different 
   f.good('simpanQCGabungan',{qc:{id:'legacy-repair-1',poId:'po000001',tanggal:'2026-10-08',kelompok:refs.map(ref=>({sources:[ref],ukuran:{L:10}}))}});
   const rates=f.state().payroll.filter(r=>r.repairQcId).map(r=>r.rate).sort();assert.deepEqual(rates,[2500,3000]);
 });
+
+test('QC role gets representative groups and HMAC proofs, never accepted-receipt tariff fingerprints',()=>{
+  const f=fixture();f.change('SlipSetor','count002',{upah:3000});
+  const st=f.state('qc-session-1234567890'),sources=st.setor;
+  assert.notEqual(sources[0].qcGroupKey,sources[1].qcGroupKey);
+  for(const source of sources){
+    assert.equal(source.upah,0);assert.equal(Object.hasOwn(source,'revision'),false);
+    assert.match(source.qcGroupKey,/^qc-group:count:count00[12]$/);assert.match(source.qcRevision,/^qch1_[a-f0-9]{64}$/);
+    const raw=f.rows('SlipSetor').find(r=>r.id===source.id);
+    const guesses=f.h.run(`(function(){var r=${JSON.stringify(raw)},out=[];for(var rate=0;rate<=10000;rate++){r.upah=rate;if(coreQcSourceRevision(r,[],false)===${JSON.stringify(source.qcRevision)}||coreQcGroupKey(r,false,[])===${JSON.stringify(source.qcGroupKey)})out.push(rate);}return out;})()`);
+    assert.deepEqual(guesses,[]);
+  }
+  assert.equal(JSON.stringify(st).includes(f.h.properties.qcRevisionSecret),false);
+  assert.ok(f.state().setor.every(s=>s.revision),'owner still has receipt edit revision');
+  f.change('SlipSetor','count002',{status:'diajukan',upah:0});
+  assert.ok(f.state('qc-session-1234567890').setor.find(s=>s.id==='count002').revision,'pending physical count retains its acceptance proof');
+});
+
+test('HMAC proof survives cold requests and unrelated writes but rejects a changed source tariff',()=>{
+  const f=fixture(),input=f.intent(),before=f.state().setor.map(s=>s.qcRevision),key=f.h.properties.qcRevisionSecret;
+  f.change('Potong','cut00001',{catatan:'Unrelated note from another phone'});
+  assert.deepEqual(f.state('qc-session-1234567890').setor.map(s=>s.qcRevision),before);
+  assert.equal(f.h.properties.qcRevisionSecret,key);
+  const modified=fixture(),old=modified.intent();modified.change('SlipSetor','count002',{upah:3000});noWrite(modified,old,/berubah sejak/);
+  assert.equal(data(f.good('simpanQCGabungan',input)).records.length,2);
+});
+
+test('QC signing key creation double-checks under the store lock, supports nesting, and stays cached per request',()=>{
+  const h=harness(),props=h.context.PropertiesService.getScriptProperties(),oldLock=h.context.LockService.getScriptLock;
+  let generated=0;h.context.Utilities.getUuid=()=>{generated++;return 'unused-new-key';};
+  h.context.LockService.getScriptLock=()=>{const lock=oldLock();return {waitLock(){lock.waitLock();props.setProperty('qcRevisionSecret','synthetic-key-from-competing-request');},releaseLock(){lock.releaseLock();}};};
+  const first=client(h),signed=first.run(`var environment=pkEnv_(); environment.signQcRevision('same source')`);
+  assert.equal(generated,0);assert.equal(h.events.filter(e=>e[0]==='lock').length,1);
+  first.run(`environment.signQcRevision('another source')`);assert.equal(h.events.filter(e=>e[0]==='lock').length,1);
+  assert.equal(client(h).run(`pkEnv_().signQcRevision('same source')`),signed);
+  const nested=harness();assert.match(client(nested).run(`pkStore_().lock(function(){return pkEnv_().signQcRevision('nested');})`),/^qch1_[a-f0-9]{64}$/);assert.equal(nested.events.filter(e=>e[0]==='lock').length,1);
+});
+
+test('signing-key persistence failure blocks QC writes, and an uncertain persisted key is reused without rotation',()=>{
+  for(const persistFirst of [false,true]){
+    const f=fixture(),input=f.intent(),props=f.h.context.PropertiesService.getScriptProperties(),set=props.setProperty.bind(props),before=f.h.sheets.QC.writes;
+    props.deleteProperty('qcRevisionSecret');
+    props.setProperty=(name,value)=>{if(name==='qcRevisionSecret'){if(persistFirst)set(name,value);throw new Error('Synthetic secret property interruption');}return set(name,value);};
+    const result=f.call('simpanQCGabungan',input);assert.equal(result.ok,false);assert.match(result.error,/secret property interruption/);assert.equal(f.h.sheets.QC.writes,before);assert.equal(f.h.isLocked(),false);
+    const saved=f.h.properties.qcRevisionSecret;assert.equal(Boolean(saved),persistFirst);props.setProperty=set;
+    f.state();assert.ok(f.h.properties.qcRevisionSecret);if(persistFirst)assert.equal(f.h.properties.qcRevisionSecret,saved);
+  }
+});
+
+test('production core cannot silently emit unsigned QC proofs when paired with an older adapter',()=>{
+  const f=fixture(),c=client(f.h);
+  assert.throws(()=>c.run(`var noSigner=pkEnv_();delete noSigner.signQcRevision;createCore(pkStore_(),noSigner).handle('getState',{token:${JSON.stringify(f.token)},clientVersion:APP_VERSION})`),/Server perlu diperbarui/);
+});
+
+test('QC response hides assignment tariff fingerprints and legacy QC wages without changing signed source proofs',()=>{
+  const f=fixture();f.h.cold();f.h.run(`pkStore_().lock(function(){pkStore_().append('QC',{
+    id:'legacy-qc-money',poId:'po000001',maklonId:'sewer001',setorId:'count001',tanggal:'2026-10-07',ukuran:'{"M":10,"L":40}',total:50,perbaikan:10,perbaikanUkuran:'{"L":10}',upah:2500,upahId:'LAMA',workflowVersion:1,imporSumber:'{"baseline":true,"skuId":"sku-a","siklus":"cycle-a","entryId":"qc-a","field":"qc"}'
+  });});true`);
+  const owner=f.state(),qc=f.state('qc-session-1234567890'),visible=qc.qc.find(q=>q.id==='legacy-qc-money'),original=owner.qc.find(q=>q.id===visible.id);
+  assert.equal(qc.kirim[0].upah,0);assert.equal(Object.hasOwn(qc.kirim[0],'revision'),false);
+  assert.equal(visible.upah,0);assert.equal(visible.upahId,'x');assert.equal(original.upah,2500);assert.equal(original.upahId,'LAMA');
+  assert.equal(visible.qcRevision,original.qcRevision);assert.equal(visible.qcGroupKey,original.qcGroupKey);assert.deepEqual(visible.ukuran,original.ukuran);assert.deepEqual(visible.perbaikanUkuran,original.perbaikanUkuran);
+  assert.equal(f.rows('QC')[0].upah,2500);assert.equal(f.rows('QC')[0].upahId,'LAMA');
+});
+
+test('a repair proof binds its linked count snapshot, including a physical-sheet tariff change',()=>{
+  const f=fixture(),input=f.intent();input.qc.kelompok[0].ukuran={M:10,L:132};input.qc.kelompok[0].perbaikanUkuran={L:10};
+  const inspected=data(f.good('simpanQCGabungan',input)),base=f.state('qc-session-1234567890').qc.find(q=>q.id===inspected.records[1].id);
+  const repair={token:'qc-session-1234567890',qc:{id:'repair-frozen-1',poId:'po000001',tanggal:'2026-10-10',kelompok:[{sources:[{repairQcId:base.id,expectedRevision:base.qcRevision}],ukuran:{L:10}}]}};
+  // The ordinary app forbids repricing an inspected source. An announced
+  // physical-sheet correction must nevertheless invalidate an open repair form.
+  f.change('SlipSetor','count002',{upah:3500});
+  noWrite(f,repair,/berubah sejak/);
+  const refreshed=f.state('qc-session-1234567890').qc.find(q=>q.id===base.id);assert.notEqual(refreshed.qcRevision,base.qcRevision);
+  repair.qc.kelompok[0].sources[0].expectedRevision=refreshed.qcRevision;
+  assert.equal(data(f.good('simpanQCGabungan',repair)).records.length,1);
+});
