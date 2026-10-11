@@ -6,6 +6,28 @@ function pkProps_() {
   if (!PK_PROPS_) PK_PROPS_ = PropertiesService.getScriptProperties().getProperties() || {};
   return PK_PROPS_;
 }
+function pkSnapshotKey_(p) { return [String(p.ver || '0'), String(p.ve || '0'), String(p.pendingWrite || '')].join('|'); }
+/* A business write may reach Sheets before this execution is interrupted.
+   The marker is durable before the first value change and is cleared in the
+   same property publication as the committed versions. Recovery invalidates
+   every row-cache epoch; it does not undo or repeat any business operation. */
+function pkRecoverWriteLocked_(p) {
+  if (!p.pendingWrite) return p;
+  SpreadsheetApp.flush();
+  var next = { ver: String(Number(p.ver || 0) + 1), ve: String(Number(p.ve || 0) + 1), pendingWrite: '', mig: '1' };
+  PropertiesService.getScriptProperties().setProperties(next, false);
+  for (var key in next) p[key] = next[key];
+  return p;
+}
+function pkRecoverWrite_() {
+  if (!pkProps_().pendingWrite) return;
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(25000); } catch (e) { throw new Error('Penyimpanan perangkat lain belum selesai. Periksa data terbaru sebentar lagi.'); }
+  try {
+    PK_PROPS_ = pkRecoverWriteLocked_(PropertiesService.getScriptProperties().getProperties() || {});
+    PK_STORE_ = null;
+  } finally { lock.releaseLock(); }
+}
 /* Versioned production rows can survive a work break. Google may evict these
    earlier; cache misses still read Sheets. Keep the account-cache lifetime
    unchanged, and always recheck physical account rows for staged sign-in. */
@@ -27,6 +49,7 @@ function pkStore_() {
   var props = PropertiesService.getScriptProperties();
   var ss = null; var tz = null;
   var cache = {}; var cacheMiss = {}; var depth = 0; var dirty = false; var businessDirty = false; var ver = null; var kotor = {};
+  var writeMarked = false; var attemptedBusinessWrite = false;
   var settingsReadInLock = false; var settingsNeedsFlush = false;
   var readCacheBatch = 0; var readCacheQueue = {};
   var sc = null; var scMati = false;
@@ -195,21 +218,37 @@ function pkStore_() {
     var start = t.last + 1;
     /* Capacity is needed only when appending, never for a read or row update.
        A prior full read/fresh/checkpoint can therefore be reused without it. */
-    if (t.max === undefined) t.max = t.sh.getMaxRows();
-    var kurang = start + data.length - 1 - t.max;
-    if (kurang > 0) { t.sh.insertRowsAfter(t.max, kurang + 200); t.max += kurang + 200; }
-    var range = t.sh.getRange(start, 1, data.length, t.head.length);
-    var fmt = fmtRow(t.head)[0];
-    range.setNumberFormats(data.map(function () { return fmt; }));
-    range.setValues(data.map(function (o) { return toArray(t, o, null); }));
-    data.forEach(function (o, i) { t.rows.push(o); t.rowNo[o[k]] = start + i; });
-    t.last += data.length; changed(name);
+    var values = data.map(function (o) { return toArray(t, o, null); });
+    mutate(name, function () {
+      if (t.max === undefined) t.max = t.sh.getMaxRows();
+      var kurang = start + data.length - 1 - t.max;
+      if (kurang > 0) { t.sh.insertRowsAfter(t.max, kurang + 200); t.max += kurang + 200; }
+      var range = t.sh.getRange(start, 1, data.length, t.head.length);
+      var fmt = fmtRow(t.head)[0];
+      range.setNumberFormats(data.map(function () { return fmt; }));
+      range.setValues(values);
+      data.forEach(function (o, i) { t.rows.push(o); t.rowNo[o[k]] = start + i; });
+      t.last += data.length;
+    });
   }
   function changed(name, privateAuthOnly) {
     delete readCacheQueue[name];
     dirty = true; kotor[name] = 1;
     if (!privateAuthOnly) businessDirty = true;
     if (name === 'Pengaturan') { settingsReadInLock = false; settingsNeedsFlush = true; }
+  }
+  /* A Sheets call can persist and then throw (for example a lost response).
+     Invalidate this table even when success cannot be confirmed. Never publish
+     the in-memory before-image as the new version after an uncertain write. */
+  function mutate(name, fn, privateAuthOnly) {
+    if (!privateAuthOnly && !writeMarked) {
+      /* If the marker cannot be stored, do not begin a physical mutation. */
+      props.setProperty('pendingWrite', '1'); pkProps_().pendingWrite = '1'; writeMarked = true;
+    }
+    changed(name, privateAuthOnly);
+    if (!privateAuthOnly) attemptedBusinessWrite = true;
+    try { return fn(); }
+    catch (err) { delete cache[name]; delete readCacheQueue[name]; if (!privateAuthOnly) err.uncertain = true; throw err; }
   }
   function version() {
     if (ver === null) ver = Number(pkProps_().ver || 0);
@@ -279,23 +318,27 @@ function pkStore_() {
       for (var p in patch) if (SCHEMA[name].indexOf(p) >= 0) next[p] = fromCell(p, toCell(p, patch[p]));
       var range = t.sh.getRange(r, 1, 1, t.head.length);
       var base = t.extra ? range.getValues()[0] : null;
-      range.setNumberFormats(fmtRow(t.head));
-      range.setValues([toArray(t, next, base)]);
-      for (var field in next) obj[field] = next[field];
+      var values = [toArray(t, next, base)];
       /* Session tokens and PIN-attempt counters are not part of publicUser.
          Publish their account-table version normally, without forcing every
          colleague to download the full production state after each sign-in. */
       var patchKeys = Object.keys(patch);
-      changed(name, name === 'Pegawai' && patchKeys.length > 0 && patchKeys.every(function (key) { return ['token','gagal','kunci'].indexOf(key) >= 0; }));
+      mutate(name, function () {
+        range.setNumberFormats(fmtRow(t.head));
+        range.setValues(values);
+        for (var field in next) obj[field] = next[field];
+      }, name === 'Pegawai' && patchKeys.length > 0 && patchKeys.every(function (key) { return ['token','gagal','kunci'].indexOf(key) >= 0; }));
     },
     remove: function (name, id) {
       if (name === 'Pengaturan') migBelumPasti();
       var t = load(name, true); var k = keyOf(name); var r = t.rowNo[id]; if (!r) return;
-      t.sh.deleteRow(r);
-      t.rows = t.rows.filter(function (x) { return x[k] !== id; });
-      delete t.rowNo[id];
-      for (var key in t.rowNo) if (t.rowNo[key] > r) t.rowNo[key]--;
-      t.last--; if (t.max !== undefined) t.max--; changed(name);
+      mutate(name, function () {
+        t.sh.deleteRow(r);
+        t.rows = t.rows.filter(function (x) { return x[k] !== id; });
+        delete t.rowNo[id];
+        for (var key in t.rowNo) if (t.rowNo[key] > r) t.rowNo[key]--;
+        t.last--; if (t.max !== undefined) t.max--;
+      });
     },
     replaceAll: function (name, list) {
       if (name === 'Pengaturan') migBelumPasti();
@@ -305,19 +348,22 @@ function pkStore_() {
       if (lastRow > 1) {
         var body = t.sh.getRange(2, 1, lastRow - 1, lebar);
         if (t.extra) { var idCol = t.head.indexOf(k); body.getValues().forEach(function (v) { if (v[idCol] !== '') lamaById[String(v[idCol])] = v; }); }
-        body.clearContent();
       }
-      if (data.length) {
-        var kurang = data.length + 1 - t.sh.getMaxRows();
-        if (kurang > 0) t.sh.insertRowsAfter(t.sh.getMaxRows(), kurang + 200);
-        var range = t.sh.getRange(2, 1, data.length, lebar);
-        var fmt = fmtRow(t.head)[0];
-        range.setNumberFormats(data.map(function () { return fmt; }));
-        range.setValues(data.map(function (o) { return toArray(t, o, lamaById[String(o[k])] || null); }));
-      }
-      t.rows = data; t.rowNo = {}; data.forEach(function (o, i) { t.rowNo[o[k]] = i + 2; });
-      t.last = data.length + 1; t.max = t.sh.getMaxRows(); t.ringan = false; cache[name] = t;
-      changed(name);
+      /* Replace rows and clear the old tail in one value write. Clearing the
+         whole body first could lose every row if the following write failed. */
+      var values = data.map(function (o) { return toArray(t, o, lamaById[String(o[k])] || null); });
+      while (values.length < lastRow - 1) values.push(t.head.map(function () { return ''; }));
+      mutate(name, function () {
+        var max = t.sh.getMaxRows(), kurang = values.length + 1 - max;
+        if (kurang > 0) { t.sh.insertRowsAfter(max, kurang + 200); max += kurang + 200; }
+        if (values.length) {
+          var range = t.sh.getRange(2, 1, values.length, lebar), fmt = fmtRow(t.head)[0];
+          range.setNumberFormats(values.map(function () { return fmt; }));
+          range.setValues(values);
+        }
+        t.rows = data; t.rowNo = {}; data.forEach(function (o, i) { t.rowNo[o[k]] = i + 2; });
+        t.last = data.length + 1; t.max = max; t.ringan = false; cache[name] = t;
+      });
     },
     getSettings: function () {
       var out = {}; load('Pengaturan').rows.forEach(function (r) { out[r.key] = coreParseJSON(r.value, r.value); });
@@ -357,10 +403,13 @@ function pkStore_() {
       if (depth > 0) return fn();
       var lk = LockService.getScriptLock();
       try { lk.waitLock(25000); } catch (e) { throw new Error('Server sedang sibuk. Coba lagi beberapa detik lagi.'); }
-      depth = 1; cache = {}; cacheMiss = {}; dirty = false; businessDirty = false; kotor = {}; settingsReadInLock = false; settingsNeedsFlush = false;
-      PK_PROPS_ = null; var pv = pkProps_();
-      ver = Number(pv.ver || 0);
-      try { return fn(); }
+      depth = 1; cache = {}; cacheMiss = {}; dirty = false; businessDirty = false; writeMarked = false; kotor = {}; settingsReadInLock = false; settingsNeedsFlush = false;
+      var pv, operationError = null;
+      try {
+        PK_PROPS_ = null; pv = pkRecoverWriteLocked_(pkProps_());
+        ver = Number(pv.ver || 0);
+        return fn();
+      } catch (error) { operationError = error; throw error; }
       finally {
         var galatSimpan = null;
         try {
@@ -368,8 +417,10 @@ function pkStore_() {
           if (dirty) {
             dirty = false;
             var nextVer = ver + (businessDirty ? 1 : 0);
-            var naik = businessDirty ? { ver: String(nextVer) } : {}; var nama = Object.keys(kotor); var kunciLama = {};
+            var naik = businessDirty ? { ver: String(nextVer), pendingWrite: '' } : {}; var nama = Object.keys(kotor); var kunciLama = {};
             nama.forEach(function (n) { kunciLama[n] = kunciCache(n, String(pv['v_' + n] || '0')); naik['v_' + n] = String(Number(pv['v_' + n] || 0) + 1); });
+            /* A failed flush leaves the durable marker for the next request. */
+            if (galatSimpan && businessDirty) delete naik.pendingWrite;
             try { props.setProperties(naik, false); }
             catch (e2) {
               var c = lemari(); if (c) nama.forEach(function (n) { try { c.remove(kunciLama[n]); } catch (e3) {} });
@@ -381,9 +432,11 @@ function pkStore_() {
           }
           if (galatSimpan) throw galatSimpan;
         }
-        finally { depth = 0; dirty = false; businessDirty = false; settingsReadInLock = false; settingsNeedsFlush = false; lk.releaseLock(); }
+        catch (commitError) { if (attemptedBusinessWrite) { commitError.uncertain = true; if (operationError) operationError.uncertain = true; } throw operationError || commitError; }
+        finally { depth = 0; dirty = false; businessDirty = false; writeMarked = false; settingsReadInLock = false; settingsNeedsFlush = false; lk.releaseLock(); }
       }
     },
+    attemptedBusinessWrite: function () { return attemptedBusinessWrite; },
     version: version,
     fresh: function (name) { load(name, true); },
     /* benar kalau semua tabel itu sudah ada di cache (atau sudah dibaca pada eksekusi ini), tanpa membuka spreadsheet */
@@ -414,6 +467,7 @@ function pkStore_() {
 }
 function pkEnv_() {
   return {
+    enforceClientVersion: true,
     now: function () { return new Date(); },
     id: function () { return Utilities.getUuid().replace(/-/g, '').slice(0, 16); },
     makePdf: function (html, name) { return Utilities.base64Encode(Utilities.newBlob(html, 'text/html', name).getAs('application/pdf').getBytes()); }
@@ -433,17 +487,36 @@ function pkSetup_() {
 function pkRun_(text) {
   try {
     var reqObj = JSON.parse(text);
+    /* Apps Script requests normally have fresh globals. Reset explicitly so a
+       reused execution can never retain another request's pre-lock rows. */
+    PK_PROPS_ = null; PK_STORE_ = null;
+    pkRecoverWrite_();
     pkSetup_();
     var store = pkStore_();
     return store.withReadCacheBatch(function () {
       var core = createCore(store, pkEnv_());
       var data = core.handle(String(reqObj.action || ''), reqObj.payload || {});
+      /* An unlocked read may straddle a colleague's multi-table commit. Reject
+         that response rather than publishing a partial snapshot. Own locked
+         commits update pkProps_, so they compare against their final version. */
+      var expected = pkSnapshotKey_(pkProps_());
+      var latest = PropertiesService.getScriptProperties().getProperties() || {};
+      if (latest.pendingWrite || expected !== pkSnapshotKey_(latest)) {
+        var stale = new Error('Data berubah saat dimuat. Periksa data terbaru sebelum melanjutkan.');
+        stale.retryable = true; if (store.attemptedBusinessWrite()) stale.uncertain = true; throw stale;
+      }
       /* aplikasi di GitHub Pages boleh memakai jembatan (lihat pkJembatan_); angka lain atau tidak ada = jangan dipakai */
       if (reqObj.action === 'bootstrap' && data && typeof data === 'object') data.jembatan = PK_JEMBATAN_;
       return { ok: true, data: data };
     });
   } catch (err) {
-    return { ok: false, error: String((err && err.message) || err) };
+    var failure = { ok: false, error: String((err && err.message) || err) };
+    if (err && err.updateRequired === true) { failure.updateRequired = true; failure.appVersion = APP_VERSION; }
+    /* This also covers a late response/fence failure after a physical mutation
+       succeeded. A failed response must never imply that nothing was saved. */
+    if (err && err.uncertain === true || store && store.attemptedBusinessWrite()) failure.uncertain = true;
+    if (err && err.retryable === true) failure.retryable = true;
+    return failure;
   }
 }
 function api(text) { return JSON.stringify(pkRun_(text)); }
@@ -488,7 +561,11 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify(pkRun_(text))).setMimeType(ContentService.MimeType.JSON);
 }
 function onEdit(e) {
+  var lk = null, acquired = false;
   try {
+    /* Share the app's commit lock: two read/increment/write operations on the
+       version properties must not publish the same version for different edits. */
+    lk = LockService.getScriptLock(); lk.waitLock(25000); acquired = true;
     var props = PropertiesService.getScriptProperties();
     var naik = { ver: String(Number(props.getProperty('ver') || 0) + 1) };
     var nama = ''; try { nama = (e && e.range) ? e.range.getSheet().getName() : ''; } catch (x) {}
@@ -497,7 +574,9 @@ function onEdit(e) {
     /* tab Pengaturan (atau tab yang tidak dikenali) diedit langsung: status pemulihan diperiksa lagi dari sheet */
     if (nama === 'Pengaturan' || !SCHEMA[nama]) naik.mig = '1';
     props.setProperties(naik, false);
+    PK_PROPS_ = null;
   } catch (err) {}
+  finally { if (acquired) { try { lk.releaseLock(); } catch (ignored) {} } }
 }
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Aplikasi Produksi')
