@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.33';
+var APP_VERSION = '1.5.34';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -395,6 +395,27 @@ function coreActiveSizes(po) {
     seen[s]=true;
   }
   return {valid:true,ukuran:coreSizeOrder(sizes.slice())};
+}
+/* Assignment availability follows the same size contract as strictSizes.
+   Historical counts remain visible, but closed source sizes and inspected
+   sizes cannot become new sewing work merely because an old dispatch is absent. */
+function coreKirimAvailability(po, flow, defaultSizes) {
+  var out = { total: 0, ukuran: {} };
+  if (!po || po.status !== 'aktif' || !flow || !flow.ukuran || (flow.blockingIssues || flow.issues || []).length) return out;
+  var evidence = coreLegacyCuttingEvidence(po), active = evidence ? null : coreActiveSizes(po);
+  /* Worker responses omit source provenance. This size-only projection is
+     computed by coreWorkflow; write actions also recompute it from stored rows. */
+  if (!evidence && !active && flow.cutting && flow.cutting.verified === true && flow.cutting.ukuran instanceof Array) evidence = { valid: true, ukuran: flow.cutting.ukuran };
+  if (active && !active.valid) return out;
+  var allowed = active && active.valid ? active.ukuran.slice() : Object.keys(coreMap(po.ukuran));
+  if (evidence && evidence.valid) evidence.ukuran.forEach(function (size) { if (allowed.indexOf(size) < 0) allowed.push(size); });
+  if (!allowed.length) allowed = defaultSizes instanceof Array ? defaultSizes : [];
+  allowed.forEach(function (size) {
+    var u = flow.ukuran[size]; if (!u || coreNum(u.qcOk) + coreNum(u.qcOffline) + coreNum(u.qcReject) + coreNum(u.qcPerbaikan) > 0) return;
+    var n = Math.max(0, coreNum(u.potong) - coreNum(u.kirim));
+    if (n > 0) { out.ukuran[size] = n; out.total += n; }
+  });
+  return out;
 }
 function coreCuttingProjection(poRows, physicalCuts, lepas) {
   lepas = coreMap(lepas);
@@ -2205,8 +2226,8 @@ function createCore(store, env) {
     var po = openPO(k.poId);
     var maklon = findUser(String(k.maklonId || '')); if (!maklon || maklon.divisi !== 'jahit' || !maklon.aktif) fail('Pilih maklon jahit yang aktif.');
     var ukuran = strictSizes(k.ukuran, po, false);
-    var total = coreSumSizes(ukuran); var wf = poClean(po);
-    Object.keys(ukuran).forEach(function (s) { var u = wf.ukuran[s]; if (!u || ukuran[s] > u.potong - u.kirim) fail('Penugasan ' + s + ' melebihi hasil potong yang belum dikirim.'); if (u.qcOk + u.qcOffline + u.qcReject + u.qcPerbaikan > 0) fail('Ukuran ' + s + ' sudah masuk QC.'); });
+    var total = coreSumSizes(ukuran); var wf = poClean(po), available = coreKirimAvailability(po, wf, settings().ukuran);
+    Object.keys(ukuran).forEach(function (s) { var u = wf.ukuran[s]; if (u && u.qcOk + u.qcOffline + u.qcReject + u.qcPerbaikan > 0) fail('Ukuran ' + s + ' sudah masuk QC.'); if (ukuran[s] > coreNum(available.ukuran[s])) fail('Penugasan ' + s + ' melebihi hasil potong yang belum dikirim.'); });
     if (total <= 0) fail('Isi jumlah pcs yang dikirim.');
     var tanggal = tglOk(k.tanggal) || today();
     var st = settings();
@@ -5384,6 +5405,12 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       if(!(r.items instanceof Array)||!r.items.length||r.items.length>100)fail('Isi 1 sampai 100 baris barang.');var seen={};
       out.items=r.items.map(function(i){var x={id:id(i.id)};if(seen[x.id])fail('Identitas baris barang ganda.');seen[x.id]=true;
         if(kind==='order'){x.nama=text(i.nama,120,true);x.jumlah=num(i.jumlah,1e8,true,true);}else{x.name=text(i.name,120,true);x.size=text(i.size,40);x.color=text(i.color,60);x.qty=num(i.qty,1e8,true,true);x.price=num(i.price,1e12,false,true);x.discPercent=num(i.discPercent===undefined?0:i.discPercent,100,false,false);x.subtotal=Math.round(x.qty*x.price*(100-x.discPercent)/100);if(!Number.isSafeInteger(x.subtotal))fail('Subtotal terlalu besar.');}return x;});
+      if(kind==='order'){var names=Object.create(null),duplicate=false;out.items.forEach(function(i){var name=i.nama.replace(/\s+/g,' ').toLowerCase();if(names[name])duplicate=true;names[name]=true;});
+        /* An unchanged historical list may still receive metadata/price edits. Never
+           add, reorder, rename or increase duplicate rows, nor guess receipt links. */
+        var unchanged=old&&old.items instanceof Array&&old.items.length===out.items.length&&out.items.every(function(i,n){var prior=old.items[n];return prior&&i.id===prior.id&&i.nama===String(prior.nama==null?'':prior.nama).trim()&&i.jumlah===Number(prior.jumlah);});
+        if(duplicate&&!unchanged)fail('Nama varian ganda dalam satu model. Gabungkan jumlah pada varian yang sama atau gunakan nama yang berbeda.');
+      }
       if(kind==='order'){out.produkId=id(r.produkId);var product=find('pembelian','product',out.produkId),pd=coreCommerceData(product),supplier=find('pembelian','supplier',pd.supplierId),sd=coreCommerceData(supplier),sameProduct=old&&old.produkId===out.produkId&&old.productSnapshot&&old.productSnapshot.id&&old.supplierSnapshot&&old.supplierSnapshot.id;if(!sameProduct&&(!product||!supplier||pd.aktif===false||sd.aktif===false))fail('Produk atau supplier pembelian tidak ditemukan atau tidak aktif.');out.productSnapshot=sameProduct?old.productSnapshot:{id:pd.id,nama:pd.nama,model:pd.model||'',warna:pd.warna||'',supplierId:pd.supplierId};out.supplierSnapshot=sameProduct?old.supplierSnapshot:{id:sd.id,nama:sd.nama,kontak:sd.kontak||'',alamat:sd.alamat||''};out.grupNama=text(r.grupNama,100);out.hargaSatuan=num(r.hargaSatuan,1e12,false,true);out.tanggalOrder=date(r.tanggalOrder);out.totalHarga=out.items.reduce(function(n,i){return n+i.jumlah*out.hargaSatuan;},0);out.catatan=text(r.catatan,1000);if(!Number.isSafeInteger(out.totalHarga))fail('Total terlalu besar.');}
       else{var c=r.customer||{};out.customer={name:text(c.name,120,true),phone:text(c.phone,60),address:text(c.address,400),type:c.type==='reseller'?'reseller':'walkin'};out.date=date(r.date);out.discountPercent=num(r.discountPercent===undefined?0:r.discountPercent,100,false,false);out.shipping=num(r.shipping===undefined?0:r.shipping,1e12,false,true);out.subtotal=out.items.reduce(function(n,i){return n+i.subtotal;},0);out.discountAmount=Math.round(out.subtotal*out.discountPercent/100);out.total=out.subtotal-out.discountAmount+out.shipping;out.notes=text(r.notes,1000);if(!Number.isSafeInteger(out.total))fail('Total terlalu besar.');}
       out.cancelled=old?!!old.cancelled:false;if(out.cancelled)fail('Catatan yang dibatalkan tidak dapat diubah.');
