@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.33 — beberapa model dalam satu invoice pembelian
+
+- **Order baru** menerima beberapa model sekaligus untuk satu supplier. Setiap model memiliki produk, jumlah/varian, dan harga sendiri; tanggal, nama invoice, catatan, dan DP diisi sekali. Ringkasan menghitung total seluruh model dan sisa pembayaran.
+- Aksi `saveCommerceOrderBatch` memvalidasi seluruh invoice sebelum satu penulisan kumpulan order. Identitas invoice dan bukti isi permintaan mencegah pengiriman ulang membuat order atau DP ganda. Jika hasil penyimpanan tidak pasti, aplikasi memeriksa seluruh model sebelum menyatakan berhasil.
+- DP awal invoice dibagi dalam rupiah bulat menurut nilai model dan tampil sebagai satu pembayaran gabungan. Edit order, koreksi pembayaran/penerimaan, nonaktifkan, dan arsip tetap memakai riwayat yang sama.
+- Tidak ada migrasi atau penggantian data order lama. Terbitkan core dan tampilan Apps Script bersama dengan PWA agar versi server dan aplikasi sesuai.
+
 ## Rilis 1.5.32 — penggunaan bersama dan status PO supplier
 
 - Formulir menyimpan revisi data saat dibuka. Edit PO, stok, tarif, hitung fisik, target jahit, dan pembayaran upah menolak data yang berubah di perangkat lain. Pengaturan serta aksi administratif umum memakai versi data pusat. Identitas pengiriman ulang terikat pada isi dan pengguna; tidak dipakai untuk menimpa perubahan yang lebih baru.
