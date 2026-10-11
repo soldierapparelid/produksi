@@ -426,7 +426,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261011-baca-tahan-gangguan-1526';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261011-jembatan-1527';</script>
 <script>
 (function () {
 'use strict';
@@ -448,7 +448,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.25';
+var APP_VERSION = '1.5.27';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6062,7 +6062,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.26';
+var UI_VERSION = '1.5.27';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -6315,6 +6315,75 @@ var Api = (function () {
   var BACA_SUSUL = /^(bootstrap|sync|getState|getCommerceState)$/;
   var BACA_ULANG = /^(getGambar|cekGambar|getHistoryCorrection|previewLegacyMigration|getCommerceImages|previewCommerceImport)$/;
   var SUSUL_MS = 5000;
+
+  /* Jembatan: jalur kedua ke server yang sama. Jawaban doPost diantar Google lewat alamat terpisah (macros/echo) dan bisa
+     hilang di sana. Halaman kecil dari server (doGet ?jembatan=1) dimuat di bingkai tersembunyi dan meneruskan permintaan
+     lewat google.script.run, yang jawabannya kembali langsung. Dipakai hanya bila server menyatakan boleh (bootstrap
+     .jembatan === 1, diingat di pk_jembatan) dan aplikasi tidak sedang dibingkai situs lain. Pesan hanya diterima dari
+     dalam bingkai itu sendiri. Bila jembatan belum siap atau tidak menjawab, jalur biasa (fetch) yang dipakai. */
+  var ASAL_JEMBATAN = /^https:\/\/n-[a-z0-9-]+-script\.googleusercontent\.com$/;
+  var JEMBATAN_TUNGGU = 8000, JEMBATAN_SIAP_TUNGGU = 4000, JEMBATAN_MUAT_MAKS = 15000, JEMBATAN_UMUR = 30 * 60000;
+  var J = { frame: null, win: null, asal: '', siap: false, mati: false, dengar: false, mulai: 0, gagal: 0, n: 0, tunggu: {}, antre: [] };
+  function jembatanDari(w) {
+    var induk = J.frame && J.frame.contentWindow; if (!induk || !w) return false;
+    try { for (var i = 0; i < 5 && w; i++) { if (w === induk) return true; if (w.parent === w) break; w = w.parent; } } catch (e) {}
+    return false;
+  }
+  function jembatanPesan(ev) {
+    var d = ev && ev.data; if (!d || typeof d !== 'object' || !ASAL_JEMBATAN.test(String(ev.origin || '')) || !jembatanDari(ev.source)) return;
+    if (d.pk === 'jembatan-siap') {
+      J.win = ev.source; J.asal = ev.origin; J.siap = true;
+      var antre = J.antre; J.antre = []; antre.forEach(function (fn) { fn(); });
+    } else if (d.pk === 'api' && J.tunggu[d.id]) { var fn = J.tunggu[d.id]; delete J.tunggu[d.id]; fn(d); }
+  }
+  function jembatanMulai() {
+    if (gas || !remoteUrl || J.frame || J.mati) return;
+    if (typeof document === 'undefined' || !document.createElement || typeof window.addEventListener !== 'function') return;
+    try { if (window.top !== window.self) { J.mati = true; return; } } catch (e) { J.mati = true; return; }
+    if (!J.dengar) { J.dengar = true; window.addEventListener('message', jembatanPesan); }
+    var pasang = function () {
+      if (J.frame || J.mati || !remoteUrl || !document.body) return;
+      var f = document.createElement('iframe');
+      f.setAttribute('aria-hidden', 'true'); f.setAttribute('tabindex', '-1'); f.setAttribute('title', 'Sambungan server');
+      f.setAttribute('style', 'position:absolute;left:-9999px;top:0;width:0;height:0;border:0');
+      f.src = remoteUrl + '?jembatan=1';
+      J.frame = f; J.mulai = Date.now(); document.body.appendChild(f);
+    };
+    if (document.body) pasang(); else if (typeof document.addEventListener === 'function') document.addEventListener('DOMContentLoaded', pasang);
+  }
+  function jembatanBuang() {
+    if (J.frame && J.frame.parentNode) J.frame.parentNode.removeChild(J.frame);
+    J.frame = null; J.win = null; J.asal = ''; J.siap = false; J.antre = [];
+    var tunggu = J.tunggu; J.tunggu = {}; Object.keys(tunggu).forEach(function (k) { tunggu[k]({ ok: false, e: 'jembatan' }); });
+  }
+  function jembatanKeadaan() {
+    if (!J.frame || J.mati) return 'tidak';
+    /* halaman jembatan yang terlalu lama terbuka diganti yang baru selagi tidak ada permintaan yang ditunggu */
+    if (J.siap && Date.now() - J.mulai > JEMBATAN_UMUR && !Object.keys(J.tunggu).length) { jembatanBuang(); jembatanMulai(); }
+    if (J.siap) return 'siap';
+    return J.frame && Date.now() - J.mulai < JEMBATAN_MUAT_MAKS ? 'muat' : 'tidak';
+  }
+  function jembatanSaatSiap(fn) { J.antre.push(fn); }
+  /* selesai(d): d.ok + d.s (teks jawaban), atau d.ok false (+ d.belum bila permintaan pasti belum sampai ke server) */
+  function jembatanKirim(body, selesai) {
+    var id = 'j' + (++J.n);
+    J.tunggu[id] = selesai;
+    try { J.win.postMessage({ pk: 'api', id: id, body: body }, J.asal); }
+    catch (e) { delete J.tunggu[id]; setTimeout(function () { selesai({ ok: false, belum: true, e: 'jembatan' }); }, 0); return function () {}; }
+    return function () { delete J.tunggu[id]; };
+  }
+  function jembatanHasil(baik) {
+    if (baik) { J.gagal = 0; return; }
+    J.gagal++;
+    /* jembatan yang tidak menjawab dibuat lagi di belakang layar; kalau terus gagal, perangkat ini memakai jalur biasa saja */
+    if (J.gagal >= 6) { jembatanBuang(); J.mati = true; }
+    else if (!Object.keys(J.tunggu).length) { jembatanBuang(); jembatanMulai(); }
+  }
+  function jembatanIzin(res) {
+    if (!res || !res.ok || !res.data) return;
+    if (res.data.jembatan === 1) { if (LS.get('pk_jembatan') !== '1') LS.set('pk_jembatan', '1'); jembatanMulai(); }
+    else { if (LS.get('pk_jembatan') && LS.del) LS.del('pk_jembatan'); jembatanBuang(); }
+  }
   function call(action, payload) {
     var body = JSON.stringify({ action: action, payload: payload || {} });
     return new Promise(function (resolve, reject) {
@@ -6346,9 +6415,13 @@ var Api = (function () {
           .withFailureHandler(failure)
           .api(body);
       } else if (remoteUrl) {
-        var susul = BACA_SUSUL.test(action), maks = susul ? 6 : (BACA_ULANG.test(action) ? 3 : 1);
-        var dikirim = 0, jalan = 0, kendali = [], jeda = null;
-        controller = { abort: function () { clearTimeout(jeda); kendali.forEach(function (k) { try { k.abort(); } catch (e) {} }); } };
+        var susul = BACA_SUSUL.test(action), baca = susul || BACA_ULANG.test(action), aman = baca || action === 'hangat', maks = susul ? 6 : (baca ? 3 : 1);
+        var dikirim = 0, jalan = 0, kendali = [], jeda = null, jedaJ = null, tungguJ = null, lepasJ = null, jDiam = false, lewatFetch = false;
+        var bersih = function () {
+          clearTimeout(jeda); clearTimeout(jedaJ); clearTimeout(tungguJ); tungguJ = null;
+          if (lepasJ) { lepasJ(); lepasJ = null; if (jDiam) jembatanHasil(false); }
+        };
+        controller = { abort: function () { bersih(); kendali.forEach(function (k) { try { k.abort(); } catch (e) {} }); } };
         var kirim = function () {
           if (settled || dikirim >= maks) return;
           dikirim++; jalan++;
@@ -6361,14 +6434,43 @@ var Api = (function () {
             .then(function (r) { if (!r.ok) throw new Error('http'); if (!settled) clearTimeout(jeda); return r.json(); })
             .then(function (res) {
               jalan--; if (settled) return;
-              clearTimeout(jeda); kendali.forEach(function (lain) { if (lain !== k) { try { lain.abort(); } catch (e) {} } });
+              bersih(); kendali.forEach(function (lain) { if (lain !== k) { try { lain.abort(); } catch (e) {} } });
+              if (action === 'bootstrap') jembatanIzin(res);
               success(res);
             }, function (error) {
               jalan--; if (settled || jalan > 0) return;   /* masih ada permintaan lain yang ditunggu */
-              if (dikirim < maks) kirim(); else failure(error);
+              if (dikirim < maks) kirim(); else if (!lepasJ) { bersih(); failure(error); }
             });
         };
-        kirim();
+        var mulaiFetch = function () { if (settled || lewatFetch) return; lewatFetch = true; kirim(); };
+        var mulaiJembatan = function () {
+          if (settled || lepasJ) return;
+          lepasJ = jembatanKirim(body, function (d) {
+            lepasJ = null; clearTimeout(jedaJ); if (settled) return;
+            var res = null; if (d && d.ok) { try { res = JSON.parse(d.s); } catch (e) { res = null; } }
+            if (res) {
+              jembatanHasil(true); bersih(); kendali.forEach(function (lain) { try { lain.abort(); } catch (e) {} });
+              if (action === 'bootstrap') jembatanIzin(res);
+              success(res); return;
+            }
+            jembatanHasil(false);
+            if (aman || (d && d.belum)) {   /* aman diulang, atau permintaan pasti belum sampai ke server: jalur biasa */
+              if (!lewatFetch) mulaiFetch(); else if (!jalan && dikirim >= maks) { bersih(); failure(new Error('jembatan')); }
+            } else { bersih(); failure(new Error('jembatan')); }   /* simpan: hasilnya tidak pasti, sama seperti sambungan putus */
+          });
+          /* jembatan diam: untuk permintaan yang aman diulang, jalur biasa ikut dicoba; jawaban pertama yang dipakai */
+          if (aman) jedaJ = setTimeout(function () { jDiam = true; mulaiFetch(); }, JEMBATAN_TUNGGU);
+        };
+        var keadaan = jembatanKeadaan();
+        if (keadaan === 'siap') mulaiJembatan();
+        else if (keadaan === 'muat' && !aman) {
+          /* simpan saat jembatan masih dimuat: ditunggu sebentar; kalau belum siap juga, jalur biasa (tetap satu kali kirim) */
+          tungguJ = setTimeout(function () { tungguJ = null; mulaiFetch(); }, JEMBATAN_SIAP_TUNGGU);
+          jembatanSaatSiap(function () { if (settled || tungguJ === null) return; clearTimeout(tungguJ); tungguJ = null; mulaiJembatan(); });
+        } else {
+          mulaiFetch();
+          if (keadaan === 'muat') jembatanSaatSiap(mulaiJembatan);
+        }
       } else {
         ensureLocal();
         setTimeout(function () {
@@ -6381,7 +6483,7 @@ var Api = (function () {
   }
   return {
     /* dipanggil sekali setelah penyimpanan perangkat siap dibaca */
-    init: function () { readDiv(); if (!gas) readInvite(); },
+    init: function () { readDiv(); if (!gas) { readInvite(); if (LS.get('pk_jembatan') === '1') jembatanMulai(); } },
     call: call,
     mode: function () { return gas ? 'gas' : (remoteUrl ? 'remote' : 'demo'); },
     local: function () { ensureLocal(); return local; },
@@ -6390,9 +6492,11 @@ var Api = (function () {
     connect: function (input) {
       var m = String(input || '').match(/\/macros\/s\/([A-Za-z0-9_-]{20,})/) || String(input || '').match(/k=([A-Za-z0-9_-]{20,})/) || String(input || '').trim().match(/^([A-Za-z0-9_-]{20,})$/);
       if (!m) return false;
-      LS.set('pk_api', m[1]); remoteUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec'; return true;
+      LS.set('pk_api', m[1]); remoteUrl = 'https://script.google.com/macros/s/' + m[1] + '/exec';
+      jembatanBuang(); if (LS.get('pk_jembatan') === '1') jembatanMulai();
+      return true;
     },
-    disconnect: function () { LS.del('pk_api'); remoteUrl = ''; },
+    disconnect: function () { LS.del('pk_api'); remoteUrl = ''; jembatanBuang(); },
     /* link undangan dibuka saat aplikasi sudah terbuka: alamatnya hanya berubah di bagian #, halaman tidak dimuat ulang */
     rehash: function () { if (gas || !/[#&]k=[A-Za-z0-9_-]{20,}/.test(String(location.hash || ''))) return false; readDiv(); readInvite(); return true; },
     div: function () { return lockDiv; },
