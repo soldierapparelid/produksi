@@ -27,7 +27,8 @@ function fixture() {
 test('cancelling a modern payment with forty sources performs one receipt deletion and no source-row writes', () => {
   const { h, good } = fixture();
   const ids = Array.from({ length: 40 }, (_, i) => 'potong:test_cut' + String(i).padStart(3, '0'));
-  const payment = good('createUpah', { upah: { id: 'modern_payment', pegawaiId: 'cutter01', tanggal: '2026-10-06', itemIds: ids } });
+  const expectedRevisions = Object.fromEntries(good('getState').payroll.filter(r => ids.includes(r.id)).map(r => [r.id,r.revision]));
+  const payment = good('createUpah', { upah: { expectedRevisions, id: 'modern_payment', pegawaiId: 'cutter01', tanggal: '2026-10-06', itemIds: ids } });
   assert.equal(payment.totalQty, 40); assert.equal(payment.totalUpah, 4000);
   const before = good('getState');
   assert.equal(before.payroll.filter(r => r.pegawaiId === 'cutter01').reduce((sum, r) => sum + r.available, 0), 0);

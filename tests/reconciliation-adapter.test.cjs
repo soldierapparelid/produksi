@@ -75,7 +75,7 @@ test('actual Sheets adapter reconciles, recovers an interrupted apply, and survi
   assert.equal(h.run(`pkStore_().read('MigrasiJournal').filter(function(r){return r.sheet==='_manifest';})[0].status`),'complete');
   assert.equal(good('applyLegacyMigration',{backup}).alreadyApplied,true,'repeat apply from a fresh request is idempotent');
   assert.equal(good('recoverLegacyMigration',{batchId:retry.batchId}).dipulihkan,false);
-  good('saveStok',{stok:{baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
+  good('saveStok',{stok:{id:'fixture-stock',baru:true,jenis:'beli',bahan:'Fixture cloth',qty:5,satuan:'kg',rol:1,harga:1000}});
   good('savePOWithRencana',{po:{newId:'ordinary_after',nama:'Pekerjaan Baru',ukuran:{},ukuranAktif:['M']},rencana:{id:'fixture-plan',bahanList:[{nama:'Fixture cloth',qty:1,satuan:'kg'}],rol:1}});
   assert.ok(good('getState').po.some(p=>p.id==='ordinary_after'),'ordinary production writes reopen after the durable marker is cleared');
 });

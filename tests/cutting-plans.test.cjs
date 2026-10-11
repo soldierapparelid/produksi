@@ -45,7 +45,7 @@ test('prepared result consumes once via one authoritative append, retries are id
   const cut=f.good('createPotong',f.payload(p),f.cutter);assert.equal(cut.rencanaId,p.id);assert.equal(cut.kg,6);assert.equal(cut.rol,2);assert.equal(cut.userId,'cutter01');assert.deepEqual(JSON.parse(cut.bahanList),[{nama:'Cotton',qty:6}]);
   f.good('createPotong',f.payload(p),f.cutter);assert.equal(f.raw('Potong').length,1);assert.deepEqual(f.raw('RencanaPotong'),before);assert.deepEqual(f.raw('StokBahan'),stockBefore);assert.equal(f.h.sheets.RencanaPotong.writes,planWrites);
   const second=f.call('createPotong',f.payload(p,'cutout02'),f.cutter2);assert.equal(second.ok,false);assert.match(second.error,/sudah dipakai/);
-  const sameid=f.call('createPotong',f.payload(p),f.cutter2);assert.equal(sameid.ok,false);assert.match(sameid.error,/Bukan catatan/);
+  const sameid=f.call('createPotong',f.payload(p),f.cutter2);assert.equal(sameid.ok,false);assert.match(sameid.error,/permintaan berbeda/);
   const state=f.good('getState'),b=state.stokRingkas.find(r=>r.nama==='Cotton');assert.equal(b.saldo,14);assert.equal(b.dicadangkan,0);assert.equal(b.tersedia,14);assert.equal(state.rencanaPotong[0].status,'terpakai');assert.equal(state.rencanaPotong[0].potongId,cut.id);
   for(const req of [{action:'deleteRecord',p:{sheet:'Potong',id:cut.id}},{action:'deleteRecord',p:{sheet:'RencanaPotong',id:p.id}},{action:'saveRencanaPotong',p:{expectedRevision:p.revision,rencana:{id:p.id,status:'batal'}}}])assert.equal(f.call(req.action,req.p).ok,false);
 });

@@ -99,8 +99,8 @@ test('an answer that has started to arrive stops the follow-up requests',async()
 });
 test('reads stop after their attempts with the ordinary server message',async()=>{
   const t=transport('remote'),done=t.run("Api.call('bootstrap',{}).catch(function(e){return e;})");
-  for(let i=0;i<6;i++){assert.equal(t.calls.length,i+1);t.calls[i].reject(new TypeError('Failed to fetch'));await napas();}
-  const error=await done;assert.equal(error.net,true);assert.match(error.message,/Server tidak bisa dihubungi/);assert.equal(t.calls.length,6);assert.equal(t.timers.size,0);
+  for(let i=0;i<3;i++){assert.equal(t.calls.length,i+1);t.calls[i].reject(new TypeError('Failed to fetch'));await napas();}
+  const error=await done;assert.equal(error.net,true);assert.match(error.message,/Server tidak bisa dihubungi/);assert.equal(t.calls.length,3);assert.equal(t.timers.size,0);
   const gambar=transport('remote'),g=gambar.run("Api.call('getGambar',{token:'s',ids:['a']}).catch(function(e){return e;})");
   assert.equal(susulan(gambar),0,'pictures are only asked again after a failure');
   for(let i=0;i<3;i++){gambar.calls[i].reject(new TypeError('Failed to fetch'));await napas();}
@@ -120,9 +120,9 @@ test('a server refusal is an answer: it is shown, not asked again',async()=>{
 });
 test('the overall deadline of a read releases every waiting request',async()=>{
   const t=transport('remote'),done=t.run("Api.call('getState',{token:'s'}).catch(function(e){return e;})");
-  t.fire(5000);t.fire(5000);assert.equal(t.calls.length,3);t.fire(60000);
-  const error=await done;assert.equal(error.timeout,true);assert.equal(t.aborted(),3);assert.equal(t.timers.size,0);
-  t.calls[0].reject(new Error('aborted'));await napas();assert.equal(t.calls.length,3,'nothing is sent after the deadline');
+  t.fire(5000);assert.equal(t.calls.length,2);assert.equal(susulan(t),0);t.fire(60000);
+  const error=await done;assert.equal(error.timeout,true);assert.equal(t.aborted(),2);assert.equal(t.timers.size,0);
+  t.calls[0].reject(new Error('aborted'));await napas();assert.equal(t.calls.length,2,'nothing is sent after the deadline');
 });
 test('an old request cannot install previous account state or sign out a newer session',async()=>{
   for(const rejected of [false,true]){

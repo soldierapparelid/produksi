@@ -193,28 +193,58 @@ test('purchase and sales pages are fetched quietly once per sign-in after the ma
   const worker=harness();worker.run("var timers=[];setTimeout=function(fn){timers.push(fn);return 1;};S.state.me={id:'w',divisi:'potong'};commercePrefetch();");assert.equal(worker.run('timers.length'),0);
   const demo=harness();demo.run("var timers=[];setTimeout=function(fn){timers.push(fn);return 1;};Api.mode=function(){return 'demo';};commercePrefetch();");assert.equal(demo.run('timers.length'),0);
 });
-test('each order offers Edit and Hapus where allowed; a removed order leaves the normal list; removal with payments is one owner request',()=>{
+test('purchase lifecycle actions are central, preserve ledger intent and expose separate inactive and archive filters',()=>{
   const h=harness(),orders=shopOrders();orders.push({...orders[1],id:'old',revision:'ro',legacy:true,status:'dp',totalPaid:1000,balance:9000},{...orders[1],id:'oldclean',revision:'rc',legacy:true});
   h.seed('pembelian',{suppliers:[],products:[],orders});const card=id=>h.run("commerceOrderCard(commerceFind('pembelian','orders',"+JSON.stringify(id)+"))");
-  assert.match(card('o1'),/data-a="commerceOrderOpen" data-id="o1">Edit/);assert.match(card('o1'),/data-a="commerceCancelOpen" data-m="pembelian" data-id="o1">Hapus/);
-  for(const id of ['o3','o5']){assert.ok(!card(id).includes('>Edit<'),id+' is not editable');}assert.match(card('old'),/>Hapus</,'the owner can remove an imported order from the list');assert.match(card('oldclean'),/>Hapus</);assert.match(card('oldclean'),/>Edit</);assert.match(card('old'),/>Edit</);
+  assert.match(card('o1'),/data-a="commerceOrderOpen" data-id="o1">Edit/);assert.doesNotMatch(card('o1'),/commerceCancelOpen/,'supplier cards stay compact');
+  for(const id of ['o3','o5']){assert.ok(!card(id).includes('>Edit<'),id+' is not editable');}assert.match(card('oldclean'),/>Edit</);assert.match(card('old'),/>Edit</);
+  const detail=h.run("commerceDetail('pembelian','o1')");assert.match(detail,/data-mode="inactive">Nonaktifkan PO/);assert.match(detail,/data-mode="archived">Hapus PO/);
+  h.run("commerceInvoiceShow(['o1','o2'])");assert.match(h.run('lastSheet'),/Kelola PO/);assert.equal((h.run('lastSheet').match(/>Nonaktifkan PO</g)||[]).length,2);
   h.run("S.listFn=null;S.sub.commercePurchase='orders';var normal=VIEWS['pembelian-produk']();S.f['commerceStatus-pembelian']='batal';var removed=S.listFn();S.f['commerceStatus-pembelian']='';");
   assert.ok(!h.run('normal').includes('data-id="o3"'),'removed orders are not in the normal list');assert.match(h.run('removed'),/data-id="o3"/);
-  const el=id=>`{getAttribute:function(k){return k==='data-m'?'pembelian':${JSON.stringify(id)};}}`;
-  h.run(`A.commerceCancelOpen(${el('o1')})`);assert.match(h.run('lastSheet'),/Hapus order/);assert.match(h.run('lastSheet'),/pembayaran <b>Rp4000<\/b> dan penerimaan <b>6 pcs<\/b>/);assert.equal(h.run('currentForm._commerceVoidAll'),true);
+  const el=(id,mode='archived')=>`{getAttribute:function(k){return k==='data-m'?'pembelian':k==='data-mode'?${JSON.stringify(mode)}:${JSON.stringify(id)};}}`;
+  h.run(`A.commerceCancelOpen(${el('o1')})`);assert.match(h.run('lastSheet'),/Hapus PO/);assert.match(h.run('lastSheet'),/bukan dihapus permanen/);assert.match(h.run('lastSheet'),/seluruh riwayat tidak berubah/);assert.match(h.run('lastSheet'),/tidak berarti utang sudah lunas/);assert.equal(h.run('currentForm._commerceCancelMode'),'archived');
   h.run("currentForm.values={id:'o1',revision:'r1',catatan:''};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();A.commerceCancelSave(null)");assert.equal(h.requests.length,0,'a reason is required');
-  h.run("currentForm.values.catatan=' tidak jadi ';A.commerceCancelSave(null)");assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{module:'pembelian',id:'o1',expectedRevision:'r1',catatan:'tidak jadi',voidAll:true,withState:true});
-  const plain=harness();plain.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});plain.run(`A.commerceCancelOpen(${el('o2')})`);assert.equal(plain.run('currentForm._commerceVoidAll'),false);
+  h.run("currentForm.values.catatan=' tidak jadi ';A.commerceCancelSave(null)");assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{module:'pembelian',id:'o1',expectedRevision:'r1',catatan:'tidak jadi',mode:'archived',withState:true});
+  const plain=harness();plain.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});plain.run(`A.commerceCancelOpen(${el('o2','inactive')})`);assert.equal(plain.run('currentForm._commerceCancelMode'),'inactive');assert.match(plain.run('lastSheet'),/Nonaktifkan PO/);
   /* an order from the old data (or one still marked for review) leaves the list with its old payments untouched, and can come back */
   const old=harness(),rows=shopOrders();rows.push({...rows[1],id:'old',revision:'ro',legacy:true,status:'dp',totalPaid:1000,balance:9000},{...rows[1],id:'gone',revision:'rg',legacy:true,status:'batal',cancelledBy:'u',cancelKeepsEvents:true},{...rows[1],id:'oldgone',revision:'rx',legacy:true,status:'batal'});
-  old.seed('pembelian',{suppliers:[],products:[],orders:rows});old.run(`A.commerceCancelOpen(${el('old')})`);assert.match(old.run('lastSheet'),/pembayaran dan penerimaan lamanya tidak diubah/);assert.equal(old.run('currentForm._commerceVoidAll'),false);assert.equal(old.run('currentForm._commerceArsip'),true);
-  old.run("currentForm.values={id:'old',revision:'ro',catatan:'dobel'};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();A.commerceCancelSave(null)");assert.deepEqual(JSON.parse(JSON.stringify(old.requests[0].payload)),{module:'pembelian',id:'old',expectedRevision:'ro',catatan:'dobel',arsip:true,withState:true});
+  old.seed('pembelian',{suppliers:[],products:[],orders:rows});old.run(`A.commerceCancelOpen(${el('old')})`);assert.match(old.run('lastSheet'),/seluruh riwayat tidak berubah/);assert.equal(old.run('currentForm._commerceCancelMode'),'archived');
+  old.run("currentForm.values={id:'old',revision:'ro',catatan:'dobel'};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();A.commerceCancelSave(null)");assert.deepEqual(JSON.parse(JSON.stringify(old.requests[0].payload)),{module:'pembelian',id:'old',expectedRevision:'ro',catatan:'dobel',mode:'archived',withState:true});
   const back=id=>old.run("commerceOrderCard(commerceFind('pembelian','orders',"+JSON.stringify(id)+"))");assert.match(back('gone'),/data-a="commerceRestore" data-m="pembelian" data-id="gone">Kembalikan ke daftar/);assert.ok(!back('oldgone').includes('commerceRestore'),'an order cancelled in the old data stays as it came');
   const again=harness();again.seed('pembelian',{suppliers:[],products:[],orders:rows});again.run(`A.commerceRestore(${el('gone')})`);assert.match(again.run('lastSheet'),/lamanya ikut kembali/);
   again.run("currentForm.values={id:'gone',revision:'rg'};currentForm.module='pembelian';currentForm._commerceScope=commerceScope();A.commerceRestoreSave(null)");
   assert.equal(again.requests[0].action,'restoreCommerceRecord');assert.deepEqual(JSON.parse(JSON.stringify(again.requests[0].payload)),{module:'pembelian',id:'gone',expectedRevision:'rg',withState:true});
   const admin=harness();admin.run("S.state.me={id:'adm',divisi:'admin'};");admin.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});assert.ok(!admin.run("commerceOrderCard(commerceFind('pembelian','orders','o2'))").includes('>Hapus<'));assert.match(admin.run("commerceOrderCard(commerceFind('pembelian','orders','o2'))"),/>Edit</);admin.run(`A.commerceCancelOpen(${el('o2')})`);assert.match(admin.json('messages').at(-1).text,/Hanya owner/);
 });
+test('inactive and archived PO remain readable and restorable without entering active totals or each others filter',()=>{
+  const h=harness(),base=shopOrders()[0],orders=[base,{...base,id:'inactive',status:'batal',cancelled:true,cancelMode:'inactive',cancelledBy:'owner',cancelKeepsEvents:true,cancelReason:'<script>private note</script>'},{...base,id:'archive',status:'batal',cancelled:true,cancelMode:'archived',cancelledBy:'owner',cancelKeepsEvents:true}];
+  h.seed('pembelian',{suppliers:[],products:[],orders});h.run("commerceOrderList(commerceData('pembelian').orders)");assert.match(h.run('S.listFn()'),/data-ids="o1"/);assert.doesNotMatch(h.run('S.listFn()'),/data-id="inactive"|data-id="archive"/);
+  for(const mode of ['inactive','archived']){h.run("S.f['commerceStatus-pembelian']="+JSON.stringify(mode));const markup=h.run('S.listFn()');assert.match(markup,new RegExp('data-id="'+(mode==='inactive'?'inactive':'archive')+'"'));assert.doesNotMatch(markup,new RegExp('data-id="'+(mode==='inactive'?'archive':'inactive')+'"'));assert.match(markup,mode==='inactive'?/Nonaktif/:/Dihapus \/ arsip/);}
+  const detail=h.run("commerceDetail('pembelian','inactive')");assert.match(detail,/Aktifkan kembali/);assert.match(detail,/Hapus PO/);assert.match(detail,/DP, sisa tagihan, dan penerimaan tetap tersimpan/);assert.match(detail,/&lt;script&gt;/);assert.doesNotMatch(detail,/<script>/);assert.doesNotMatch(detail,/data-a="commercePaymentOpen"|data-a="commerceReceiptOpen"/);assert.match(detail,/Rp4000/);
+  assert.deepEqual(h.json("commercePurchaseTotals(commerceData('pembelian').orders)"),{total:10000,paid:4000,balance:6000,count:1,review:0,cancelled:2});assert.equal(h.requests.length,0);
+});
+
+test('inactive and archive supplier headers summarise the displayed preserved PO without offering new transactions',()=>{
+  const h=harness(),base=shopOrders()[0],closed={...base,id:'closed',status:'batal',cancelled:true,cancelMode:'inactive',cancelledBy:'owner',cancelKeepsEvents:true,productName:'Topi Contoh',tanggalOrder:'2026-10-10',totalQty:300,totalReceived:280,totalHarga:15000000,totalPaid:5000000,balance:10000000,items:[{id:'black',nama:'Hitam',jumlah:300}]};
+  h.seed('pembelian',{suppliers:[],products:[],orders:[base,closed]});h.run("commerceOrderList(commerceData('pembelian').orders)");
+  for(const mode of ['inactive','archived']){
+    h.run("commerceData('pembelian').orders[1].cancelMode="+JSON.stringify(mode)+";S.f['commerceStatus-pembelian']="+JSON.stringify(mode));
+    const markup=h.run('S.listFn()'),header=markup.slice(markup.indexOf('class="cgroup-h"'),markup.indexOf('class="corder"'));
+    assert.match(header,/1 order · 2026-10-10/);assert.match(header,/Topi Contoh/);assert.match(header,/Diterima 280\/300 pcs · Sisa 20 pcs/);assert.match(header,/Total Rp15000000/);assert.match(header,/DP \/ dibayar Rp5000000/);assert.match(header,/Sisa Rp10000000/);
+    assert.doesNotMatch(markup,/data-a="commercePaymentOpen"|data-a="commerceReceiptOpen"|data-a="commerceGroupPayOpen"|data-a="commerceTambahModel"/);
+    assert.deepEqual(h.json("commercePurchaseTotals(commerceData('pembelian').orders)"),{total:10000,paid:4000,balance:6000,count:1,review:0,cancelled:1});
+  }
+  h.run("commerceData('pembelian').orders[1].paymentReview=true;");const held=h.run('S.listFn()');assert.match(held,/Total Perlu diperiksa/);assert.match(held,/DP \/ dibayar Perlu diperiksa/);assert.match(held,/Sisa Perlu diperiksa/);assert.equal(h.requests.length,0);
+});
+
+test('an uncertain archive does not falsely confirm success from the preceding inactive status',async()=>{
+  const h=harness(),row={...shopOrders()[0],status:'batal',cancelled:true,cancelMode:'inactive',cancelledBy:'owner',cancelKeepsEvents:true,cancelReason:'Tunda'};h.seed('pembelian',{orders:[row],suppliers:[],products:[]});h.form({},'pembelian');
+  const saving=h.run("commerceMutation('pembelian','cancelCommerceRecord',{module:'pembelian',id:'o1',expectedRevision:'r1',mode:'archived',catatan:'Arsip'},currentForm,null)");h.requests[0].reject(Object.assign(new Error('Timeout'),{uncertain:true}));await saving;
+  const check=h.run("A.commerceCheck({closest:function(){return currentForm;}})");h.requests[1].resolve(reply('pembelian',{orders:[row],suppliers:[],products:[]},11));await check;
+  assert.equal(h.run('drops'),0);assert.equal(h.run('currentForm._commerceRetry'),true);assert.match(h.run('currentForm.note.innerHTML'),/belum menunjukkan permintaan/);assert.equal(h.requests.length,2,'status inspection never retries the mutation automatically');
+});
+
 test('order save preserves item identity and sends initial DP in the same request',async()=>{
   const h=harness();h.form({id:'order-one',revision:'',produkId:'product-one',hargaSatuan:'100',tanggalOrder:'2026-10-08',catatan:'',dp:'50',metode:'transfer'},'pembelian',[{id:'line-M',values:{lineName:'M',lineQty:'2'}},{id:'line-L',values:{lineName:'L',lineQty:'3'}}]);h.run('A.commerceOrderSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceOrder');const p=h.requests[0].payload;assert.equal(p.record.initialPayment.jumlah,50);assert.deepEqual(JSON.parse(JSON.stringify(p.record.items)),[{id:'line-M',nama:'M',jumlah:2},{id:'line-L',nama:'L',jumlah:3}]);assert.equal(p.record.id,'order-one');
 });

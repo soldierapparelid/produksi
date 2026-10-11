@@ -169,7 +169,9 @@ test('a physical status read error fails closed whenever the hint is unsure, and
 test('actual login needs no physical settings read and a single commit flush while preserving the authenticated response', () => {
   function measured(legacy) {
     const { h, owner } = fixture();
-    if (legacy) h.run(`pkStore_().getMigrationStatusFresh=function(){this.checkpoint(['Pengaturan']);return this.getSettings().legacyMigrationStatus;};void 0;`);
+    // Requests deliberately create a fresh store; instrument the factory so the
+    // historical comparison remains active across that execution boundary.
+    if (legacy) h.run(`var latencyStoreFactory=pkStore_;pkStore_=function(){var store=latencyStoreFactory();store.getMigrationStatusFresh=function(){this.checkpoint(['Pengaturan']);return this.getSettings().legacyMigrationStatus;};return store;};void 0;`);
     const m = meter(h), result = h.request('login', { userId: owner.id, pin: '1234' });
     assert.equal(result.ok, true, result.error);
     assert.ok(result.data.token);
@@ -269,7 +271,7 @@ test('ordinary sync opens no spreadsheet for the recovery status, and a hard-tim
 test('cold login batches independent read-cache fills with fewer cache RPCs and identical authenticated state',()=>{
   function measured(batch){
     const {h,owner}=fixture();for(const key of Object.keys(h.cached))delete h.cached[key];h.cold();
-    if(!batch)h.run('pkStore_().withReadCacheBatch=function(fn){return fn();};void 0;');
+    if(!batch)h.run('var latencyStoreFactory=pkStore_;pkStore_=function(){var store=latencyStoreFactory();store.withReadCacheBatch=function(fn){return fn();};return store;};void 0;');
     const m=meter(h),result=h.request('login',{userId:owner.id,pin:'1234'});assert.equal(result.ok,true,result.error);
     const published=m.cachePuts.length,readNames=Object.keys(m.reads).sort();
     h.cold();const warm=h.request('getState',{token:result.data.token});assert.equal(warm.ok,true,warm.error);assert.equal(warm.data.me.id,result.data.state.me.id);
