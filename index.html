@@ -429,7 +429,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261011-salin-order-lama-1525';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261011-baca-tahan-gangguan-1526';</script>
 <script>
 (function () {
 'use strict';
@@ -6065,7 +6065,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.25';
+var UI_VERSION = '1.5.26';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -6311,6 +6311,13 @@ var Api = (function () {
   function unwrap(res, resolve, reject) {
     if (res && res.ok) resolve(res.data); else reject(new Error((res && res.error) || 'Terjadi kesalahan.'));
   }
+  /* Jawaban server kadang hilang di perjalanan walau server sudah selesai bekerja (sinyal putus, atau jalur pengantar
+     jawaban di sisi Google sedang terganggu). Permintaan BACA aman diulang, jadi diulang sendiri begitu gagal.
+     Untuk data utama (BACA_SUSUL), permintaan susulan juga dikirim bila belum ada jawaban SUSUL_MS; jawaban pertama
+     yang sampai yang dipakai. Permintaan SIMPAN, masuk (PIN), dan pembuatan PDF tidak pernah dikirim ulang di sini. */
+  var BACA_SUSUL = /^(bootstrap|sync|getState|getCommerceState)$/;
+  var BACA_ULANG = /^(getGambar|cekGambar|getHistoryCorrection|previewLegacyMigration|getCommerceImages|previewCommerceImport)$/;
+  var SUSUL_MS = 5000;
   function call(action, payload) {
     var body = JSON.stringify({ action: action, payload: payload || {} });
     return new Promise(function (resolve, reject) {
@@ -6342,12 +6349,29 @@ var Api = (function () {
           .withFailureHandler(failure)
           .api(body);
       } else if (remoteUrl) {
-        if (typeof AbortController === 'function') controller = new AbortController();
-        var options = { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow' };
-        if (controller) options.signal = controller.signal;
-        fetch(remoteUrl, options)
-          .then(function (r) { if (!r.ok) throw new Error('http'); return r.json(); })
-          .then(success, failure);
+        var susul = BACA_SUSUL.test(action), maks = susul ? 6 : (BACA_ULANG.test(action) ? 3 : 1);
+        var dikirim = 0, jalan = 0, kendali = [], jeda = null;
+        controller = { abort: function () { clearTimeout(jeda); kendali.forEach(function (k) { try { k.abort(); } catch (e) {} }); } };
+        var kirim = function () {
+          if (settled || dikirim >= maks) return;
+          dikirim++; jalan++;
+          var k = typeof AbortController === 'function' ? new AbortController() : null;
+          var options = { method: 'POST', body: body, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow' };
+          if (k) { kendali.push(k); options.signal = k.signal; }
+          clearTimeout(jeda); if (susul && dikirim < maks) jeda = setTimeout(kirim, SUSUL_MS);
+          fetch(remoteUrl, options)
+            /* jawaban mulai datang: tidak perlu permintaan susulan lagi, tinggal menunggu isinya selesai diunduh */
+            .then(function (r) { if (!r.ok) throw new Error('http'); if (!settled) clearTimeout(jeda); return r.json(); })
+            .then(function (res) {
+              jalan--; if (settled) return;
+              clearTimeout(jeda); kendali.forEach(function (lain) { if (lain !== k) { try { lain.abort(); } catch (e) {} } });
+              success(res);
+            }, function (error) {
+              jalan--; if (settled || jalan > 0) return;   /* masih ada permintaan lain yang ditunggu */
+              if (dikirim < maks) kirim(); else failure(error);
+            });
+        };
+        kirim();
       } else {
         ensureLocal();
         setTimeout(function () {

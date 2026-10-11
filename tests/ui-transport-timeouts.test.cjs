@@ -6,7 +6,7 @@ function transport(mode='gas'){
   const timers=new Map(),calls=[];let serial=0,ok,fail,aborted=0;
   const runner={withSuccessHandler(fn){ok=fn;return this;},withFailureHandler(fn){fail=fn;return this;},api(body){calls.push(JSON.parse(body));}};
   function element(){const classes=new Set();return {children:[],disabled:false,classList:{add(c){classes.add(c);},remove(c){classes.delete(c);},contains(c){return classes.has(c);}},setAttribute(k,v){this[k]=v;},appendChild(el){this.children.push(el);},textContent:''};}
-  const c=vm.createContext({console,google:{script:{run:runner}},window:mode==='gas'?{google:{script:{run:runner}}}:{},navigator:{onLine:true},location:{hash:'',search:'',origin:'https://example.test',pathname:'/'},fetch(url,opt){calls.push({url,opt});return new Promise((resolve,reject)=>{ok=resolve;fail=reject;});},AbortController:class{constructor(){this.signal={};}abort(){aborted++;}},setTimeout(fn,ms){const id=++serial;timers.set(id,{fn,ms});return id;},clearTimeout(id){timers.delete(id);},document:{createElement:element}});
+  const c=vm.createContext({console,google:{script:{run:runner}},window:mode==='gas'?{google:{script:{run:runner}}}:{},navigator:{onLine:true},location:{hash:'',search:'',origin:'https://example.test',pathname:'/'},fetch(url,opt){return new Promise((resolve,reject)=>{calls.push({url,opt,resolve,reject});ok=resolve;fail=reject;});},AbortController:class{constructor(){this.signal={};}abort(){aborted++;}},setTimeout(fn,ms){const id=++serial;timers.set(id,{fn,ms});return id;},clearTimeout(id){timers.delete(id);},document:{createElement:element}});
   vm.runInContext(`var LS={get:function(k){return k==='pk_api'?'deployment_example123456789':'';},set:function(){}},DIV_APP={},DIVISI={},A={},S={busy:0,token:'test_session',state:{workflowVersion:2},seq:0};
     var paints=0,applied=0,refreshed=0,toasts=[],sheets=[],dropped=0;
     function paintSync(){paints++;}function applyState(){applied++;}function refresh(){refreshed++;}function toast(m){toasts.push(m);}function quiet(){}
@@ -70,6 +70,59 @@ test('synchronous action failure and transport construction failure never strand
   t.run('A.confirmOk')(button);assert.equal(t.run('sheets[0].sending'),false);assert.equal(button.disabled,false);
   const done=t.run(`Api.call=function(){throw new Error('serialize failed');};req('getState',{}).catch(function(e){return e;})`);
   assert.match((await done).message,/serialize failed/);assert.equal(t.run('S.busy'),0);
+});
+/* 1.5.26: jawaban server yang hilang di perjalanan (server sudah selesai, jawabannya tidak sampai) */
+const napas=()=>new Promise(r=>setImmediate(r));
+const jawab=data=>({ok:true,status:200,json(){return Promise.resolve({ok:true,data});}});
+const susulan=t=>[...t.timers.values()].filter(x=>x.ms===5000).length;
+test('a lost answer to a read is asked again by itself and the first answer that arrives is used',async()=>{
+  const t=transport('remote'),done=t.run("Api.call('getState',{token:'s'})");
+  assert.equal(t.calls.length,1);t.calls[0].reject(new TypeError('Failed to fetch'));await napas();
+  assert.equal(t.calls.length,2,'asked again without the user');assert.deepEqual(JSON.parse(t.calls[1].opt.body),JSON.parse(t.calls[0].opt.body));
+  t.calls[1].resolve({ok:false,status:404,json(){return Promise.reject(new Error('html'));}});await napas();
+  assert.equal(t.calls.length,3,'an error page instead of the answer counts as lost');
+  t.calls[2].resolve(jawab({me:{id:'owner'}}));assert.equal((await done).me.id,'owner');
+  assert.equal(t.timers.size,0);assert.equal(t.calls.length,3);
+});
+test('a main read that stays silent gets a follow-up request; the late twin is dropped',async()=>{
+  const t=transport('remote'),done=t.run("Api.call('sync',{token:'s',ver:7})");
+  assert.equal(susulan(t),1);t.fire(5000);assert.equal(t.calls.length,2);
+  t.calls[1].resolve(jawab({same:true,ver:7}));assert.equal((await done).same,true);
+  assert.equal(t.aborted(),1,'the request still waiting is released');assert.equal(t.timers.size,0);
+  t.calls[0].resolve(jawab({same:false}));await napas();assert.equal(t.calls.length,2);
+});
+test('an answer that has started to arrive stops the follow-up requests',async()=>{
+  const t=transport('remote');let isi;const done=t.run("Api.call('getState',{token:'s'})");
+  t.calls[0].resolve({ok:true,status:200,json(){return new Promise(r=>{isi=r;});}});await napas();
+  assert.equal(susulan(t),0);assert.equal(t.calls.length,1);
+  isi({ok:true,data:{me:{id:'owner'}}});assert.equal((await done).me.id,'owner');
+});
+test('reads stop after their attempts with the ordinary server message',async()=>{
+  const t=transport('remote'),done=t.run("Api.call('bootstrap',{}).catch(function(e){return e;})");
+  for(let i=0;i<6;i++){assert.equal(t.calls.length,i+1);t.calls[i].reject(new TypeError('Failed to fetch'));await napas();}
+  const error=await done;assert.equal(error.net,true);assert.match(error.message,/Server tidak bisa dihubungi/);assert.equal(t.calls.length,6);assert.equal(t.timers.size,0);
+  const gambar=transport('remote'),g=gambar.run("Api.call('getGambar',{token:'s',ids:['a']}).catch(function(e){return e;})");
+  assert.equal(susulan(gambar),0,'pictures are only asked again after a failure');
+  for(let i=0;i<3;i++){gambar.calls[i].reject(new TypeError('Failed to fetch'));await napas();}
+  assert.equal((await g).net,true);assert.equal(gambar.calls.length,3);
+});
+test('a save, a login, a PDF and the warm-up are never sent twice',async()=>{
+  for(const [action,pola] of [['deleteRecord',/mungkin sudah tersimpan/],['catatSetor',/mungkin sudah tersimpan/],['login',/masukkan PIN dan coba lagi/],['makeGajiPdf',/Server tidak bisa dihubungi/],['hangat',/Server tidak bisa dihubungi/]]){
+    const t=transport('remote'),done=t.run(`Api.call(${JSON.stringify(action)},{token:'s'}).catch(function(e){return e;})`);
+    assert.equal(susulan(t),0,action);t.calls[0].reject(new TypeError('Failed to fetch'));await napas();
+    const error=await done;assert.match(error.message,pola,action);assert.equal(t.calls.length,1,action);
+  }
+});
+test('a server refusal is an answer: it is shown, not asked again',async()=>{
+  const t=transport('remote'),done=t.run("Api.call('getState',{token:'old'}).catch(function(e){return e;})");
+  t.calls[0].resolve({ok:true,status:200,json(){return Promise.resolve({ok:false,error:'Sesi berakhir. Silakan login.'});}});
+  assert.match((await done).message,/Sesi berakhir/);assert.equal(t.calls.length,1);assert.equal(t.timers.size,0);
+});
+test('the overall deadline of a read releases every waiting request',async()=>{
+  const t=transport('remote'),done=t.run("Api.call('getState',{token:'s'}).catch(function(e){return e;})");
+  t.fire(5000);t.fire(5000);assert.equal(t.calls.length,3);t.fire(60000);
+  const error=await done;assert.equal(error.timeout,true);assert.equal(t.aborted(),3);assert.equal(t.timers.size,0);
+  t.calls[0].reject(new Error('aborted'));await napas();assert.equal(t.calls.length,3,'nothing is sent after the deadline');
 });
 test('an old request cannot install previous account state or sign out a newer session',async()=>{
   for(const rejected of [false,true]){
