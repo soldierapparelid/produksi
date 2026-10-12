@@ -2,6 +2,12 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.42 - rol per ukuran, hubungan SKU tersimpan di server
+
+- **Rol per ukuran.** Di "Siapkan bahan potong", tiap rol yang dicentang punya pilihan **Ukuran** (ukuran PO yang masih harus dipotong, atau "semua"). Ringkasannya menyebut jumlahnya ("6 rol · 142 kg · M 2 rol · L 1 rol · XL 3 rol"). Server menyimpannya pada `alokasiBahan` (`{stokId, qty, ukuran}`, `coreRollSelection`) dan mengirimnya di `rincianRol`. Di kartu dan formulir tukang potong kiloan rol dikelompokkan per ukuran ("Ukuran M · 2 rol"). Pembagian ini petunjuk untuk tukang: pemakaian stok tidak berubah, seluruh bahan persiapan tetap tercatat terpakai pada potongan pertama.
+- **Hubungan SKU tersimpan di server.** Hubungan keluarga SKU BigSeller dengan barang, batas per barang, tanda "lagi laku" dan "sembunyikan" (layar Stok & PO ulang) disimpan di pengaturan `stokJualLink` lewat aksi baru `saveStokJualLink` (owner/admin; hanya dikirim ke owner/admin). Hubungan yang sudah dibuat di perangkat sebelum rilis ini dikirim otomatis saat layar itu dibuka. Angka stok BigSeller tetap di perangkat: unggah ulang file ekspor di perangkat lain.
+- Rilis ini mengubah server: pasang `Core.gs` dan `Index.html` di Apps Script, lalu Merge.
+
 ## Rilis 1.5.41 - hasil potong disimpan per ukuran (potong lanjutan)
 
 - **Simpan satu ukuran dulu, lanjut besok.** PO baru yang sebagian ukurannya sudah dipotong dari bahan persiapan owner tidak lagi kembali ke "Menunggu bahan dari owner". Di layar tukang potong ia tampil sebagai **"Lanjut potong · bahan sudah ada"** dengan ukuran yang belum dipotong; tukang mengisi ukuran berikutnya lalu menyimpan lagi.
