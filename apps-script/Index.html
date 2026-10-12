@@ -442,7 +442,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540b';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540c';</script>
 <script>
 (function () {
 'use strict';
@@ -8598,12 +8598,12 @@ function poDaftar() {
   }
   return { rows: rows, kosong: kosong, tabArsip: tabArsip, bisaArsip: bisaArsip, lihatBuang: lihatBuang, n: n };
 }
-/* PO aktif yang dibuat dalam 2 hari terakhir. Daftar PO disusun per seri, jadi PO baru bisa jatuh jauh di bawah;
-   bagian "Baru dibuat" di paling atas membuatnya langsung terlihat. Selama di sana, PO itu tidak diulang di serinya. */
-function poBaruDibuat() {
-  var batas = Date.now() - 2 * 86400000;
-  return S.state.po.filter(function (p) { var kapan = Date.parse(p.dibuat); return p.status === 'aktif' && p.asal !== 'lama' && isFinite(kapan) && kapan >= batas; })
-    .sort(function (a, b) { return String(b.dibuat).localeCompare(String(a.dibuat)); }).slice(0, 12);
+/* PO aktif yang masih punya ukuran untuk dipotong, terbaru dulu. Daftar PO disusun per seri, jadi PO seperti ini bisa
+   jatuh jauh di bawah; bagian "Harus dipotong" di paling atas membuatnya langsung terlihat. Selama di sana, PO itu
+   tidak diulang di serinya; setelah semua ukurannya dipotong ia masuk ke serinya. */
+function poHarusDipotong() {
+  return S.state.po.filter(function (p) { return p.status === 'aktif' && poUkuranPotong(p).length > 0; })
+    .sort(function (a, b) { return String(b.dibuat || '').localeCompare(String(a.dibuat || '')); });
 }
 /* PO aktif untuk barang yang sama yang belum punya hasil potong atau penugasan: kemungkinan PO yang sama dibuat dua kali */
 function poKembarBelumPotong(produkId, nama) {
@@ -8646,12 +8646,12 @@ VIEWS.po = function () {
     var kakiBuang = d.tabArsip && d.n.buang && admin ? '<div class="row" style="margin-top:12px"><span class="grow xs muted">' + nf(d.n.buang) + ' PO sudah dihapus dari aplikasi. Catatan produksinya tetap tersimpan.</span><button class="btn ghost sm" data-a="poBuangLihat">' + (d.lihatBuang ? 'Kembali ke arsip' : 'Lihat') + '</button></div>' : '';
     var alat = d.lihatBuang ? '<div class="note warn" style="margin-bottom:12px">PO di bawah ini sudah dihapus dari aplikasi. Kembalikan bila terhapus tanpa sengaja.</div>' : d.tabArsip ? '<div class="note" style="margin-bottom:12px">PO di arsip tidak tampil di daftar lain dan barangnya dihitung "Belum PO". Catatan potong, jahit, QC, dan upahnya tetap tersimpan.</div>' :
       (d.bisaArsip && admin && rows.length ? '<div class="row wrap" style="margin-bottom:12px"><span class="grow small muted">' + nf(rows.length) + ' PO ' + (f.poStatus === 'selesai' ? 'selesai' : 'batal') + ' tampil.</span><button class="btn sm" data-a="poArsipSemua">' + ic('box', 's') + 'Arsipkan semua yang tampil</button></div>' : '');
-    /* PO yang baru dibuat tampil satu kali saja: di bagian "Baru dibuat" paling atas, tidak diulang di serinya */
-    var baruDibuat = (f.poStatus === 'aktif' || f.poStatus === 'semua') && !f.q && !f.poTahap && !f.poJenis ? poBaruDibuat().filter(function (p) { return rows.indexOf(p) >= 0; }) : [], idBaru = {};
-    baruDibuat.forEach(function (p) { idBaru[p.id] = 1; });
-    var grup = poKelompok(rows.filter(function (p) { return !idBaru[p.id]; }).slice(0, 90), d.kosong.slice(0, 150));
-    var stripBaru = baruDibuat.length ? '<section class="po-seri" id="po-baru"><div class="po-seri-h"><h3>Baru dibuat</h3><span class="xs muted">' + nf(baruDibuat.length) + ' PO dalam 2 hari terakhir · sesudah itu pindah ke serinya</span></div><div class="grid g-cards">' +
-      baruDibuat.map(function (p) { return poCard(p, '<div class="xs muted">Dibuat ' + esc(lalu(p.dibuat)) + '</div>'); }).join('') + '</div></section>' : '';
+    /* PO yang masih harus dipotong tampil satu kali saja: di bagian "Harus dipotong" paling atas, tidak diulang di serinya */
+    var perluPotong = (f.poStatus === 'aktif' || f.poStatus === 'semua') && !f.q && !f.poTahap && !f.poJenis ? poHarusDipotong().filter(function (p) { return rows.indexOf(p) >= 0; }) : [], idAtas = {}, batasBaru = Date.now() - 2 * 86400000;
+    perluPotong.forEach(function (p) { idAtas[p.id] = 1; });
+    var grup = poKelompok(rows.filter(function (p) { return !idAtas[p.id]; }).slice(0, 90), d.kosong.slice(0, 150));
+    var stripBaru = perluPotong.length ? '<section class="po-seri" id="po-potong"><div class="po-seri-h"><h3>Harus dipotong</h3><span class="xs muted">' + nf(perluPotong.length) + ' PO · terbaru di atas · sesudah dipotong pindah ke serinya</span></div><div class="grid g-cards">' +
+      perluPotong.map(function (p) { var kapan = Date.parse(p.dibuat); return poCard(p, isFinite(kapan) && kapan >= batasBaru ? '<div class="xs muted">Dibuat ' + esc(lalu(p.dibuat)) + '</div>' : ''); }).join('') + '</div></section>' : '';
     var isi = grup.map(function (g) {
       return '<section class="po-seri"><div class="po-seri-h"><h3>' + esc(g.nama || 'Tanpa seri') + '</h3><span class="xs muted">' + [g.po.length ? nf(g.po.length) + ' PO' : '', g.produk.length ? nf(g.produk.length) + ' belum di-PO' : ''].filter(Boolean).join(' · ') + '</span></div>' +
         '<div class="grid g-cards">' + g.po.map(kartu).join('') + g.produk.map(poProdukKartu).join('') + '</div></section>';
@@ -12699,7 +12699,7 @@ A.poSave = function (el) {
   if (gambar && gambar.touched) payload.gambarData = gambar.data;
   if (!v.id && poPrepareOwner()) {
     var kembar = f._poKembarOk || typeof poKembarBelumPotong !== 'function' ? null : poKembarBelumPotong(v.produkId, v.nama);
-    if (kembar) return confirmBox({ title: 'Barang ini sudah punya PO yang belum dipotong', text: (kembar.noPO || 'PO') + ' · ' + kembar.nama + ' (dibuat ' + lalu(kembar.dibuat) + ') belum punya hasil potong. PO itu ada di daftar PO, di bagian Baru dibuat atau di serinya. Kalau itu yang Anda maksud, tekan Batal lalu tutup formulir ini. Tetap buat PO baru untuk barang yang sama?', ok: 'Tetap buat PO baru' }, function () { f._poKembarOk = true; setTimeout(function () { A.poSave(el); }, 0); });
+    if (kembar) return confirmBox({ title: 'Barang ini sudah punya PO yang belum dipotong', text: (kembar.noPO || 'PO') + ' · ' + kembar.nama + ' (dibuat ' + lalu(kembar.dibuat) + ') belum punya hasil potong. PO itu ada di daftar PO, di bagian Harus dipotong paling atas. Kalau itu yang Anda maksud, tekan Batal lalu tutup formulir ini. Tetap buat PO baru untuk barang yang sama?', ok: 'Tetap buat PO baru' }, function () { f._poKembarOk = true; setTimeout(function () { A.poSave(el); }, 0); });
     if(v.materialTiming==='now'){
       try { payload.rencana=v.prepareMode==='legacy'?poLegacyValues(f):rollPreparedValues(f);payload.rencana.id=v.rencanaId;payload.rencana.catatan=''; } catch(e) {return toast(e.message,true);}
     }else payload.deferMaterial=true;
