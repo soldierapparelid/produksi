@@ -460,7 +460,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541e';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541f';</script>
 <script>
 (function () {
 'use strict';
@@ -11629,7 +11629,7 @@ function sjDariBaris(rows) {
    dan apakah ukuran itu sudah di-PO tetapi belum dipotong. Yang sudah lulus QC dianggap sudah menjadi stok: catatan
    "Input BigSeller" tidak dipakai, karena tidak menentukan selesainya produksi dan sering tidak diisi. */
 function sjProduksi(produkId) {
-  var out = { po: [], uk: {}, kosong: [] }, pr = produkId ? D.produk[produkId] : null; if (!pr) return out;   /* kosong: PO yang belum dipotong sama sekali */
+  var out = { po: [], uk: {}, kosong: [] }, pr = produkId ? D.produk[produkId] : null; if (!pr) return out;   /* kosong: PO buatan aplikasi ini yang belum dipotong, ukurannya masih bisa ditambah */
   var nama = String(pr.nama || '').trim().toLowerCase();
   (S.state.po || []).forEach(function (po) {
     if (po.status !== 'aktif' || po.jenis === 'pesanan') return;
@@ -11644,7 +11644,7 @@ function sjProduksi(produkId) {
       if (!jalan && !antre) return;
       var u = out.uk[s] || (out.uk[s] = { jalan: 0, antre: false }); u.jalan += jalan; if (antre) u.antre = true; ada = true;
     });
-    if (!Object.keys(au).some(function (s) { return coreNum(au[s].potong) > 0; })) out.kosong.push(po);
+    if (po.asal !== 'lama' && coreParseJSON(po.ukuranAktif, []).length && !Object.keys(au).some(function (s) { return coreNum(au[s].potong) > 0; })) out.kosong.push(po);   /* PO bawaan aplikasi lama: ukurannya terkunci */
     if (ada) out.po.push(po);
   });
   return out;
