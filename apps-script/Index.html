@@ -442,7 +442,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-qc-riwayat-1538';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-status-po-1539';</script>
 <script>
 (function () {
 'use strict';
@@ -464,7 +464,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.38';
+var APP_VERSION = '1.5.39';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6480,7 +6480,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.38';
+var UI_VERSION = '1.5.39';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -7918,6 +7918,14 @@ function poTahap(po) {
   if (qcBalance(po).waiting > 0) return { k: 'lengkap', label: 'Dihitung · QC tertahan', cls: 'warn' };
   if (t.sisaMaklon > 0) return { k: 'maklon', label: 'Di maklon', cls: 'info' };
   if (t.siapKirim > 0) return { k: 'kirim', label: 'Siap ditugaskan ke maklon', cls: 'warn' };
+  var catatanLama = Object.keys(w.qcReviewSources || {}).some(function (id) { return Object.keys(w.qcReviewSources[id] || {}).length > 0; }) ||
+    Object.keys(w.ukuran || {}).some(function (size) { var u = w.ukuran[size]; return u.legacyUnlinkedQC > 0 || u.legacyBlockedCount > 0; }) || (w.ledgerIssues || []).length > 0;
+  if (catatanLama) return { k: 'review', label: 'Catatan lama perlu diperiksa', cls: 'warn' };
+  /* Tidak ada pekerjaan tersisa yang siap bukan berarti produksi belum dimulai. */
+  if ((t.qcOk || 0) + (t.qcOffline || 0) + (t.qcReject || 0) > 0) return { k: 'qc', label: 'Sudah ada catatan QC', cls: 'info' };
+  if (t.terima > 0 || t.reject > 0) return { k: 'cek', label: 'Sudah dihitung', cls: 'info' };
+  if (t.kirim > 0) return { k: 'maklon', label: 'Sudah ditugaskan', cls: 'info' };
+  if (t.potong > 0) return { k: 'kirim', label: 'Sudah dipotong', cls: 'info' };
   return { k: 'potong', label: 'Belum dipotong', cls: '' };
 }
 function stagesHtml(po) {
