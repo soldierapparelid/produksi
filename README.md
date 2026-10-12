@@ -2,7 +2,16 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
-## Rilis 1.5.37 — hitung fisik ringkas dan QC gabungan per PO
+## Rilis 1.5.38 - ukuran QC jelas dan bahan PO dapat disiapkan belakangan
+
+- Kartu QC langsung memperlihatkan jumlah siap diperiksa per ukuran (misalnya L 142 pcs dan XL 20 pcs), sehingga total gabungan tidak terlihat seperti duplikasi. Perbaikan dan jumlah tertahan ditampilkan terpisah per ukuran, sesuai sisa sumbernya.
+- Hitungan impor lama yang memiliki QC tanpa hubungan slip pasti pada PO, penjahit, dan ukuran yang sama dipisahkan ke **Catatan lama**. Riwayat sumber tetap dapat dibuka; catatan tersebut tidak otomatis dinyatakan lolos QC atau habis.
+- Antrean utama hanya memuat hitungan yang masih dapat diproses, hambatan operasional, dan perbaikan. Kartu tanpa sisa pekerjaan tidak ditampilkan. Setoran baru pada PO lama dan ukuran lain yang sah tetap dapat diperiksa.
+- Formulir tunggal dan gabungan memakai batas sumber yang sama dengan server. Bukti revisi mencakup QC historis terkait, sehingga perubahan dari perangkat lain tidak memakai keputusan lama. Sumber yang perlu dicocokkan tidak dapat disimpan sebagai QC ulang.
+- Owner dapat membuat PO dengan memilih ukuran dahulu melalui **Siapkan bahan nanti**, tanpa mencadangkan stok. PO menunggu bahan sampai owner memilih bahan dan kiloan dari stok lewat **Siapkan bahan potong**. Hasil potong baru dapat dicatat setelah persiapannya tersedia; pengiriman ulang PO memakai identitas dan isi yang sama agar tidak membuat PO ganda.
+- Tidak ada migrasi, penghapusan, atau perubahan jumlah produksi, stok, pembayaran, dan upah. Catatan yang belum pasti tetap mencegah penutupan otomatis PO. Perbarui Core.gs dan Index.html bersama pada deployment yang sama.
+
+## Rilis 1.5.37 - hitung fisik ringkas dan QC gabungan per PO
 
 - Hitung fisik menampilkan jumlah laporan, jumlah yang sudah dihitung, dan sisa yang belum dilaporkan di atas isian. Ukuran tanpa laporan serta rincian progres disimpan dalam bagian yang dapat dibuka saat diperlukan, supaya nyaman dipakai di HP.
 - Periksa QC langsung membuka hasil hitung satu PO, dijumlahkan per ukuran. Beberapa slip dengan penjahit dan tarif sama dapat diperiksa sekaligus; sumber dengan penjahit atau tarif berbeda tetap dipisahkan. Tombol Semua bagus mempercepat pengisian setelah pemeriksaan.
