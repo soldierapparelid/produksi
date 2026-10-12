@@ -459,7 +459,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541c';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541d';</script>
 <script>
 (function () {
 'use strict';
@@ -11712,16 +11712,51 @@ C.sjFile = function (el) {
     render();
   }).catch(function (e) { toast((e && e.message) || 'File tidak terbaca.', true); });
 };
+/* Kepala lembar: gambar, judul, kode SKU dan warna dari BigSeller, supaya barangnya mudah dikenali */
+function sjKepala(k, f) {
+  var b = k.split('-'), warna = b.length >= 4 ? b[b.length - 1] : '';
+  return '<div class="row top"><span class="thumb l' + (f.g ? '" style="background-image:url(&quot;' + esc(f.g) + '&quot;)' : '') + '">' + (f.g ? '' : esc(inisial(f.j || k))) + '</span>' +
+    '<div class="grow col gap-s"><div class="b">' + esc(f.j || k) + '</div><div class="xs muted">' + esc(k) + (warna ? ' · warna ' + esc(warna) : '') + '</div></div></div>';
+}
+/* Seri barang yang sudah dihubungkan dengan kode seri SKU yang sama (bagian kedua nomor SKU) */
+function sjSeri(k) {
+  var d = sjData(), kode = k.split('-')[1] || '', seri = {};
+  Object.keys(d.link).forEach(function (x) { var p = d.link[x].p && D.produk[d.link[x].p]; if (p && p.series && x !== k && (x.split('-')[1] || '') === kode) seri[p.series] = 1; });
+  return seri;
+}
 /* Hubungkan keluarga SKU ke barang. Seri barang yang sudah pernah dihubungkan dengan kode seri yang sama tampil lebih dulu. */
 A.sjHubung = function (el) {
-  var k = el.getAttribute('data-k'), d = sjData(), f = ((d.stok || {}).fam || {})[k] || {}, kode = k.split('-')[1] || '', seri = {}, asal = el.closest ? el.closest('[data-form]') : null;
+  var k = el.getAttribute('data-k'), d = sjData(), f = ((d.stok || {}).fam || {})[k] || {}, seri = sjSeri(k), asal = el.closest ? el.closest('[data-form]') : null;
   if (asal) dropForm(asal);
-  Object.keys(d.link).forEach(function (x) { var p = d.link[x].p && D.produk[d.link[x].p]; if (p && p.series && x !== k && (x.split('-')[1] || '') === kode) seri[p.series] = 1; });
+  /* seri yang cocok dengan kode seri SKU ini tampil lebih dulu */
   var prods = S.state.produk.filter(function (p) { return p.aktif; }).sort(function (a, b) { var x = seri[a.series] ? 0 : 1, y = seri[b.series] ? 0 : 1; return x - y || ((a.series + a.nama) < (b.series + b.nama) ? -1 : 1); });
   S.pick = { title: 'Barang untuk ' + k, q: '', empty: 'Tidak ada produk yang cocok.', kind: 'produk', list: prods, cb: function (id) { var l = d.link[k] || (d.link[k] = {}); l.p = id; sjSimpan('link'); render(); toast('Terhubung ke ' + ((D.produk[id] || {}).nama || 'barang') + '.'); } };
   openSheet(function () {
-    return sheetHtml(S.pick.title, '<div class="note">' + esc(f.j || k) + '</div><label class="search">' + ic('search', 's') + '<input type="search" data-pickq value="" placeholder="Cari produk" autocomplete="off"></label><div class="card flush"><div class="list" id="pick-list">' + pickList() + '</div></div>');
+    return sheetHtml(S.pick.title, sjKepala(k, f) + '<label class="search">' + ic('search', 's') + '<input type="search" data-pickq value="" placeholder="Cari produk" autocomplete="off"></label>' +
+      '<button class="btn" data-a="sjBarangBaru" data-k="' + esc(k) + '">' + ic('plus') + 'Belum ada di aplikasi: buat barang baru</button><div class="card flush"><div class="list" id="pick-list">' + pickList() + '</div></div>');
   });
+};
+/* Barang BigSeller yang belum ada di daftar Produk: dibuat dengan nama pendek pilihan owner, lalu langsung dihubungkan */
+A.sjBarangBaru = function (el) {
+  var k = el.getAttribute('data-k'), d = sjData(), f = ((d.stok || {}).fam || {})[k] || {}, tebak = Object.keys(sjSeri(k))[0] || '', semua = {}, idBaru = newId();
+  (S.state.produk || []).forEach(function (p) { if (p.series) semua[p.series] = 1; });
+  closeSheet();
+  openSheet(function () {
+    return sheetHtml('Barang baru untuk ' + k, '<div class="col" data-form="sjBarang">' + hid('k', k) + hid('newId', idBaru) + sjKepala(k, f) +
+      '<div class="note">Barang ini ditambahkan ke daftar Produk, lalu langsung dihubungkan dengan SKU ini. Pakai nama pendek yang biasa Anda pakai di PO.</div>' +
+      '<label class="field"><span>Nama barang</span><input type="text" name="nama" value="" maxlength="80" autocomplete="off" placeholder="mis. SINGLET GYM ARMY HIJAU"></label>' +
+      '<label class="field"><span>Seri</span><input type="text" name="series" list="dl-sj-seri" value="' + esc(tebak) + '" maxlength="60" autocomplete="off"></label>' +
+      '<datalist id="dl-sj-seri">' + Object.keys(semua).sort().map(function (s) { return '<option value="' + esc(s) + '">'; }).join('') + '</datalist></div>', footSave('sjBarangSave', 'Buat & hubungkan'));
+  });
+};
+A.sjBarangSave = function (el) {
+  var f = topForm(), v = formVals(f), d = sjData(); if (f._sjBusy) return;
+  if (!String(v.nama || '').trim()) return toast('Isi nama barangnya.', true);
+  f._sjBusy = true;
+  act(el, req('saveProduk', { produk: { newId: v.newId, nama: v.nama, series: v.series, tarifPotong: 0, tarifJahit: 0, catatan: '' } })).then(function (rec) {
+    f._sjBusy = false; if (!rec || !rec.id) return;
+    var l = d.link[v.k] || (d.link[v.k] = {}); l.p = rec.id; sjSimpan('link'); dropForm(f); render(); toast('Barang dibuat dan terhubung.');
+  }).catch(function (e) { f._sjBusy = false; quiet(e); });
 };
 A.sjPO = function (el) {
   var k = el.getAttribute('data-k'), l = sjData().link[k] || {}; if (!l.p || !D.produk[l.p]) return toast('Hubungkan dulu ke barangnya.', true);
