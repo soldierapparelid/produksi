@@ -2,6 +2,16 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.41 - hasil potong disimpan per ukuran (potong lanjutan)
+
+- **Simpan satu ukuran dulu, lanjut besok.** PO baru yang sebagian ukurannya sudah dipotong dari bahan persiapan owner tidak lagi kembali ke "Menunggu bahan dari owner". Di layar tukang potong ia tampil sebagai **"Lanjut potong · bahan sudah ada"** dengan ukuran yang belum dipotong; tukang mengisi ukuran berikutnya lalu menyimpan lagi.
+- **Bahan dihitung sekali.** Bahan dan rolnya tercatat pada potongan pertama (yang memakai persiapan). Catatan lanjutan tidak membawa bahan: kolom `asal` berisi `lanjut`, `rencanaId` kosong (`createPotong` dengan `lanjut: true`). Server hanya menerimanya bila PO itu sudah punya potongan dari persiapan owner, tidak ada persiapan baru yang menunggu, dan ukurannya memang belum dipotong (`cutting.lanjut` pada PO, dihitung di `validateWorkers`). Tidak berlaku untuk PO bawaan aplikasi lama.
+- **Tiap simpanan langsung masuk upah.** Setiap simpanan adalah catatan potong sendiri dengan tanggalnya, jadi langsung bisa dibayar lewat slip seperti biasa. Catatan lanjutan yang salah bisa dihapus selama belum dibayar dan belum ditugaskan ke penjahit.
+- **Satu kartu per PO di "Sudah dipotong".** Catatan potong satu PO digabung dalam satu kartu (jumlah per ukuran dijumlah, tiap tanggal disebut), sehingga potongan hari berikutnya masuk ke kartu yang kemarin.
+- **Bila bahannya kurang,** owner tetap bisa menyiapkan bahan baru untuk PO itu; selama persiapan baru menunggu, tukang memakai persiapan itu (bukan lanjutan).
+- **HPP.** PO yang punya catatan lanjutan dihitung utuh (seluruh bahan dibagi seluruh pcs) dan potongannya tidak dipakai sebagai acuan XL tersendiri (`commerce-hpp.js`). Sebelum semua ukuran dipotong, HPP kain PO itu masih terlalu tinggi karena bahannya baru dibagi ke ukuran yang sudah dipotong.
+- Rilis ini mengubah server: pasang `Core.gs` dan `Index.html` di Apps Script, lalu Merge.
+
 ## Rilis 1.5.40 - owner mengoreksi dari Beranda, PO baru langsung terlihat
 
 - **PO yang harus dipotong tampil paling atas.** Daftar PO disusun per seri, sehingga PO baru dan PO lain yang belum dipotong bisa jatuh jauh di bawah dan dikira tidak tersimpan (pada 12 Okt satu barang sampai dibuatkan dua PO). Tab Aktif dan Semua barang sekarang dibuka dengan bagian **Harus dipotong**: semua PO aktif yang masih punya ukuran untuk dipotong (`poHarusDipotong`), terbaru di atas, sebagai kartu PO biasa; PO buatan 2 hari terakhir diberi keterangan kapan dibuat. Selama berada di sana PO itu **tidak diulang di serinya**, dan baru masuk ke serinya setelah semua ukurannya dipotong. Bagian ini tidak tampil saat mencari atau menyaring tahap/jenis. (Rakitan pertama menampilkan bagian "Baru dibuat" yang mengulang PO di serinya; rakitan `1540b` menghilangkan pengulangan itu; rakitan `1540c` menggantinya dengan "Harus dipotong".)
