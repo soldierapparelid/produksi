@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.40 - owner mengoreksi dari Beranda, PO baru langsung terlihat
+
+- **PO yang baru dibuat tampil paling atas.** Daftar PO disusun per seri, sehingga PO baru bisa jatuh jauh di bawah dan dikira tidak tersimpan (pada 12 Okt satu barang sampai dibuatkan dua PO). Tab Aktif dan Semua barang sekarang dibuka dengan bagian **Baru dibuat**: PO aktif buatan aplikasi ini dalam 2 hari terakhir, terbaru di atas (`poBaruDibuat`); PO itu tetap ada juga di serinya. Bagian ini tidak tampil saat mencari atau menyaring tahap/jenis.
+- **Peringatan PO kembar.** Saat owner menyimpan PO baru untuk barang yang masih punya PO aktif tanpa hasil potong dan tanpa penugasan (`poKembarBelumPotong`: produk yang sama, atau nama yang sama bila tanpa produk), aplikasi bertanya dulu dan menyebut nomor PO yang sudah ada. **Tetap buat PO baru** melanjutkan penyimpanan yang sama.
+- **Hasil perbaikan QC diisi dari Beranda.** Di Perlu tindakan, tiap perbaikan yang belum diisi hasilnya menjadi satu baris dengan tombol **Isi hasil** (`qcRepairOpen`). Formulirnya memakai kata **Bagus / OK**, **Offline**, dan **Reject (jelek)**; yang belum kembali dikosongkan dan bisa diisi lagi nanti.
+- **Perbaikan tidak tertahan setoran baru.** Input QC pada PO yang punya hitungan siap QC sekaligus perbaikan sekarang menawarkan keduanya: **Periksa hitungan baru** (`qcCombinedOpen`) dan **Isi hasil perbaikan**. PO yang hanya punya hitungan baru tetap langsung membuka pemeriksaan gabungan.
+- **Owner menghapus catatan salah dari Catatan terbaru.** Baris potong, QC, dan BigSeller di Beranda mendapat tombol hapus untuk owner/admin (aturan server tidak berubah: yang sudah dibayar, potongan dari persiapan owner, atau yang sudah punya tahap berikutnya tetap ditolak). Baris QC menyebut reject, masuk perbaikan, dan offline; hasil perbaikan diberi nama **Hasil perbaikan**. Lembar PO menjelaskan cara membetulkan catatan di atas daftar Riwayat.
+- Tidak ada aksi server baru, migrasi, atau perubahan data. Karena server menolak simpan dari versi yang berbeda, perbarui Core.gs dan Index.html pada deployment yang sama dengan penerbitan GitHub Pages.
+
 ## Rilis 1.5.39 - status PO mengikuti riwayat produksi
 
 - PO yang sudah memiliki hasil potong, penugasan, hitungan, atau QC tidak kembali berlabel **Belum dipotong** ketika tidak ada pekerjaan lanjutan yang siap.
