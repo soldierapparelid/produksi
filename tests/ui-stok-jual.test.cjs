@@ -168,3 +168,8 @@ test('thin sizes join a PO of the same item that is not cut yet instead of becom
   /* once the PO has been cut, a new PO is the way */
   run(c,"delete S.state.po[0].cutting;S.state.po[0].agg={ukuran:{M:{potong:30}}};S.state.po[0]._belum=[]");view=run(c,'VIEWS.stokjual()');assert.match(view,/data-a="sjPO" data-k="SA-UJI-KBD-HJ">Buat PO/);assert.doesNotMatch(view,/sjTambah/);
 });
+test('1541g: when the only uncut PO of the item is an old-app PO, the order button offers to join it together with the thin sizes',()=>{
+  const c=ui();seed(c);run(c,"var disatukan=null;function poLamaPindah(p){return p._lama?{ke:null,ukuran:['M','L']}:null;}A.poSatukan=function(el){disatukan=[el.getAttribute('data-id'),el.getAttribute('data-tambah')];};");
+  run(c,"A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.equal(c.disatukan,null);assert.equal(c.opened,'p1','no old-app PO: the ordinary new-PO form');
+  run(c,"opened=null;S.state.po[0]._lama=true;A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.deepEqual(plain(c.disatukan),['po1','XL']);assert.equal(c.opened,null,'the join question comes instead of a second PO');
+});
