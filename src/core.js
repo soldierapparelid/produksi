@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.40';
+var APP_VERSION = '1.5.41';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -924,6 +924,12 @@ function createCore(store, env) {
   function validateWorkers(wf) {
     store.read('SlipKirim').concat(store.read('SlipSetor')).forEach(function (r) { var worker = findUser(r.maklonId), p = wf[r.poId]; if (p && (!worker || worker.divisi !== 'jahit')) { var pesan = 'Pekerja asal ' + r.id + ' tidak dikenal.'; p.issues.push(pesan); p.complete = false; if (p.lama) return; if (p.blockingIssues) p.blockingIssues.push(pesan); p.readyQC = false; Object.keys(p.ukuran).forEach(function (s) { p.ukuran[s].readyQC = false; p.ukuran[s].complete = false; }); } });
     if (typeof coreCutPlanRows === 'function') coreCutPlanRows(store.read('RencanaPotong'), store.read('Potong')).forEach(function (r) { var p = wf[r.poId]; if (p && r.status === 'siap') { p.pendingCutPlans = true; p.complete = false; } });
+    /* Potong lanjutan (1.5.41): PO baru yang sebagian ukurannya sudah dipotong dari bahan persiapan owner boleh dilanjutkan
+       ukuran berikutnya tanpa persiapan baru. Bahannya sudah tercatat pada potongan pertama, jadi tidak dihitung lagi.
+       Tidak berlaku selama owner menyiapkan bahan baru untuk PO itu, dan tidak untuk PO bawaan aplikasi lama.
+       Nilainya id persiapan potongan pertama, supaya tukang tetap melihat rol yang dipakai. */
+    var potongRencana = {}; store.read('Potong').forEach(function (r) { if (r.rencanaId) potongRencana[r.poId] = r.rencanaId; });
+    Object.keys(potongRencana).forEach(function (id) { var p = wf[id]; if (p && !p.lama && p.cutting && p.cutting.verified && !p.pendingCutPlans && (p.pendingCutSizes || []).length) p.cutting.lanjut = potongRencana[id]; });
     return wf;
   }
   function legacyExtras() { return { gudangLama: store.read('GudangLama'), settlements: store.read('LegacySettlement'), historyCorrections: store.read('KoreksiRiwayat'), ukuranLepas: settings().poUkuranLepas }; }
@@ -1063,7 +1069,8 @@ function createCore(store, env) {
         var inventory = coreRollInventory(potong, stokRows, st, store.read('RencanaPotong'), '', stokRingkas);
         stokRingkas.forEach(function (m) { var legacy = inventory.legacyMap[m.kunci]; m.legacySaldo = legacy.saldo; m.legacyTersedia = legacy.tersedia; });
         if (admin) out.stokRol = inventory.rolls;
-        out.rencanaPotong = coreCutPlanRows(store.read('RencanaPotong'), potong, store.read('PO')).filter(function (r) { return admin || r.status === 'siap' || r.userId === me.id; });
+        var lanjutRencana = {}; po.forEach(function (p) { if (p.cutting && p.cutting.lanjut) lanjutRencana[p.cutting.lanjut] = true; });
+        out.rencanaPotong = coreCutPlanRows(store.read('RencanaPotong'), potong, store.read('PO')).filter(function (r) { return admin || r.status === 'siap' || r.userId === me.id || lanjutRencana[r.id]; });
         out.rencanaPotong.forEach(function (r) { var parent = po.filter(function (p) { return p.id === r.poId; })[0], scope = coreLegacyCutPlanScope(parent, r.id, parent && parent.cutting); if (scope) { r.legacyUkuran = scope.ukuran; r.legacyBlocked = scope.blocked; } r.rincianRol = r.alokasiBahan.map(function (a) { var roll = inventory.byId[a.stokId] || {}; return {stokId:a.stokId,qty:coreNum(a.qty),bahan:roll.bahan || '',satuan:roll.satuan || '',invoice:roll.invoice || '',rollLabel:roll.rollLabel || ''}; }); });
         if (!admin) out.rencanaPotong.forEach(function (r) { delete r.poDraft; });
       }
@@ -1761,9 +1768,12 @@ function createCore(store, env) {
     if (!admin && me.divisi !== 'potong') fail('Hanya tukang potong atau admin.');
     var r = p.potong || {}; var d = dedupe('Potong', r, me);
     var direct = !r.rencanaId && r.rencana && typeof r.rencana === 'object' ? r.rencana : null;
+    /* potong lanjutan: ukuran berikutnya dari bahan yang sudah tercatat pada potongan pertama PO ini */
+    var lanjut = r.lanjut === true && !r.rencanaId && !direct;
+    if (r.lanjut === true && !lanjut) fail('Potong lanjutan tidak memakai persiapan bahan.');
     if (d.ada) { if (!admin && d.ada.userId !== me.id) fail('Bukan catatan potong Anda.'); if (d.ada.rencanaId && String(r.rencanaId || (direct && direct.id) || '') !== d.ada.rencanaId) fail('Catatan potong ini berasal dari persiapan lain.'); return d.ada; }
     var plan = null, planBaru = false;
-    if (!admin && !r.rencanaId) fail('Pilih pekerjaan dengan bahan yang sudah disiapkan owner.');
+    if (!admin && !r.rencanaId && !lanjut) fail('Pilih pekerjaan dengan bahan yang sudah disiapkan owner.');
     if (r.rencanaId) {
       if (typeof coreCutAvailability !== 'function') fail('Paket persiapan potong belum lengkap. Muat ulang aplikasi.');
       ['RencanaPotong','StokBahan','PO'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
@@ -1790,11 +1800,20 @@ function createCore(store, env) {
         plan = planLama;
       } else { plan.dibuat = nowIso(); plan.dibuatOleh = me.id; planBaru = true; }
     }
+    if (lanjut) {
+      ['RencanaPotong','Potong','PO'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
+      if (['bahan','bahanList','kg','rol','alokasiBahan','legacyBahanList','legacyRol','rencana'].some(function (key) { return r[key] !== undefined && r[key] !== ''; })) fail('Potong lanjutan tidak membawa bahan. Bahannya sudah tercatat pada potongan pertama.');
+    }
     var po = openPO(plan ? plan.poId : r.poId);
-    if (!plan && !coreLegacyPO(po) && coreActiveSizes(po)) fail('Siapkan bahan potong untuk PO ini sebelum mencatat hasil potong.');
+    if (!plan && !lanjut && !coreLegacyPO(po) && coreActiveSizes(po)) fail('Siapkan bahan potong untuk PO ini sebelum mencatat hasil potong.');
     var flow = poClean(po);
     var ukuran = strictSizes(r.ukuran, po, false);
     var legacyScope = plan ? coreLegacyCutPlanScope(po, plan.id, flow && flow.cutting) : null;
+    if (lanjut) {
+      var sisaPotong = flow && flow.cutting && flow.cutting.lanjut ? (flow.cutting.pendingUkuran || []) : null;
+      if (!sisaPotong || !sisaPotong.length) fail('PO ini tidak bisa dilanjutkan tanpa persiapan bahan. Muat ulang daftar pekerjaan.');
+      Object.keys(ukuran).forEach(function (s) { if (sisaPotong.indexOf(s) < 0) fail('Ukuran ' + s + ' sudah dicatat dipotong. Isi ukuran yang belum dipotong saja.'); });
+    }
     if (legacyScope && legacyScope.blocked) fail(legacyScope.blocked);
     if (legacyScope && (Object.keys(ukuran).length !== 1 || !ukuran[legacyScope.ukuran[0]])) fail('Hasil potong harus sesuai ukuran pada jatah bahan lama: ' + legacyScope.ukuran.join(', ') + '.');
     var total = coreSumSizes(ukuran);
@@ -1804,13 +1823,13 @@ function createCore(store, env) {
     if (admin) { var tp = findUser(String(r.userId || '')); if (r.userId && (!tp || tp.divisi !== 'potong')) fail('Pilih tukang potong yang terdaftar.'); userId = tp ? tp.id : ''; }
     var st = settings();
     /* bahan yang dipakai: boleh lebih dari satu jenis. Inilah yang mengurangi stok bahan. */
-    var bahanList = plan ? coreParseJSON(plan.bahanList, []).map(function (b) { return {nama:b.nama,qty:coreNum(b.qty)}; }) : bersihBahan(r.bahanList);
-    var bahan = teks(r.bahan || (bahanList[0] || {}).nama || po.bahan, 120); var kg = Math.max(0, coreNum(r.kg));
+    var bahanList = lanjut ? [] : plan ? coreParseJSON(plan.bahanList, []).map(function (b) { return {nama:b.nama,qty:coreNum(b.qty)}; }) : bersihBahan(r.bahanList);
+    var bahan = lanjut ? '' : teks(r.bahan || (bahanList[0] || {}).nama || po.bahan, 120); var kg = lanjut ? 0 : Math.max(0, coreNum(r.kg));
     if (bahanList.length) { bahan = bahanList.map(function (b) { return b.nama; }).join(', ').slice(0, 120); kg = 0; bahanList.forEach(function (b) { kg += b.qty; }); kg = Math.round(kg * 1000) / 1000; }
     var rec = { id: d.id, poId: po.id, userId: userId, tanggal: tglOk(r.tanggal) || today(), ukuran: JSON.stringify(ukuran), total: total,
       bahan: bahan, kg: kg, rol: plan ? coreNum(plan.rol) : Math.max(0, coreNum(r.rol)),
       tarif: (admin && r.tarif !== undefined && r.tarif !== '') ? Math.max(0, coreNum(r.tarif)) : tarifProduk(po, 'tarifPotong', st.upahPotong),
-      upahId: '', catatan: teks(r.catatan, 300), dibuat: nowIso(), bahanList: bahanList.length ? JSON.stringify(bahanList) : '', asal: '', rencanaId: plan ? plan.id : '', alokasiBahan:plan ? plan.alokasiBahan || '' : '' };
+      upahId: '', catatan: teks(r.catatan, 300), dibuat: nowIso(), bahanList: bahanList.length ? JSON.stringify(bahanList) : '', asal: lanjut ? 'lanjut' : '', rencanaId: plan ? plan.id : '', alokasiBahan:plan ? plan.alokasiBahan || '' : '' };
     if (plan && st.stokMulai && rec.tanggal < st.stokMulai) fail('Tanggal hasil potong harus berada setelah tanggal awal pencatatan stok.');
     if (typeof coreCutAvailability === 'function') {
       if (!plan) ['RencanaPotong','StokBahan'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
