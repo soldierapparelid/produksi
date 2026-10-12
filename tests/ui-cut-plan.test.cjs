@@ -115,7 +115,7 @@ test('worker uncertain count stops resubmission and retains a status-check actio
 
 test('done work includes old and prepared own cuts once each without exposing another worker',()=>{
   const c=ui();evaluate(c,`S.state.rencanaPotong=[{...plan,status:'terpakai',potongId:'prepared'},{...plan,id:'alias',status:'terpakai',potongId:'prepared'}];S.state.potong=[{id:'old',poId:'po',userId:'worker',tanggal:'2026-10-07',total:15,ukuran:{M:15},bahan:'Katun lama',kg:2},{id:'prepared',poId:'po',userId:'worker',tanggal:'2026-10-08',total:20,ukuran:{M:20},rencanaId:'plan'},{id:'private-other',poId:'po',userId:'other',tanggal:'2026-10-08',total:900,catatan:'PRIVATE'}];S.sub.pkerja='sudah';`);
-  const out=evaluate(c,"VIEWS['p-kerja']()");assert.equal((out.match(/data-potong="old"/g)||[]).length,1);assert.equal((out.match(/data-potong="prepared"/g)||[]).length,1);assert.match(out,/15 pcs dipotong/);assert.match(out,/Katun lama 2 kg/);assert.doesNotMatch(out,/PRIVATE|private-other|900|data-a="potongOpen"/);
+  const out=evaluate(c,"VIEWS['p-kerja']()");assert.equal((out.match(/data-potong="/g)||[]).length,1,'one card per PO: a later cut joins the card of the earlier one');assert.match(out,/data-potong="old"/);assert.match(out,/2 kali potong · terakhir 2026-10-08/);assert.match(out,/35 pcs dipotong/);assert.match(out,/2026-10-07: M 15/);assert.match(out,/2026-10-08: M 20/);assert.match(out,/Katun lama 2 kg/);assert.doesNotMatch(out,/PRIVATE|private-other|900|data-a="potongOpen"/);
   assert.equal(c.kpis[2][1],'2');assert.equal(c.kpis[3][1],'20');
 });
 test('active uncut and partial PO remain waiting without fabricated material or unsafe input, including held PO',()=>{
@@ -180,4 +180,33 @@ test('owner without a preparation picks rolls from stock: kilos follow the rolls
  /* more than the roll holds is stopped on the device; "ketik sendiri" keeps the old hand-typed path */
  evaluate(c,"form.rollRows=[row('rollA',25.5)];A.potongSave(el)");assert.equal(c.calls.length,1);assert.match(c.messages.join(' '),/tidak melebihi sisa/);
  evaluate(c,"form.values.prepareMode='manual';A.potongSave(el)");assert.equal(c.calls.length,2);assert.equal(c.calls[1].payload.potong.rencana,undefined);assert.deepEqual(plain(c.calls[1].payload.potong.bahanList),[]);
+});
+
+test('1.5.41: a PO cut in part from the owner fabric is a continuing job with its own form, not a PO waiting for fabric',()=>{
+  const c=ui();evaluate(c,`plan.status='terpakai';po.cutting={ukuran:['M','L','XL'],pendingUkuran:['L','XL'],lanjut:'plan'};po.agg={total:{potong:20}};S.state.potong=[{id:'first',poId:'po',userId:'worker',tanggal:'2026-10-08',total:20,ukuran:{M:20},rencanaId:'plan'}];`);
+  const out=evaluate(c,"VIEWS['p-kerja']()");
+  assert.match(out,/Lanjut potong · bahan sudah ada/);assert.match(out,/<b>Belum dipotong:<\/b> L · XL/);assert.match(out,/data-a="potongOpen" data-id="po" data-lanjut="1"/);
+  assert.match(out,/Katun &lt;biru>/,'the fabric of the first cut stays visible');assert.doesNotMatch(out,/Menunggu bahan dari owner|data-rencana="plan"/);
+  assert.equal(c.kpis[0][1],'1');assert.equal(c.kpis[1][1],'0');
+  /* the done tab says which sizes are still open */
+  evaluate(c,"S.sub.pkerja='sudah'");assert.match(evaluate(c,'S.listFn()'),/20 pcs dipotong[\s\S]*<b>Belum dipotong:<\/b> L · XL/);evaluate(c,"S.sub.pkerja='perlu'");
+  /* the form: only the open sizes, no fabric fields */
+  evaluate(c,"el={getAttribute:function(k){return {'data-id':'po','data-lanjut':'1'}[k];},closest:function(){return form;}};A.potongOpen(el)");
+  assert.match(c.rendered,/Lanjutan potong/);assert.match(c.rendered,/name="lanjut" value="1"/);assert.match(c.rendered,/<input data-size="L"><input data-size="XL">/);
+  assert.match(c.rendered,/Bahan sudah tercatat pada potongan pertama dan tidak dihitung lagi/);assert.doesNotMatch(c.rendered,/data-size="M"|Bahan yang dipakai|name="rol"|name="tarif"/);
+  evaluate(c,"form.values={id:'next',poId:'po',rencanaId:'',rencanaRevision:'',lanjut:'1',tanggal:'2026-10-09',catatan:'',bahan:'INJECT',kg:9,rol:9,tarif:999,userId:'other'};sizeVals=function(){return {L:12};};");
+  evaluate(c,'A.potongSave(el)');evaluate(c,'A.potongSave(el)');assert.equal(c.calls.length,1);assert.equal(c.calls[0].action,'createPotong');
+  assert.deepEqual(plain(c.calls[0].payload),{potong:{id:'next',poId:'po',lanjut:true,tanggal:'2026-10-09',ukuran:{L:12},catatan:''}});
+  /* new fabric from the owner, or a PO under review, is not a continuing job */
+  const siap=ui();evaluate(siap,`po.cutting={ukuran:['M','L'],pendingUkuran:['L'],lanjut:'old'};S.state.rencanaPotong=[plan];`);const ready=evaluate(siap,"VIEWS['p-kerja']()");assert.match(ready,/data-rencana="plan"/);assert.doesNotMatch(ready,/data-lanjut/);
+  const tahan=ui();evaluate(tahan,`plan.status='terpakai';po.cutting={ukuran:['M','L'],pendingUkuran:['L'],lanjut:'plan'};po.workflow.issues=['review'];`);const held=evaluate(tahan,"VIEWS['p-kerja']()");assert.match(held,/Perlu diperiksa owner/);assert.doesNotMatch(held,/data-lanjut/);
+  /* nothing left to continue: the form says so instead of opening */
+  const habis=ui();evaluate(habis,"el={getAttribute:function(k){return {'data-id':'po','data-lanjut':'1'}[k];},closest:function(){return form;}};A.potongOpen(el)");assert.match(habis.rendered,/Tidak ada ukuran yang bisa dilanjutkan/);
+});
+test('1.5.41: the owner sees a partly cut PO as continuing in the PO sheet and the first-cut form says one size may be saved first',()=>{
+  const c=ui();evaluate(c,`actor={id:'owner',divisi:'owner'};plan.status='terpakai';po.cutting={ukuran:['M','L'],pendingUkuran:['L'],lanjut:'plan'};`);
+  const panel=evaluate(c,'rencanaPotongPanel(po)');assert.match(panel,/<b>Dipotong sebagian\.<\/b> Belum dipotong: L\./);assert.match(panel,/data-a="potongOpen" data-id="po" data-lanjut="1">Catat lanjutan potong/);
+  evaluate(c,"po.cutting.lanjut=''");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/Dipotong sebagian/);
+  assert.match(html,/if \(po\.cutting && po\.cutting\.lanjut\) return false;/,'such a PO is not labelled as waiting for fabric');
+  assert.match(html,/Boleh simpan satu ukuran dulu\. Ukuran lain dicatat menyusul dari daftar Potong; bahan ini dihitung sekali saja\./);
 });

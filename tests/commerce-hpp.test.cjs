@@ -103,3 +103,13 @@ test('when the model has XL-only cuts its cost per piece comes from those cuts a
  const lama=legacyFixture();lama.tables={PO:[{id:'po1',series:'Fixture',nama:'Shirt',ukuran:{},total:0}],Potong:[{id:'cutXL',poId:'po1',tanggal:'2026-10-09',total:10,ukuran:{XL:10},tarif:600,bahanList:[{nama:'Cotton',qty:4}]}],StokBahan:[{id:'newBuy',jenis:'beli',bahan:'Cotton',qty:5,satuan:'kg',harga:10000,total:50000}],SlipKirim:[],RencanaPotong:[]};
  const campur=run('coreCommerceHpp',lama).models[0];assert.equal(campur.kain.totalPcs,10);approx(campur.kain.perPcs,4000);approx(campur.potong.perPcs,600);assert.deepEqual(campur.basis.origins,{legacy:0,native:10});assert.equal(campur.basis.excludedPcs,0);
 });
+
+test('1.5.41: a PO with continuing cuts is costed as a whole; its first cut is not an XL reference and the continuing cut needs no fabric',()=>{
+ const input=nativeFixture();
+ input.tables.Potong=[{id:'cutXL',poId:'po1',tanggal:'2026-10-08',total:10,ukuran:{XL:10},tarif:500,bahanList:[{nama:'Cotton',qty:5}],alokasiBahan:[{stokId:'buyA',qty:2}]},{id:'cutNext',poId:'po1',tanggal:'2026-10-09',total:10,ukuran:{M:10},tarif:500,asal:'lanjut',bahan:'',kg:0,bahanList:''}];
+ const m=run('coreCommerceHpp',input).models[0],satu=run('coreCommerceHpp',nativeFixture()).models[0];
+ assert.equal(m.basis.ukuran,undefined);assert.equal(m.kain.totalPcs,20);assert.doesNotMatch(m.warnings.join(' '),/tanpa rincian bahan/);
+ approx(m.kain.totalCost,satu.kain.totalCost);approx(m.kain.perPcs,satu.kain.totalCost/20);approx(m.potong.perPcs,500);
+ /* without the marker the XL-only cut would be the reference for the whole model */
+ input.tables.Potong[1].asal='';assert.equal(run('coreCommerceHpp',input).models[0].basis.ukuran,'XL');
+});
