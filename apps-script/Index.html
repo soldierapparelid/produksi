@@ -442,7 +442,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-status-po-1539';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540';</script>
 <script>
 (function () {
 'use strict';
@@ -464,7 +464,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.39';
+var APP_VERSION = '1.5.40';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6480,7 +6480,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.39';
+var UI_VERSION = '1.5.40';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -8307,7 +8307,12 @@ function tindakan() {
       if (dl !== null && dl <= 3) out.push({ k: 'telat', w: dl < 0 ? 2 : 3, icon: 'alert', cls: dl < 0 ? 'bad' : 'warn', t: 'Pesanan ' + (po.pelanggan || '') + (dl < 0 ? ' lewat ' + (-dl) + ' hari' : (dl === 0 ? ' jatuh tempo hari ini' : ' jatuh tempo ' + dl + ' hari lagi')), d: po.nama + ' · ' + po.noPO, btn: 'Ubah deadline', a: 'poEdit', id: po.id, lihat: po.id });
     }
     var t = T(po);
-    if (pos(t.qcPerbaikan) > 0) out.push({ k: 'qc', w: 4, n: t.qcPerbaikan, icon: 'shield', cls: 'warn', t: nf(t.qcPerbaikan) + ' pcs sedang diperbaiki', d: po.nama + ' · ' + po.noPO + ' · belum kembali ke QC', btn: 'Lihat', a: 'poOpen', id: po.id });
+    if (pos(t.qcPerbaikan) > 0) {
+      /* tiap perbaikan yang belum diisi hasilnya punya barisnya sendiri: hasilnya (bagus atau reject) diisi langsung dari sini */
+      var antrePerbaikan = typeof repairQueue === 'function' ? repairQueue(po.id) : [];
+      if (antrePerbaikan.length) antrePerbaikan.forEach(function (x) { out.push({ k: 'qc', w: 4, n: x.total, icon: 'shield', cls: 'warn', t: nf(x.total) + ' pcs perbaikan belum diisi hasilnya', d: po.nama + ' · ' + po.noPO + ' · ' + namaUser(x.q.maklonId) + ' · ' + coreSizeText(x.uk), btn: 'Isi hasil', a: 'qcRepairOpen', id: x.q.id, lihat: po.id }); });
+      else out.push({ k: 'qc', w: 4, n: t.qcPerbaikan, icon: 'shield', cls: 'warn', t: nf(t.qcPerbaikan) + ' pcs sedang diperbaiki', d: po.nama + ' · ' + po.noPO + ' · belum kembali ke QC', btn: 'Lihat', a: 'poOpen', id: po.id });
+    }
     if (t.siapKirim > 0) out.push({ k: 'tugas', w: 5, n: t.siapKirim, icon: 'send', cls: 'info', t: nf(t.siapKirim) + ' pcs sudah dipotong, belum ditugaskan ke maklon', d: po.nama + ' · ' + po.noPO, btn: 'Tugaskan', a: 'kirimOpen', id: po.id });
     /* PO yang seluruh ukurannya sudah selesai QC (dan sudah diinput ke BigSeller) tinggal ditutup */
     if (poTahap(po).k === 'tuntas' && (po.jenis === 'pesanan' || !(pos(t.stok) > 0))) out.push({ k: 'tutup', w: 6, icon: 'check', cls: 'ok', t: po.nama + ' sudah tuntas', d: po.noPO + ' · semua ukuran selesai QC' + (po.jenis === 'pesanan' ? '' : ' dan sudah diinput ke BigSeller'), btn: 'Tandai selesai', a: 'poStatusSet', id: po.id, v: 'selesai' });
@@ -8480,12 +8485,13 @@ function berandaTodo(todo) {
     '<div class="list">' + (todo.length ? list : emptyBox('Tidak ada yang menunggu tindakan.')) + '</div></div>';
 }
 /* Catatan terbaru dari semua divisi; yang masih bisa diubah punya tombolnya sendiri di baris itu */
+function catatanHapusBtn(sheet, id) { return '<button class="icon-btn" aria-label="Hapus catatan" title="Salah input? Hapus catatan ini, lalu isi ulang." data-a="del" data-s="' + sheet + '" data-id="' + esc(id) + '">' + ic('trash', 's') + '</button>'; }
 function berandaCatatan() {
   var st = S.state, admin = isAdmin(), ev = [];
   st.potong.forEach(function (r) {
     var kosong = !(r.tarif > 0) && r.total > 0, bisa = admin && sourceCanEditRate(r, 'Potong');
     ev.push({ g: 'potong', at: r.dibuat, t: namaUser(r.userId) + ' memotong ' + nf(r.total) + ' pcs', po: r.poId, c: 'c-potong', x: admin ? (kosong ? 'harga belum diatur' : rp(r.tarif) + '/pcs') : '',
-      tail: bisa ? '<button class="btn sm' + (kosong ? ' perlu' : '') + '" data-a="hargaOpen" data-s="Potong" data-id="' + esc(r.id) + '" data-v="' + coreNum(r.tarif) + '">' + (kosong ? 'Atur harga' : 'Harga') + '</button>' : '' });
+      tail: (bisa ? '<button class="btn sm' + (kosong ? ' perlu' : '') + '" data-a="hargaOpen" data-s="Potong" data-id="' + esc(r.id) + '" data-v="' + coreNum(r.tarif) + '">' + (kosong ? 'Atur harga' : 'Harga') + '</button>' : '') + (admin && !r.rencanaId && !sourcePaid(r) ? catatanHapusBtn('Potong', r.id) : '') });
   });
   st.kirim.forEach(function (r) {
     ev.push({ g: 'jahit', at: r.dibuat, t: nf(r.total) + ' pcs dikirim ke ' + namaUser(r.maklonId), po: r.poId, c: 'c-maklon', x: '', tail: '<button class="btn sm" data-a="slip" data-t="kirim" data-id="' + esc(r.id) + '">Slip</button>' });
@@ -8495,8 +8501,11 @@ function berandaCatatan() {
     ev.push({ g: 'jahit', at: r.dibuat, t: namaUser(r.maklonId) + ' setor ' + nf(r.total) + ' pcs' + (tunggu ? ' (menunggu dicek)' : ''), po: r.poId, c: 'c-cek', x: r.status === 'ditolak' ? 'ditolak' : '',
       tail: tunggu ? '<button class="btn sm perlu" data-a="terimaOpen" data-id="' + esc(r.id) + '">Hitung</button>' : '<button class="btn sm" data-a="slip" data-t="setor" data-id="' + esc(r.id) + '">Slip</button>' });
   });
-  st.qc.forEach(function (r) { ev.push({ g: 'qc', at: r.dibuat, t: 'QC ' + nf(r.total) + ' pcs lolos' + (r.reject ? ', ' + nf(r.reject) + ' reject' : ''), po: r.poId, c: 'c-qc', x: '', tail: '' }); });
-  st.gudang.forEach(function (r) { ev.push({ g: 'jual', at: r.dibuat, t: nf(r.total) + ' pcs diinput ke BigSeller', po: r.poId, c: 'c-jual', x: '', tail: '' }); });
+  st.qc.forEach(function (r) {
+    var lainQC = [r.reject ? nf(r.reject) + ' reject' : '', r.perbaikan > 0 ? nf(r.perbaikan) + ' masuk perbaikan' : '', r.offline ? nf(r.offline) + ' offline' : ''].filter(Boolean).join(', ');
+    ev.push({ g: 'qc', at: r.dibuat, t: (r.repairQcId ? 'Hasil perbaikan: ' : 'QC ') + nf(r.total) + ' pcs lolos' + (lainQC ? ', ' + lainQC : ''), po: r.poId, c: 'c-qc', x: '', tail: admin ? catatanHapusBtn('QC', r.id) : '' });
+  });
+  st.gudang.forEach(function (r) { ev.push({ g: 'jual', at: r.dibuat, t: nf(r.total) + ' pcs diinput ke BigSeller', po: r.poId, c: 'c-jual', x: '', tail: admin ? catatanHapusBtn('Gudang', r.id) : '' }); });
   ev.sort(function (a, b) { return String(a.at) < String(b.at) ? 1 : -1; });
   var cur = S.sub.evK || '', rows = cur ? ev.filter(function (e) { return e.g === cur; }) : ev, banyak = S.sub.evAll === '1', tampil = rows.slice(0, banyak ? 40 : 8);
   var saring = ev.length ? '<div class="saring">' + [['', 'Semua'], ['potong', 'Potong'], ['jahit', 'Jahit'], ['qc', 'QC'], ['jual', 'BigSeller']].map(function (g) {
@@ -8589,6 +8598,19 @@ function poDaftar() {
   }
   return { rows: rows, kosong: kosong, tabArsip: tabArsip, bisaArsip: bisaArsip, lihatBuang: lihatBuang, n: n };
 }
+/* PO aktif yang dibuat dalam 2 hari terakhir. Daftar PO disusun per seri, jadi PO baru bisa jatuh jauh di bawah;
+   bagian "Baru dibuat" di paling atas membuatnya langsung terlihat. */
+function poBaruDibuat() {
+  var batas = Date.now() - 2 * 86400000;
+  return S.state.po.filter(function (p) { var kapan = Date.parse(p.dibuat); return p.status === 'aktif' && p.asal !== 'lama' && isFinite(kapan) && kapan >= batas; })
+    .sort(function (a, b) { return String(b.dibuat).localeCompare(String(a.dibuat)); }).slice(0, 12);
+}
+/* PO aktif untuk barang yang sama yang belum punya hasil potong atau penugasan: kemungkinan PO yang sama dibuat dua kali */
+function poKembarBelumPotong(produkId, nama) {
+  var kunci = String(nama || '').trim().toLowerCase();
+  return poAktif().filter(function (p) { var tot = T(p); return (produkId ? p.produkId === produkId : String(p.nama || '').trim().toLowerCase() === kunci) && !(tot.potong > 0) && !(tot.kirim > 0); })
+    .sort(function (a, b) { return String(b.dibuat).localeCompare(String(a.dibuat)); })[0] || null;
+}
 function poSeri(po) { var pr = po.produkId ? D.produk[po.produkId] : null; return String(po.series || (pr && pr.series) || '').trim(); }
 function poKelompok(rows, kosong) {
   var map = {}, out = [], urut = {}; PO_WARNA.forEach(function (w, i) { urut[w[0]] = i; });
@@ -8625,11 +8647,16 @@ VIEWS.po = function () {
     var alat = d.lihatBuang ? '<div class="note warn" style="margin-bottom:12px">PO di bawah ini sudah dihapus dari aplikasi. Kembalikan bila terhapus tanpa sengaja.</div>' : d.tabArsip ? '<div class="note" style="margin-bottom:12px">PO di arsip tidak tampil di daftar lain dan barangnya dihitung "Belum PO". Catatan potong, jahit, QC, dan upahnya tetap tersimpan.</div>' :
       (d.bisaArsip && admin && rows.length ? '<div class="row wrap" style="margin-bottom:12px"><span class="grow small muted">' + nf(rows.length) + ' PO ' + (f.poStatus === 'selesai' ? 'selesai' : 'batal') + ' tampil.</span><button class="btn sm" data-a="poArsipSemua">' + ic('box', 's') + 'Arsipkan semua yang tampil</button></div>' : '');
     var grup = poKelompok(rows.slice(0, 90), d.kosong.slice(0, 150));
+    var baruDibuat = (f.poStatus === 'aktif' || f.poStatus === 'semua') && !f.q && !f.poTahap && !f.poJenis ? poBaruDibuat() : [];
+    var stripBaru = baruDibuat.length ? '<section class="po-seri" id="po-baru"><div class="po-seri-h"><h3>Baru dibuat</h3><span class="xs muted">' + nf(baruDibuat.length) + ' PO dalam 2 hari terakhir · tetap ada juga di serinya di bawah</span></div><div class="card flush"><div class="list">' + baruDibuat.map(function (p) {
+      var tahapBaru = poTahap(p);
+      return '<button class="item" data-a="poOpen" data-id="' + esc(p.id) + '">' + thumb(p) + '<span class="grow"><span class="t">' + esc(p.nama) + '</span><br><span class="d">' + poMeta(p) + ' · dibuat ' + esc(lalu(p.dibuat)) + '</span></span><span class="chip ' + tahapBaru.cls + '">' + esc(poMenungguBahan(p) ? 'Menunggu bahan' : tahapBaru.label) + '</span>' + ic('chev') + '</button>';
+    }).join('') + '</div></div></section>' : '';
     var isi = grup.map(function (g) {
       return '<section class="po-seri"><div class="po-seri-h"><h3>' + esc(g.nama || 'Tanpa seri') + '</h3><span class="xs muted">' + [g.po.length ? nf(g.po.length) + ' PO' : '', g.produk.length ? nf(g.produk.length) + ' belum di-PO' : ''].filter(Boolean).join(' · ') + '</span></div>' +
         '<div class="grid g-cards">' + g.po.map(kartu).join('') + g.produk.map(poProdukKartu).join('') + '</div></section>';
     }).join('');
-    return (grup.length ? alat + poLegenda(rows, d.kosong.length) + isi + more : '<div class="card">' + emptyBox(d.tabArsip ? 'Arsip masih kosong. PO selesai atau batal bisa diarsipkan dari tabnya.' : st.po.length ? 'Tidak ada PO yang cocok dengan saringan ini.' : 'Belum ada PO.', st.po.length ? '' : '<button class="btn pri sm" data-a="poNew">Buat PO pertama</button>') + '</div>') + kakiBuang + arsip;
+    return (grup.length ? alat + stripBaru + poLegenda(rows, d.kosong.length) + isi + more : '<div class="card">' + emptyBox(d.tabArsip ? 'Arsip masih kosong. PO selesai atau batal bisa diarsipkan dari tabnya.' : st.po.length ? 'Tidak ada PO yang cocok dengan saringan ini.' : 'Belum ada PO.', st.po.length ? '' : '<button class="btn pri sm" data-a="poNew">Buat PO pertama</button>') + '</div>') + kakiBuang + arsip;
   };
   return '<div class="head"><div class="grow"><h1>PO</h1><div class="sub">Satu PO untuk satu barang dalam satu putaran produksi. Dikelompokkan per seri; warna menunjukkan tahapnya. "Semua barang" memuat seluruh barang, termasuk yang belum di-PO.</div></div><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
     poPendingPlansHtml() + '<div class="tools"><div class="seg">' + [['semua', 'Semua barang'], ['aktif', 'Aktif'], ['selesai', 'Selesai'], ['batal', 'Batal'], ['arsip', 'Arsip']].map(function (o) { return '<button data-a="poStatus" data-v="' + o[0] + '"' + (f.poStatus === o[0] ? ' class="on"' : '') + '>' + o[1] + ' ' + nf(n[o[0]] || 0) + '</button>'; }).join('') + '</div>' +
@@ -8754,7 +8781,7 @@ function poSheet(id) {
   st.qc.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-qc', t: 'QC lolos ' + nf(r.total) + ' pcs', d: [r.userId ? namaUser(r.userId) : '', r.maklonId ? 'jahitan ' + namaUser(r.maklonId) : '', r.offline ? 'offline ' + r.offline : '', r.perbaikan > 0 ? 'perbaikan ' + r.perbaikan : (r.perbaikan < 0 ? 'hasil perbaikan' : ''), r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, del: (admin || r.userId === me().id) ? ['QC', r.id] : null }); });
   st.gudang.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-jual', t: 'Input BigSeller ' + nf(r.total) + ' pcs', d: [r.userId ? namaUser(r.userId) : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, del: admin ? ['Gudang', r.id] : null }); });
   ev.sort(function (a, b) { return String(a.tg) + String(a.at) < String(b.tg) + String(b.at) ? 1 : -1; });
-  h += '<div class="col gap-s"><div class="label">Riwayat</div><div class="card flush"><div class="list">' + (ev.length ? ev.map(function (e) {
+  h += '<div class="col gap-s"><div class="label">Riwayat</div>' + (admin && ev.length ? '<p class="xs muted">Salah input? Hapus catatan yang salah lewat ikon tempat sampah (penugasan dan setoran: buka Slip-nya), lalu isi ulang. Mulai dari catatan paling akhir; yang sudah dibayar tidak bisa dihapus.</p>' : '') + '<div class="card flush"><div class="list">' + (ev.length ? ev.map(function (e) {
     var tail = e.slip ? '<button class="btn sm" data-a="slip" data-t="' + e.slip[0] + '" data-id="' + esc(e.slip[1]) + '">' + (e.belumSlip ? 'Lihat' : 'Slip') + '</button>'
       : ((e.harga ? '<button class="btn sm" data-a="hargaOpen" data-s="' + e.harga[0] + '" data-id="' + esc(e.harga[1]) + '" data-v="' + coreNum(e.harga[2]) + '">Harga</button>' : '') +
         (e.del ? '<button class="icon-btn" aria-label="Hapus" data-a="del" data-s="' + e.del[0] + '" data-id="' + esc(e.del[1]) + '">' + ic('trash', 's') + '</button>' : ''));
@@ -12272,7 +12299,7 @@ A.terimaTolak = function () {
 /* ---------- QC ---------- */
 A.qcOpen = function (el) { openQC(el.getAttribute('data-id')); };
 function qcGrid(uk, repair) {
-  var kinds = repair ? [['ok','OK'],['offline','Offline'],['reject','Reject']] : [['ok','OK'],['offline','Offline'],['perbaikan','Perbaikan'],['reject','Reject']];
+  var kinds = repair ? [['ok','Bagus / OK'],['offline','Offline'],['reject','Reject (jelek)']] : [['ok','OK'],['offline','Offline'],['perbaikan','Perbaikan'],['reject','Reject']];
   return '<div class="col">' + Object.keys(uk).map(function (size) {
     return '<fieldset class="card col gap-s" data-qc-row="' + esc(size) + '" data-expected="' + uk[size] + '"><legend>Ukuran ' + esc(size) + ' · ' + nf(uk[size]) + ' pcs</legend><div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">' + kinds.map(function (kind) {
       return '<label class="field"><span>' + kind[1] + '</span><input type="number" inputmode="numeric" min="0" max="' + uk[size] + '" step="1" value="" placeholder="0" data-qc-size="' + esc(size) + '" data-qc-kind="' + kind[0] + '" data-add></label>';
@@ -12355,13 +12382,16 @@ A.qcCombinedSave = function (el) {
 };
 function openQC(poId, setorId, repairQcId) {
   if (!setorId && !repairQcId) {
-    if (antreanQC().some(function (x) { return x.s.poId === poId; })) return openCombinedQC(poId);
+    /* hanya hitungan baru: langsung ke pemeriksaan gabungan. Kalau PO itu juga punya perbaikan yang belum diisi hasilnya,
+       keduanya ditawarkan, supaya hasil perbaikan tidak tertahan selama masih ada setoran baru. */
+    if (antreanQC().some(function (x) { return x.s.poId === poId; }) && !repairQueue(poId).length) return openCombinedQC(poId);
     openSheet(function () {
       var choices = antreanQC().filter(function (x) { return x.s.poId === poId; }), repairs = repairQueue(poId);
       var waiting = qcBalance(D.po[poId]).waiting;
       var history = qcPoGroups(true).filter(function (g) { return g.po.id === poId && g.review > 0; });
-      var rows = choices.map(function (x) { return '<button class="btn" data-a="qcSlipOpen" data-id="' + esc(x.s.id) + '">' + esc(x.s.noSlip) + ' · ' + esc(coreSizeText(x.uk)) + ' · ' + esc(namaUser(x.s.maklonId)) + '</button>'; });
-      repairs.forEach(function (x) { rows.push('<button class="btn" data-a="qcRepairOpen" data-id="' + esc(x.q.id) + '">Perbaikan ' + tgl(x.q.tanggal) + ' · ' + esc(coreSizeText(x.uk)) + ' · ' + esc(namaUser(x.q.maklonId)) + '</button>'); });
+      var siapGabung = choices.reduce(function (n, x) { return n + x.sisa; }, 0);
+      var rows = choices.length ? ['<button class="btn pri" data-a="qcCombinedOpen" data-id="' + esc(poId) + '">' + ic('shield') + 'Periksa hitungan baru · ' + nf(siapGabung) + ' pcs</button>'] : [];
+      repairs.forEach(function (x) { rows.push('<button class="btn" data-a="qcRepairOpen" data-id="' + esc(x.q.id) + '">Isi hasil perbaikan ' + tgl(x.q.tanggal) + ' · ' + esc(coreSizeText(x.uk)) + ' · ' + esc(namaUser(x.q.maklonId)) + '</button>'); });
       return sheetHtml('Pilih hitungan atau perbaikan', '<div class="col">' + (rows.length ? rows.join('') : emptyBox(waiting ? nf(waiting) + ' pcs sudah dihitung tetapi QC-nya tertahan. Periksa catatan PO ini dahulu.' : 'Tidak ada hitungan atau perbaikan yang menunggu QC.')) + qcHistoricalNotes(history) + '</div>');
     }, { live: true });
     return;
@@ -12380,11 +12410,12 @@ function openQC(poId, setorId, repairQcId) {
     var uk = repair ? repair.uk : queue.uk;
     return sheetHtml(repair ? 'Hasil perbaikan' : 'Periksa ' + slip.noSlip,
       '<div class="col" data-form="qc">' + hid('id',fid) + hid('poId',poId) + hid('setorId',slip.id) + hid('repairQcId',repairQcId || '') + poHead(po) +
-      '<div class="note">' + esc(namaUser(slip.maklonId)) + '. ' + (repair ? 'Pilih jumlah perbaikan yang sudah selesai. Tarif mengikuti hitungan asal; tanggal berikut menjadi tanggal upah perbaikan.' : 'Isi seluruh hasil untuk setiap ukuran yang ditampilkan. OK + offline + perbaikan + reject harus tepat sejumlah hitungan slip ini; sisa jahitan yang belum disetor diperiksa nanti dengan slipnya sendiri.') + '</div>' +
+      '<div class="note">' + esc(namaUser(slip.maklonId)) + '. ' + (repair ? 'Isi yang sudah kembali dari perbaikan: yang jadi bagus di Bagus / OK, yang tetap jelek di Reject. Yang belum kembali dikosongkan dulu dan bisa diisi lagi nanti. Tarif mengikuti hitungan asal; tanggal berikut menjadi tanggal upah perbaikan.' : 'Isi seluruh hasil untuk setiap ukuran yang ditampilkan. OK + offline + perbaikan + reject harus tepat sejumlah hitungan slip ini; sisa jahitan yang belum disetor diperiksa nanti dengan slipnya sendiri.') + '</div>' +
       qcGrid(uk,!!repair) + sumLine('Total diperiksa') + fTanggal('Tanggal pemeriksaan', 'tanggal') + fCatatan() + '</div>', footSave('qcSave'));
   });
 }
-A.qcRepairOpen = function (el) { var q = S.state.qc.filter(function (x) { return x.id === el.getAttribute('data-id'); })[0]; if (q) openQC(q.poId, q.setorId, q.id); };
+A.qcRepairOpen = function (el) { var q = S.state.qc.filter(function (x) { return x.id === el.getAttribute('data-id'); })[0]; if (q) openQC(q.poId, q.setorId, q.id); else toast('Perbaikan ini sudah tidak menunggu hasil. Muat ulang data.', true); };
+A.qcCombinedOpen = function (el) { openCombinedQC(el.getAttribute('data-id')); };
 A.qcSave = function (el) {
   var f = topForm(), v = formVals(f), maps;
   try {
@@ -12667,6 +12698,8 @@ A.poSave = function (el) {
   if (existing) { var diarsip = poDiarsip(existing); if (v.status === 'arsip') { payload.po.status = existing.status === 'aktif' ? 'selesai' : existing.status; if (!diarsip) arsipBaru = true; } else if (diarsip) arsipBaru = false; }
   if (gambar && gambar.touched) payload.gambarData = gambar.data;
   if (!v.id && poPrepareOwner()) {
+    var kembar = f._poKembarOk || typeof poKembarBelumPotong !== 'function' ? null : poKembarBelumPotong(v.produkId, v.nama);
+    if (kembar) return confirmBox({ title: 'Barang ini sudah punya PO yang belum dipotong', text: (kembar.noPO || 'PO') + ' · ' + kembar.nama + ' (dibuat ' + lalu(kembar.dibuat) + ') belum punya hasil potong. PO itu ada di daftar PO, di bagian Baru dibuat atau di serinya. Kalau itu yang Anda maksud, tekan Batal lalu tutup formulir ini. Tetap buat PO baru untuk barang yang sama?', ok: 'Tetap buat PO baru' }, function () { f._poKembarOk = true; setTimeout(function () { A.poSave(el); }, 0); });
     if(v.materialTiming==='now'){
       try { payload.rencana=v.prepareMode==='legacy'?poLegacyValues(f):rollPreparedValues(f);payload.rencana.id=v.rencanaId;payload.rencana.catatan=''; } catch(e) {return toast(e.message,true);}
     }else payload.deferMaterial=true;
