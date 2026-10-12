@@ -76,6 +76,12 @@ function build() {
     '// Jangan edit output ini; lihat README untuk memperbarui project Apps Script yang sudah ada.\n' +
     '// Berisi logika murni saja, bukan adaptor Google Sheets atau endpoint web app.\n\n';
   const browser = browserOutput(read('index.html'), core);
+  const appVersion = core.match(/var APP_VERSION = '([^']+)'/);
+  const uiVersion = browser.match(/var UI_VERSION = '([^']+)'/);
+  const pageBuild = browser.match(/window\.PK_BUILD = '([^']+)'/);
+  const workerBuild = read('sw.js').match(/var RAKITAN = '([^']+)'/);
+  if (!appVersion || !uiVersion || appVersion[1] !== uiVersion[1]) throw new Error('Versi UI dan core harus sama sebelum rilis.');
+  if (!pageBuild || !workerBuild || pageBuild[1] !== workerBuild[1]) throw new Error('Rakitan halaman dan service worker harus sama sebelum rilis.');
   const outputs = [
     { file: 'apps-script/Core.gs', content: header + core },
     { file: 'apps-script/Index.html', content: appsScriptHtml(browser) }

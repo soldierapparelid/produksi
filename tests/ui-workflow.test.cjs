@@ -13,7 +13,7 @@ function between(a, b) {
 function context() {
   const c = vm.createContext({ console });
   vm.runInContext(fs.readFileSync(path.join(root, 'src/core.js'), 'utf8'), c);
-  vm.runInContext(`var S={state:{setor:[],qc:[],payroll:[]}},D={po:{},user:{}};
+  vm.runInContext(`var S={state:{po:[],setor:[],qc:[],payroll:[]}},D={po:{},user:{}};
     function findSlip(type,id){return S.state.setor.find(function(r){return r.id===id;});}
     function workflowFor(po){return po.workflow;}`, c);
   vm.runInContext(between('function categorySizes(', "VIEWS['q-qc'] ="), c);
@@ -50,7 +50,9 @@ test('the QC queue shows one card per PO with a row per counted slip, and says w
   assert.match(kartu, /Hitung terakhir 2026-10-08/); assert.match(kartu, /SS-1/);
   assert.equal(kartu.split('data-a="qcSlipOpen"').length - 1, 2, 'each counted slip keeps its own Periksa button');
   assert.match(vm.runInContext('qcPoCardHtml(qcPoGroups()[1])', c), /Seluruh jahitan sudah dihitung/);
-  assert.match(html, /miniKpi\(\[\['Antrean', nf\(groups\.length\), 'PO · '/);
+  const queueView=between("VIEWS['q-qc'] =",'A.qcMorePO =');
+  assert.match(queueView, /work = groups\.filter\(function \(g\) \{ return g\.ready \|\| g\.waiting \|\| g\.repairs\.length; \}\)/);
+  assert.match(queueView, /miniKpi\(\[\['Antrean', nf\(work\.length\), 'PO · '/);
 });
 
 test('historical QC ambiguity holds only its baseline count, while a new source stays selectable', () => {
@@ -102,7 +104,7 @@ test('QC opens combined counts first and keeps remaining repair choices live', (
     function namaUser(){return 'Ali';} function tgl(s){return s;} function emptyBox(s){return s;}
     function sheetHtml(title,html){return title+html;} function openSheet(fn,opt){renders.push(fn);options.push(opt);}
     S.state.setor=[{id:'s',noSlip:'SS-001',poId:'p',maklonId:'w',status:'diterima',ukuran:{M:40},total:40}];
-    D.po.p={id:'p',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,siapQC:40,target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0}}}};`, c);
+    D.po.p={id:'p',status:'aktif',workflow:{issues:[],ukuran:{M:{readyQC:true,siapQC:40,target:40,kirim:40,sisaMaklon:0,diajukan:0,diterima:40,rejectJahit:0}}}};S.state.po=[D.po.p];`, c);
   vm.runInContext(between('function qcBalance(', 'function poTahap('), c);
   vm.runInContext(`var combinedPo='';function openCombinedQC(id){combinedPo=id;}`, c);
   vm.runInContext(between('function openQC(', 'A.qcRepairOpen ='), c);

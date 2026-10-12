@@ -19,13 +19,13 @@ function ui() {
   vm.runInContext(`
     var A={}, C={}, calls=[], decodes=[], messages=[], closed=0, quietErrors=[];
     var S={state:{settings:{ukuran:['M']}},tab:''}, D={po:{},produk:{}};
-    var form={isConnected:true,nodes:{},closest:function(){return null;},values:{id:'',newId:'draftpo01',rencanaId:'draftplan01',prepareMode:'legacy',produkId:'product01',jenis:'stok',nama:'Desain baru',series:'Seri',pelanggan:'',deadline:'',bahan:'Katun',catatan:'',noPO:'',status:'aktif'}};
+    var form={isConnected:true,nodes:{},closest:function(){return null;},values:{id:'',newId:'draftpo01',rencanaId:'draftplan01',materialTiming:'now',prepareMode:'legacy',produkId:'product01',jenis:'stok',nama:'Desain baru',series:'Seri',pelanggan:'',deadline:'',bahan:'Katun',catatan:'',noPO:'',status:'aktif'}};
     ['data-po-image','data-po-image-preview','data-po-image-label','data-po-image-remove','data-po-image-input','data-po-image-note','data-po-prepared-notice'].forEach(function(key){form.nodes['['+key+']']={hidden:false,disabled:false,value:'',getAttribute:function(){return '';},removeAttribute:function(k){delete this[k];}};});
     var fileInput=form.nodes['[data-po-image-input]'];fileInput.closest=function(){return form;};
     var removeButton=form.nodes['[data-po-image-remove]'];removeButton.closest=function(){return form;};
     function $(selector,scope){return scope.nodes[selector]||null;}
     function $$(selector,scope){if(selector==='[data-po-active-size]:checked')return [{getAttribute:function(){return 'M';}}];if(selector==='input,select,textarea,button')return Object.keys(form.nodes).map(function(k){return form.nodes[k];});return [];}
-    function me(){return {id:'owner01',divisi:'owner'};}function poPrepareHtml(){return '';}function poLegacyValues(){return {bahanList:[{nama:'Katun',qty:2,satuan:'kg'}],rol:1};}function applyState(state){S.state=state;}function refresh(){}
+    function me(){return {id:'owner01',divisi:'owner'};}function poNewMaterialsHtml(){return '';}function poLegacyValues(){return {bahanList:[{nama:'Katun',qty:2,satuan:'kg'}],rol:1};}function applyState(state){S.state=state;}function refresh(){}
     function topForm(){return form;}function formVals(f){return Object.assign({},f.values);}function sizeVals(){return {M:2};}
     function fileToThumb(file){return new Promise(function(resolve,reject){decodes.push({file:file,resolve:resolve,reject:reject});});}
     function req(action,payload){return new Promise(function(resolve,reject){calls.push({action:action,payload:payload,resolve:resolve,reject:reject});});}
