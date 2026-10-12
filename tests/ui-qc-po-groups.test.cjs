@@ -37,10 +37,10 @@ test('multiple counted batches form one PO card with actual count dates, slip ID
   assert.match(view,/data-qc-batch="a"/);assert.match(view,/data-qc-batch="b"/);assert.doesNotMatch(view,/data-qc-batch="pending"/);
   assert.match(view,/data-a="qcSlipOpen" data-id="a"/);assert.match(view,/data-a="slip" data-t="setor" data-id="b"/);
 });
-test('a partial PO remains visible after its existing batch is QCed, then admits a later counted batch without calling the PO complete',()=>{
+test('a PO with no remaining QC work leaves the queue, then admits a later counted batch',()=>{
   const h=harness(),source=receipt('a',10),q={id:'q',poId:'p',setorId:'a',maklonId:'w',tanggal:'2026-10-08',ukuran:{M:10},total:10};
-  load(h,[po()],[source],[q]);assert.equal(h.groups().length,1);assert.equal(h.groups()[0].ready,0);
-  let view=h.VIEWS['q-qc']();assert.match(view,/QC selesai/);assert.match(view,/Tunggu setoran berikutnya; PO belum selesai/);assert.doesNotMatch(view,/data-a="qcSlipOpen"/);
+  load(h,[po()],[source],[q]);assert.equal(h.groups().length,0);assert.equal(h.D.po.p.workflow.complete,false);
+  let view=h.VIEWS['q-qc']();assert.equal(countCards(view),0);assert.doesNotMatch(view,/data-a="qcSlipOpen"/);assert.equal(h.S.state.setor.length,1);assert.equal(h.S.state.qc.length,1);
   load(h,[po()],[source,receipt('b',30,'2026-10-09')],[q]);assert.equal(h.groups()[0].countComplete,true);assert.equal(h.groups()[0].ready,30);
   view=h.VIEWS['q-qc']();assert.equal(countCards(view),1);assert.match(view,/Seluruh jahitan sudah dihitung/);assert.match(view,/data-a="qcSlipOpen" data-id="b"/);assert.doesNotMatch(view,/data-a="qcSlipOpen" data-id="a"/);
   load(h,[po()],[source,receipt('b',30,'2026-10-09')],[q,{id:'q2',poId:'p',setorId:'b',maklonId:'w',tanggal:'2026-10-09',ukuran:{M:30},total:30}]);assert.equal(h.groups().length,0);
@@ -85,16 +85,16 @@ test('the collapsed PO summary shows its latest chosen physical-count date befor
   const view=h.VIEWS['q-qc'](),summary=view.slice(0,view.indexOf('<details'));
   assert.match(summary,/Hitung terakhir 2026-10-09/);assert.doesNotMatch(summary,/Hitung terakhir 2026-10-10/);
 });
-test('source-only legacy issues do not claim a sewing remainder or ask for another delivery',()=>{
+test('source-only legacy issues do not create a zero-work QC card after all linked receipts are checked',()=>{
   const h=harness(),p=po();p.imporReview='Hubungan historis perlu ditinjau';
   load(h,[p],[receipt('full',40)],[{id:'q',poId:'p',setorId:'full',maklonId:'w',tanggal:'2026-10-08',ukuran:{M:40},total:40}]);
-  const groups=h.groups();assert.equal(groups.length,1);assert.equal(groups[0].atSewing,0);assert.equal(groups[0].pendingCount,0);assert.equal(groups[0].ready,0);
-  const view=h.VIEWS['q-qc']();assert.match(view,/Status hitungan perlu diperiksa/);assert.match(view,/Kelengkapan PO belum terverifikasi/);assert.doesNotMatch(view,/Tunggu setoran berikutnya|Hitungan belum lengkap/);
+  const groups=h.groups();assert.equal(groups.length,0);assert.equal(h.S.state.setor.length,1);assert.equal(h.S.state.qc.length,1);
+  const view=h.VIEWS['q-qc']();assert.equal(countCards(view),0);assert.doesNotMatch(view,/Tunggu setoran berikutnya|Hitungan belum lengkap/);
 });
-test('pending cutting keeps the PO card relevant without incorrectly asking for more sewing deliveries',()=>{
+test('pending cutting remains in PO workflow without creating a zero-work QC card',()=>{
   for(const pending of [{pendingCutPlans:true},{pendingCutSizes:['L']}]){
     const h=harness(),p=po();load(h,[p],[receipt('full',40)],[{id:'q',poId:'p',setorId:'full',maklonId:'w',tanggal:'2026-10-08',ukuran:{M:40},total:40}]);Object.assign(p.workflow,pending);
-    assert.equal(h.groups().length,1);const view=h.VIEWS['q-qc']();assert.match(view,/Pekerjaan PO belum lengkap/);assert.match(view,/Masih ada pekerjaan potong atau penugasan/);assert.doesNotMatch(view,/Tunggu setoran berikutnya|Seluruh jahitan sudah dihitung/);
+    assert.equal(h.groups().length,0);assert.equal(p.workflow.pendingCutPlans||p.workflow.pendingCutSizes.length>0,true);const view=h.VIEWS['q-qc']();assert.equal(countCards(view),0);assert.doesNotMatch(view,/Tunggu setoran berikutnya|Seluruh jahitan sudah dihitung/);
   }
 });
 

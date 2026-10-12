@@ -7,7 +7,7 @@ function ui(){const c=vm.createContext({console});vm.runInContext(fs.readFileSyn
  var stock=[{kunci:'katun',nama:'Katun',satuan:'kg',saldo:30,tersedia:25,legacyTersedia:10},{kunci:'rib',nama:'Rib',satuan:'kg',saldo:4,tersedia:4,legacyTersedia:0}];
  var rolls=[{id:'rollA',bahan:'Katun',satuan:'kg',qty:8,tersedia:5,invoice:'BON-A',rollLabel:'Rol 1'},{id:'rollB',bahan:'Katun',satuan:'kg',qty:10,tersedia:10,invoice:'BON-A',rollLabel:'Rol 2'},{id:'rollC',bahan:'Rib',satuan:'kg',qty:4,tersedia:4,invoice:'BON-B',rollLabel:'Rol 1'}];
  var S={state:{po:[],users:[],produk:[],stokRol:rolls,stokRingkas:stock,rencanaPotong:[],settings:{ukuran:['M']}},tab:'po',f:{},sub:{}},sheet={};
- var form={values:{id:'',newId:'newpo001',rencanaId:'newpo001_cut',produkId:'product',jenis:'stok',nama:'Kaos',series:'Seri',pelanggan:'',deadline:'',bahan:'',catatan:'Catatan',noPO:'',status:'aktif',siapkanPotong:true,prepareMode:'roll',legacyRol:'0'},meta:{},choices:[],legacy:[],controls:[],closest:function(){return sheet;}};
+ var form={values:{id:'',newId:'newpo001',rencanaId:'newpo001_cut',produkId:'product',jenis:'stok',nama:'Kaos',series:'Seri',pelanggan:'',deadline:'',bahan:'',catatan:'Catatan',noPO:'',status:'aktif',materialTiming:'now',prepareMode:'roll',legacyRol:'0'},meta:{},choices:[],legacy:[],controls:[],closest:function(){return sheet;}};
  function element(attrs){return {disabled:false,attributes:attrs||{},getAttribute:function(k){return this.attributes[k]||'';},closest:function(){return form;},classList:{add:function(){},remove:function(){}}};}
  function choice(id,qty,checked){var row={selected:{checked:checked!==false},input:{value:String(qty),disabled:checked===false},getAttribute:function(){return id;}};return row;}
  form.choices=[choice('rollA',5),choice('rollC',2)];form.meta['[data-roll-picker]']={getAttribute:function(){return '';}};form.meta['[data-roll-summary]']={textContent:''};form.meta['[data-po-prepared-notice]']={hidden:true,innerHTML:''};
@@ -25,8 +25,8 @@ function ui(){const c=vm.createContext({console});vm.runInContext(fs.readFileSyn
  function req(action,payload){return new Promise(function(resolve,reject){requests.push({action:action,payload:payload,resolve:resolve,reject:reject});});}
  `,c);vm.runInContext(part('function fTanggal(','/* ---------- hitungan PO'),c);vm.runInContext(part('function rencanaPotongById(','function rencanaPotongPanel('),c);vm.runInContext(part('function poPrepareOwner()','A.poNew ='),c);vm.runInContext(part('function openPO(id, produkId)','C.poJenisForm ='),c);vm.runInContext(part('A.poSave = function','A.poDelete ='),c);return {c,run:s=>vm.runInContext(s,c),json:s=>JSON.parse(vm.runInContext('JSON.stringify('+s+')',c)),resolve(i,v){c.requests[i].resolve(v);},reject(i,msg='Jawaban belum diterima'){c.requests[i].reject(Object.assign(new Error(msg),{uncertain:true}));}};}
 
-test('product and custom new PO share obvious prepared-material choices, while non-owner has no allocation control',()=>{
- const h=ui();for(const product of ['', 'product']){h.run(`openPO('',${JSON.stringify(product)})`);const html=h.run('rendered');assert.match(html,/Bahan potong \(wajib\)/);assert.doesNotMatch(html,/name="siapkanPotong"|siapkan nanti/);assert.match(html,/Saldo lama/);assert.match(html,/data-po-image/);assert.match(html,/data-roll-picker/);assert.match(html,/PO baru harus memiliki bahan dan jumlah yang disiapkan/);}
+test('product and custom new PO default to preparing materials later, with stock choices available now',()=>{
+ const h=ui();for(const product of ['', 'product']){h.run(`openPO('',${JSON.stringify(product)})`);const html=h.run('rendered');assert.match(html,/name="materialTiming"/);assert.match(html,/value="later" selected[^>]*>Siapkan bahan nanti/);assert.match(html,/data-po-material-now hidden/);assert.match(html,/Saldo lama/);assert.match(html,/data-po-image/);assert.match(html,/data-roll-picker/);assert.doesNotMatch(html,/Bahan potong \(wajib\)|PO baru harus memiliki bahan/);}
  h.run("actor.divisi='admin';openPO('','product')");assert.doesNotMatch(h.run('rendered'),/data-roll-picker|siapkanPotong/);
 });
 
@@ -57,7 +57,7 @@ test('duplicate, stale, excessive or malformed selected roll quantities block su
  h.run("actor.divisi='potong'");assert.throws(()=>h.run('rollPickerValues(form)'),/owner/);
 });
 test('PO and specific rolls submit in one action with stable IDs and image, duplicate tap sends once',async()=>{
- const h=ui();h.run("form.values.siapkanPotong=false;form._poImage={touched:true,data:'data:image/jpeg;base64,example'}");const done=h.run('A.poSave(button)');h.run('A.poSave(button)');await Promise.resolve();
+ const h=ui();h.run("form._poImage={touched:true,data:'data:image/jpeg;base64,example'}");const done=h.run('A.poSave(button)');h.run('A.poSave(button)');await Promise.resolve();
  assert.equal(h.run('requests.length'),1);assert.equal(h.run('requests[0].action'),'savePOWithRencana');assert.equal(h.run('requests[0].payload.po.newId'),'newpo001');assert.equal(h.run('requests[0].payload.rencana.id'),'newpo001_cut');assert.equal(h.run('requests[0].payload.gambarData'),'data:image/jpeg;base64,example');assert.equal(h.run('form._poPreparedFrozen'),true);
  h.resolve(0,{po:{id:'newpo001'},rencana:{id:'newpo001_cut'},pending:false});await done;assert.equal(h.run('closed'),1);
 });
