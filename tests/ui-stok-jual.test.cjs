@@ -5,7 +5,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const root=path.resolve(__dirname,'..'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 function part(a,b){const p=html.indexOf(a),q=html.indexOf(b,p+a.length);assert.ok(p>=0&&q>p,a);return html.slice(p,q);}
 function ui(){
-  const c=vm.createContext({console,TextDecoder,DataView,Uint8Array,ArrayBuffer,Response,Blob,DecompressionStream,Promise,Date});
+  const c=vm.createContext({console,TextDecoder,DataView,Uint8Array,ArrayBuffer,Response,Blob,DecompressionStream,Promise,Date,setTimeout});
   vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);
   vm.runInContext(`
     var A={},C={},VIEWS={},messages=[],rendered=0,opened=null,closed=0,sheet='',store={},form={values:{}};
@@ -18,7 +18,7 @@ function ui(){
     function cocok(q,parts){q=String(q||'').toLowerCase();return !q||parts.join(' ').toLowerCase().indexOf(q)>=0;}
     function seg(k,o,cur){return o.map(function(x){return '['+x[1]+(x[0]===cur?'*':'')+']';}).join('');}
     function poUkuranPotong(po){return po._belum||[];}function poWarna(po){return po._tahap||'maklon';}function T(po){diproyeksi++;return {};}function workflowFor(po){return po.workflow||{ukuran:{}};}var diproyeksi=0;
-    function openPO(id,p){opened=p;}function openSheet(fn){sheet=fn();}function sheetHtml(t,b,f){return t+b+(f||'');}function pickList(){return '';}
+    function openPO(id,p){opened=p;openedId=id;}var openedId=null,dibuka=null;function $(sel,f){return f&&f.nodes&&f.nodes[sel]||null;}A.poOpen=function(el){dibuka=el.getAttribute('data-id');};function openSheet(fn){sheet=fn();}function sheetHtml(t,b,f){return t+b+(f||'');}function pickList(){return '';}
     function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fNum(l,n,v){return '<input name="'+n+'" value="'+esc(v)+'">';}function footSave(a){return a;}
     function topForm(){return form;}function formVals(){return Object.assign({},form.values);}function dropForm(){closed++;}
     var calls=[],sheetsClosed=0;function closeSheet(){sheetsClosed++;}function newId(){return 'id-baru';}function act(el,p){return p;}function quiet(e){messages.push([e&&e.message,true]);}
@@ -92,26 +92,41 @@ test('each size is red, yellow or green from the stock, the warning level and th
   /* a PO without a product id is matched by the item name */
   run(c,"delete S.sj.link['SA-UJI-KBD-HJ'].batas;S.state.po[0].produkId='';S.state.po[0].nama=' kaos uji hijau '");assert.equal(lihat()['SA-UJI-KBD-HJ'][0],'jalan');
 });
-test('the screen lists what needs a new PO first and the owner links, tunes and starts a PO from a card',()=>{
+test('the screen lists what needs a new PO first in short cards, and the owner links, hides, tunes and starts a PO from a card',()=>{
   const c=ui();assert.match(run(c,'VIEWS.stokjual()'),/Belum ada data stok[\s\S]*Rincian Stok/);assert.match(run(c,'VIEWS.stokjual()'),/Unggah stok BigSeller<input type="file" accept="\.xlsx" data-c="sjFile" hidden>/);
   seed(c);let view=run(c,'VIEWS.stokjual()');
-  assert.match(view,/\[Perlu PO 2\*\]\[Diproduksi 0\]\[Aman 1\]\[Belum dihubungkan 2\]\[Semua\]/);assert.match(view,/5 SKU · 3 barang · 2 belum dihubungkan · tersimpan di perangkat ini saja/);
+  assert.match(view,/\[Perlu PO 2\*\]\[Diproduksi 0\]\[Aman 1\]\[Belum dihubungkan 2\]\[Semua\]/);assert.match(view,/Stok BigSeller baru saja · 3 barang · tersimpan di perangkat ini saja/);
   assert.ok(view.indexOf('Kaos Uji Hijau')>0&&view.indexOf('Kaos Uji Hijau')<view.indexOf('Topi uji'),'the item with more thin sizes comes first');
-  assert.match(view,/<div class="sj-sel jalan"><b>M<\/b><span class="sj-n">5<\/span><span class="xs">\+30 jalan<\/span><\/div><div class="sj-sel aman"><b>L<\/b><span class="sj-n">98<\/span><span class="xs">batas 20<\/span><\/div><div class="sj-sel perlu"><b>XL<\/b><span class="sj-n">0<\/span><span class="xs">batas 10<\/span><\/div>/);
-  assert.match(view,/background-image:url\(&quot;https:\/\/img\.example\.test\/sku\/a\.jpg\?imageView2\/1\/w\/300\/h\/300&quot;\)/);assert.match(view,/data-a="poOpen" data-id="po1">PO-1 · di penjahit/);assert.match(view,/<span class="chip bad">Perlu PO ulang<\/span><span class="chip">Warna HJ<\/span>/,'the colour code of the SKU is shown');assert.match(html,/qc: 'menunggu QC'/);assert.match(view,/class="btn sm pri" data-a="sjPO" data-k="SA-UJI-KBD-HJ"/);
-  assert.match(view,/SA-UJI-TOP-HT · belum dihubungkan ke barang[\s\S]*data-a="sjHubung" data-k="SA-UJI-TOP-HT">Hubungkan ke barang/);assert.doesNotMatch(view,/Barang satuan|javascript:/);
-  run(c,"S.sub.sj='aman'");assert.match(run(c,'VIEWS.stokjual()'),/Barang satuan[\s\S]*<b>Stok<\/b><span class="sj-n">50/);assert.doesNotMatch(run(c,'VIEWS.stokjual()'),/Warna /,'a SKU without the usual parts has no colour mark');
+  /* one small pill per size: size and stock; the colour says the rest */
+  assert.match(view,/<span class="sj-sel jalan"><b>M<\/b><span class="sj-n">5<\/span><\/span><span class="sj-sel aman"><b>L<\/b><span class="sj-n">98<\/span><\/span><span class="sj-sel perlu"><b>XL<\/b><span class="sj-n">0<\/span><\/span><\/div>/);
+  /* what to do, in words */
+  assert.match(view,/<div class="small sj-perlu"><b>Perlu PO:<\/b> XL<\/div><div class="small muted"><b>Sedang diproduksi:<\/b> M 30<\/div>/);
+  assert.doesNotMatch(view,/batas \d|Hubungkan dulu ke barangnya|class="chip|Antre potong/,'no level under every size, no helper paragraph, no chips');
+  assert.match(view,/background-image:url\(&quot;https:\/\/img\.example\.test\/sku\/a\.jpg\?imageView2\/1\/w\/300\/h\/300&quot;\)/);
+  assert.match(view,/class="btn sm pri" data-a="sjPO" data-k="SA-UJI-KBD-HJ">Buat PO<\/button><button class="btn sm ghost" data-a="poOpen" data-id="po1" title="di penjahit">PO-1<\/button><button class="btn sm ghost" data-a="sjAtur" data-k="SA-UJI-KBD-HJ">Atur/);assert.match(html,/qc: 'menunggu QC'/);
+  /* an item that is not linked yet: the stock is known, the production is not */
+  assert.match(view,/Topi uji<\/div><div class="xs muted">SA-UJI-TOP-HT · warna HT<\/div>[\s\S]*<div class="small sj-perlu"><b>Stok tipis:<\/b> 58<\/div><div class="row wrap gap-s"><button class="btn sm pri" data-a="sjHubung" data-k="SA-UJI-TOP-HT">Hubungkan<\/button><button class="btn sm ghost" data-a="sjSembunyi" data-k="SA-UJI-TOP-HT">Sembunyikan<\/button>/);
+  assert.doesNotMatch(view,/Barang satuan|javascript:/);
+  run(c,"S.state.po[0]._belum=['XL']");view=run(c,'VIEWS.stokjual()');assert.match(view,/\[Perlu PO 1\*\]\[Diproduksi 1\]/);run(c,"S.sub.sj='jalan'");view=run(c,'VIEWS.stokjual()');
+  assert.match(view,/<div class="small muted"><b>Antre potong:<\/b> XL<\/div><div class="small muted"><b>Sedang diproduksi:<\/b> M 30<\/div>/);assert.doesNotMatch(view,/Perlu PO:|data-a="sjPO"/,'nothing to order: no order button');run(c,"delete S.state.po[0]._belum");
+  run(c,"S.sub.sj='aman'");view=run(c,'VIEWS.stokjual()');assert.match(view,/Barang satuan[\s\S]*<b>Stok<\/b><span class="sj-n">50<\/span><\/span><\/div><div class="small muted">Stok aman<\/div>/);assert.doesNotMatch(view,/warna /,'a SKU without the usual parts has no colour');
+  /* hide with one tap, show again from the hidden tab */
+  run(c,"S.sub.sj='perlu';A.sjSembunyi({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");assert.deepEqual(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'],{sembunyi:1});assert.match(c.messages.slice(-1)[0][0],/Disembunyikan/);
+  view=run(c,'VIEWS.stokjual()');assert.doesNotMatch(view,/data-k="SA-UJI-TOP-HT"/);assert.match(view,/\[Perlu PO 1\*\][\s\S]*\[Disembunyikan 1\]/);
+  run(c,"S.sub.sj='sembunyi'");assert.match(run(c,'VIEWS.stokjual()'),/<div class="row wrap gap-s"><button class="btn sm" data-a="sjSembunyi" data-k="SA-UJI-TOP-HT">Tampilkan lagi<\/button><\/div>/);
+  run(c,"A.sjSembunyi({getAttribute:function(){return 'SA-UJI-TOP-HT';}});S.sub.sj='perlu'");assert.deepEqual(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'],{});assert.match(run(c,'VIEWS.stokjual()'),/data-k="SA-UJI-TOP-HT">Hubungkan/);
   /* start a PO for the linked item */
   run(c,"A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.equal(c.opened,'p1');assert.deepEqual(plain(c.messages.slice(-1)),[['Ukuran yang perlu: XL',false]]);
   run(c,"opened=null;A.sjPO({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");assert.equal(c.opened,null);assert.equal(c.messages.slice(-1)[0][1],true);
   /* link an item: the choice is stored on this device */
-  run(c,"A.sjHubung({getAttribute:function(){return 'SA-UJI-TOP-HT';}});S.pick.cb('p1')");assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'].p,'p1');assert.match(c.sheet,/Barang untuk SA-UJI-TOP-HT[\s\S]*Topi uji<\/div><div class="xs muted">SA-UJI-TOP-HT · warna HT<\/div>[\s\S]*data-a="sjBarangBaru" data-k="SA-UJI-TOP-HT">Belum ada di aplikasi: buat barang baru/,'the sheet shows what BigSeller knows about the item and offers to create it');
-  /* tune: own level, selling well, hidden */
-  run(c,"A.sjAtur({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.match(c.sheet,/Atur SA-UJI-KBD-HJ[\s\S]*Kaos Uji Hijau[\s\S]*name="laku"[\s\S]*name="sembunyi"[\s\S]*data-a="sjLepas"/);
+  run(c,"A.sjHubung({getAttribute:function(){return 'SA-UJI-TOP-HT';}});S.pick.cb('p1')");assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'].p,'p1');
+  assert.match(c.sheet,/Barang untuk SA-UJI-TOP-HT[\s\S]*Topi uji<\/div><div class="xs muted">SA-UJI-TOP-HT · warna HT<\/div>[\s\S]*data-a="sjBarangBaru" data-k="SA-UJI-TOP-HT">Belum ada di aplikasi: buat barang baru/,'the sheet shows what BigSeller knows about the item and offers to create it');
+  /* tune: the levels in use are shown there; own level, selling well, hidden */
+  run(c,"A.sjAtur({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.match(c.sheet,/Atur SA-UJI-KBD-HJ[\s\S]*Kaos Uji Hijau<\/div><div class="xs muted">Batas sekarang: M 20 · L 20 · XL 10<\/div>[\s\S]*name="laku"[\s\S]*name="sembunyi"[\s\S]*data-a="sjLepas"/);
   run(c,"form.values={k:'SA-UJI-KBD-HJ',batas:'30',laku:true,sembunyi:false};A.sjAturSave()");assert.deepEqual(JSON.parse(c.store.pk_stoklink)['SA-UJI-KBD-HJ'],{p:'p1',batas:30,laku:1});
-  run(c,"S.sub.sj='semua'");view=run(c,'VIEWS.stokjual()');assert.match(view,/Lagi laku/);assert.match(view,/<b>M<\/b><span class="sj-n">5<\/span>/);
+  run(c,"S.sub.sj='semua'");view=run(c,'VIEWS.stokjual()');assert.match(view,/SA-UJI-KBD-HJ · UJI · lagi laku<\/div>/);assert.match(view,/<b>M<\/b><span class="sj-n">5<\/span>/);
   run(c,"form.values={k:'SA-UJI-KBD-HJ',batas:'',laku:false,sembunyi:true};A.sjAturSave()");assert.deepEqual(JSON.parse(c.store.pk_stoklink)['SA-UJI-KBD-HJ'],{p:'p1',sembunyi:1});
-  view=run(c,'VIEWS.stokjual()');assert.doesNotMatch(view,/data-k="SA-UJI-KBD-HJ"/,'a hidden item leaves every list');assert.match(view,/\[Disembunyikan 1\]/);run(c,"S.sub.sj='sembunyi'");assert.match(run(c,'VIEWS.stokjual()'),/data-k="SA-UJI-KBD-HJ"/);
+  view=run(c,'VIEWS.stokjual()');assert.doesNotMatch(view,/data-k="SA-UJI-KBD-HJ"/,'a hidden item leaves every list');assert.match(view,/\[Disembunyikan 1\]/);run(c,"S.sub.sj='sembunyi'");assert.match(run(c,'VIEWS.stokjual()'),/data-k="SA-UJI-KBD-HJ">Tampilkan lagi/);
   run(c,"A.sjLepas({getAttribute:function(){return 'SA-UJI-KBD-HJ';},closest:function(){return null;}})");assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-KBD-HJ'].p,undefined);
 });
 test('the screen is reachable from the owner menu, the PO page and Lainnya; the server is not involved',()=>{
@@ -133,4 +148,19 @@ test('an item that BigSeller has and the app does not is created from the link s
   /* a refused save keeps the form and links nothing */
   const g=ui();seed(g);run(g,"form.values={k:'SA-UJI-TOP-HT',newId:'x',nama:'Kaos Uji Hijau',series:'UJI'};A.sjBarangSave({})");g.calls[0].reject(new Error('Produk KAOS UJI HIJAU (UJI) sudah ada.'));await new Promise(r=>setTimeout(r,10));
   assert.equal(g.store.pk_stoklink,undefined);assert.equal(g.closed,0);assert.match(g.messages.slice(-1)[0][0],/sudah ada/);run(g,"A.sjBarangSave({})");assert.equal(g.calls.length,2,'the owner can try again');
+});
+test('thin sizes join a PO of the same item that is not cut yet instead of becoming a second PO',async()=>{
+  const c=ui();seed(c);run(c,"D.po.po1=S.state.po[0];S.state.po[0].agg={ukuran:{}};S.state.po[0]._belum=['M','L']");
+  let view=run(c,'VIEWS.stokjual()');
+  assert.match(view,/<b>Perlu PO:<\/b> XL<\/div><div class="small muted"><b>Antre potong:<\/b> M · L<\/div>/);
+  assert.match(view,/class="btn sm pri" data-a="sjTambah" data-k="SA-UJI-KBD-HJ" data-id="po1">Tambah ke PO-1<\/button>/);assert.doesNotMatch(view,/data-a="sjPO"/,'one button: no second PO for the same item');
+  const el="{getAttribute:function(a){return a==='data-k'?'SA-UJI-KBD-HJ':'po1';}}";
+  run(c,"form.nodes={'[data-po-active-size=\"XL\"]':{checked:false},'[data-po-active-size=\"M\"]':{checked:true}};A.sjTambah("+el+")");await new Promise(r=>setTimeout(r,120));
+  assert.equal(c.openedId,'po1','the edit form of that PO opens');assert.equal(c.opened,'');assert.equal(c.form.nodes['[data-po-active-size="XL"]'].checked,true,'the size is ticked for the owner to check and save');
+  assert.deepEqual(plain(c.messages.slice(-1)),[['Ukuran XL sudah dicentang. Periksa, lalu Simpan.',false]]);
+  /* a size that was released from that PO is switched back on from the PO sheet */
+  run(c,"S.state.po[0].cutting={lepasUkuran:['XL']};openedId=null;A.sjTambah("+el+")");assert.equal(c.dibuka,'po1');assert.equal(c.openedId,null);assert.match(c.messages.slice(-1)[0][0],/pernah dilepas dari PO ini\. Klik "Aktifkan lagi ukuran XL"/);
+  run(c,"A.sjTambah({getAttribute:function(a){return a==='data-k'?'SA-UJI-KBD-HJ':'hilang';}})");assert.equal(c.messages.slice(-1)[0][1],true);
+  /* once the PO has been cut, a new PO is the way */
+  run(c,"delete S.state.po[0].cutting;S.state.po[0].agg={ukuran:{M:{potong:30}}};S.state.po[0]._belum=[]");view=run(c,'VIEWS.stokjual()');assert.match(view,/data-a="sjPO" data-k="SA-UJI-KBD-HJ">Buat PO/);assert.doesNotMatch(view,/sjTambah/);
 });
