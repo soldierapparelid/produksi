@@ -2,6 +2,12 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.39 - status PO mengikuti riwayat produksi
+
+- PO yang sudah memiliki hasil potong, penugasan, hitungan, atau QC tidak kembali berlabel **Belum dipotong** ketika tidak ada pekerjaan lanjutan yang siap.
+- Riwayat lama yang masih perlu dicocokkan ditandai **Catatan lama perlu diperiksa**. Pekerjaan baru yang sah tetap ditampilkan sesuai tahapnya; status selesai tetap memerlukan bukti lengkap.
+- Perbaikan tampilan tidak mengubah jumlah produksi, stok, pembayaran, maupun arsip. Perbarui Core.gs dan Index.html bersama pada deployment yang sama.
+
 ## Rilis 1.5.38 - ukuran QC jelas dan bahan PO dapat disiapkan belakangan
 
 - Kartu QC langsung memperlihatkan jumlah siap diperiksa per ukuran (misalnya L 142 pcs dan XL 20 pcs), sehingga total gabungan tidak terlihat seperti duplikasi. Perbaikan dan jumlah tertahan ditampilkan terpisah per ukuran, sesuai sisa sumbernya.
