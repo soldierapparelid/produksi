@@ -135,24 +135,32 @@ test('sizes the owner released are shown as not to be cut; the release is asked 
   assert.match(html,/data-a="lepasUkuran"' \+ d \+ ' data-v="1">Tidak jadi dipotong: /);
   assert.match(html,/if \(\(c\.lepasUkuran \|\| \[\]\)\.length && !\(c\.pendingUkuran \|\| \[\]\)\.length\) return false;/,'the cutter no longer waits for a PO whose remaining sizes were released');
 });
-test('1.5.40: a PO made in the last two days is listed first under "Baru dibuat", and a second PO for an item that is not cut yet asks first',()=>{
+test('1.5.40: POs that still have sizes to cut are listed first under "Harus dipotong", once and newest first; a second PO for an item that is not cut yet asks first',()=>{
   const h=ui(),kini=new Date().toISOString(),kemarin=new Date(Date.now()-30*3600*1000).toISOString(),lama=new Date(Date.now()-5*86400000).toISOString();
   h.run("function lalu(){return 'tadi';}function poAktif(){return S.state.po.filter(function(p){return p.status==='aktif';});}");
-  h.c.fixture=[po('n1',{nama:'Polo Baru',series:'Zulu',noPO:'PO-9',produkId:'pr1',dibuat:kini}),po('n2',{nama:'Kaos Kemarin',series:'Alfa',dibuat:kemarin,t:{potong:5,siapKirim:5}}),po('o1',{nama:'Lama',series:'Alfa',dibuat:lama}),po('i1',{nama:'Impor',series:'Alfa',dibuat:kini,asal:'lama'}),po('s1',{nama:'Selesai',series:'Alfa',dibuat:kini,status:'selesai'})];
+  h.c.fixture=[po('n1',{nama:'Polo Baru',series:'Zulu',noPO:'PO-9',produkId:'pr1',dibuat:kini,ukuranAktif:['M','L']}),
+    po('n2',{nama:'Kaos Kemarin',series:'Alfa',dibuat:kemarin,ukuranAktif:['M'],agg:{ukuran:{M:{potong:5}}},t:{potong:5,siapKirim:5}}),
+    po('o1',{nama:'Lama',series:'Alfa',dibuat:lama,ukuranAktif:['M','L'],agg:{ukuran:{M:{potong:3}}},t:{potong:3,kirim:3,sisaMaklon:3}}),
+    po('i1',{nama:'Impor',series:'Alfa',dibuat:'',asal:'lama',ukuran:{XL:10}}),
+    po('s1',{nama:'Selesai',series:'Alfa',dibuat:kini,status:'selesai',ukuranAktif:['M']})];
   h.run('seed(fixture,[])');const view=h.run('VIEWS.po()');
-  const strip=view.slice(at(view,'id="po-baru"'),at(view,'po-legenda'));
-  assert.match(strip,/<h3>Baru dibuat<\/h3><span class="xs muted">2 PO dalam 2 hari terakhir/);
-  assert.ok(at(strip,'data-id="n1"')<at(strip,'data-id="n2"'),'newest first');
-  for(const id of ['o1','i1','s1'])assert.ok(!strip.includes('data-id="'+id+'"'),id+' is not new, was imported, or is finished');
-  assert.match(strip,/Polo Baru[\s\S]*?PO-9 · Zulu[\s\S]*?Dibuat tadi/);
-  assert.ok(at(view,'id="po-baru"')<at(view,'<h3>Alfa</h3>'),'above the series');const sisa=view.slice(at(view,'po-legenda'));assert.ok(!sisa.includes('data-id="n1"')&&!sisa.includes('data-id="n2"'),'a new PO is shown once: not repeated in its series');assert.ok(!view.includes('<h3>Zulu</h3>'),'a series whose only PO is new has nothing left to list');assert.match(sisa,/data-id="o1"/);
-  h.run('seed([fixture[0]],[])');const hanyaBaru=h.run('VIEWS.po()');assert.match(hanyaBaru,/id="po-baru"/);assert.ok(!hanyaBaru.includes('Tidak ada PO'),'only new POs: still a list, not the empty note');h.run('seed(fixture,[])');
+  const atas=view.slice(at(view,'id="po-potong"'),at(view,'po-legenda'));
+  assert.match(atas,/<h3>Harus dipotong<\/h3><span class="xs muted">3 PO · terbaru di atas/);
+  assert.ok(at(atas,'data-id="n1"')<at(atas,'data-id="o1"')&&at(atas,'data-id="o1"')<at(atas,'data-id="i1"'),'newest first, records without a date last');
+  for(const id of ['n2','s1'])assert.ok(!atas.includes('data-id="'+id+'"'),id+' is fully cut or finished');
+  assert.match(atas,/class="po w-potong" data-a="poOpen" data-id="n1"/,'the ordinary PO card');assert.match(atas,/Polo Baru[\s\S]*?PO-9 · Zulu[\s\S]*?Dibuat tadi/);
+  assert.equal((atas.match(/Dibuat tadi/g)||[]).length,1,'only a PO of the last two days says when it was made');
+  const sisa=view.slice(at(view,'po-legenda'));
+  for(const id of ['n1','o1','i1'])assert.ok(!sisa.includes('data-id="'+id+'"'),id+' is shown once: not repeated in its series');
+  assert.ok(!view.includes('<h3>Zulu</h3>'),'a series with nothing else has nothing left to list');assert.match(sisa,/<h3>Alfa<\/h3>[\s\S]*data-id="n2"/);
+  assert.ok(at(view,'id="po-potong"')<at(view,'<h3>Alfa</h3>'),'above the series');
+  h.run('seed([fixture[0]],[])');const hanya=h.run('VIEWS.po()');assert.match(hanya,/id="po-potong"/);assert.ok(!hanya.includes('Tidak ada PO'),'only POs to cut: still a list, not the empty note');h.run('seed(fixture,[])');
   /* a search, a stage filter or another tab shows the plain list */
-  h.run("S.f.q='polo'");assert.ok(!h.run('VIEWS.po()').includes('po-baru'));h.run("S.f.q='';S.f.poTahap='kirim'");assert.ok(!h.run('VIEWS.po()').includes('po-baru'));
-  h.run("S.f.poTahap='';S.f.poStatus='selesai'");assert.ok(!h.run('VIEWS.po()').includes('po-baru'));
+  h.run("S.f.q='polo'");assert.ok(!h.run('VIEWS.po()').includes('po-potong'));h.run("S.f.q='';S.f.poTahap='kirim'");assert.ok(!h.run('VIEWS.po()').includes('po-potong'));
+  h.run("S.f.poTahap='';S.f.poStatus='selesai'");assert.ok(!h.run('VIEWS.po()').includes('po-potong'));
   /* the same product (or the same name when there is no product) that has no cut and no assignment yet */
   assert.equal(h.run("poKembarBelumPotong('pr1','apa saja').id"),'n1');assert.equal(h.run("poKembarBelumPotong('','  kaos kemarin ')"),null,'already cut');
-  assert.equal(h.run("poKembarBelumPotong('','LAMA').id"),'o1');assert.equal(h.run("poKembarBelumPotong('pr2','Polo Baru')"),null);
+  assert.equal(h.run("poKembarBelumPotong('','IMPOR').id"),'i1');assert.equal(h.run("poKembarBelumPotong('pr2','Polo Baru')"),null);
   assert.match(html,/var kembar = f\._poKembarOk \|\| typeof poKembarBelumPotong !== 'function' \? null : poKembarBelumPotong\(v\.produkId, v\.nama\);/);
   assert.match(html,/ok: 'Tetap buat PO baru' \}, function \(\) \{ f\._poKembarOk = true; setTimeout\(function \(\) \{ A\.poSave\(el\); \}, 0\); \}\);/);
 });
