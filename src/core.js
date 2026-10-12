@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.41';
+var APP_VERSION = '1.5.42';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -102,6 +102,7 @@ var DEFAULT_SETTINGS = {
   bahanSembunyi: [],      /* nama bahan yang tidak ditampilkan lagi di daftar stok */
   poSembunyi: [],         /* id PO selesai/batal yang diarsipkan (keluar dari daftar, tampil di tab Arsip) */
   poBuang: [],            /* id PO selesai/batal yang dihapus dari aplikasi; barisnya tetap karena punya catatan produksi */
+  stokJualLink: {},       /* keluarga SKU BigSeller -> { p: id barang, batas, laku, sembunyi } untuk layar Stok & PO ulang; hanya dikirim ke owner/admin */
   poUkuranLepas: {}       /* id PO -> ukuran aktif yang tidak jadi dipotong di PO itu (tidak lagi menunggu tukang potong) */
 };
 
@@ -336,7 +337,10 @@ function coreRollSelection(input, inventory) {
     if (roll.status === 'periksa' || qty > roll.tersedia + 0.000001) throw new Error('Berat ' + roll.rollLabel + ' melebihi stok rol yang tersedia. Periksa cadangan dan riwayat stok.');
     var key = coreNormBahan(roll.bahan); if (!materials[key]) { materials[key] = {nama:roll.bahan,satuan:roll.satuan,qty:0}; order.push(key); }
     materials[key].qty += qty;
-    return {stokId:id,qty:qty};
+    /* rol boleh ditandai untuk satu ukuran ("M 2 rol, L 1 rol"); tanpa tanda berarti untuk semua ukuran */
+    var uk = a.ukuran === undefined || a.ukuran === null ? '' : String(a.ukuran).trim().toUpperCase();
+    if (uk && !/^[A-Z0-9][A-Z0-9 +.\/-]{0,11}$/.test(uk)) throw new Error('Ukuran untuk rol tidak sah.');
+    return uk ? {stokId:id,qty:qty,ukuran:uk} : {stokId:id,qty:qty};
   });
   if (order.length > 20) throw new Error('Satu persiapan maksimal 20 jenis bahan.');
   var list = order.map(function (key) { materials[key].qty = Math.round(materials[key].qty*1000)/1000; return materials[key]; });
@@ -858,6 +862,7 @@ function createCore(store, env) {
     if (!(out.poSembunyi instanceof Array)) out.poSembunyi = [];
     if (!(out.poBuang instanceof Array)) out.poBuang = [];
     if (!out.poUkuranLepas || typeof out.poUkuranLepas !== 'object' || out.poUkuranLepas instanceof Array) out.poUkuranLepas = {};
+    if (!out.stokJualLink || typeof out.stokJualLink !== 'object' || out.stokJualLink instanceof Array) out.stokJualLink = {};
     return out;
   }
 
@@ -1054,6 +1059,7 @@ function createCore(store, env) {
     }
 
     var admin = coreIsAdmin(me);
+    if (!admin) delete st.stokJualLink;   /* hubungan SKU hanya untuk owner/admin */
     if (me.divisi === 'owner' && migrationStatus) { st.legacyMigrationStatus = {}; ['batchId','beforeHash','planHash','at'].forEach(function (key) { if (migrationStatus[key] !== undefined) st.legacyMigrationStatus[key] = migrationStatus[key]; }); }
     var out = { ver: store.version(), serverTime: nowIso(), appVersion: APP_VERSION, workflowVersion: WORKFLOW_VERSION, contractVersion: WORKFLOW_VERSION, settings: st, me: publicUser(me, true), trimmed: false, semua: semua };
     out.payroll = earned.filter(function (r) { return admin || r.pegawaiId === me.id; });
@@ -1071,7 +1077,7 @@ function createCore(store, env) {
         if (admin) out.stokRol = inventory.rolls;
         var lanjutRencana = {}; po.forEach(function (p) { if (p.cutting && p.cutting.lanjut) lanjutRencana[p.cutting.lanjut] = true; });
         out.rencanaPotong = coreCutPlanRows(store.read('RencanaPotong'), potong, store.read('PO')).filter(function (r) { return admin || r.status === 'siap' || r.userId === me.id || lanjutRencana[r.id]; });
-        out.rencanaPotong.forEach(function (r) { var parent = po.filter(function (p) { return p.id === r.poId; })[0], scope = coreLegacyCutPlanScope(parent, r.id, parent && parent.cutting); if (scope) { r.legacyUkuran = scope.ukuran; r.legacyBlocked = scope.blocked; } r.rincianRol = r.alokasiBahan.map(function (a) { var roll = inventory.byId[a.stokId] || {}; return {stokId:a.stokId,qty:coreNum(a.qty),bahan:roll.bahan || '',satuan:roll.satuan || '',invoice:roll.invoice || '',rollLabel:roll.rollLabel || ''}; }); });
+        out.rencanaPotong.forEach(function (r) { var parent = po.filter(function (p) { return p.id === r.poId; })[0], scope = coreLegacyCutPlanScope(parent, r.id, parent && parent.cutting); if (scope) { r.legacyUkuran = scope.ukuran; r.legacyBlocked = scope.blocked; } r.rincianRol = r.alokasiBahan.map(function (a) { var roll = inventory.byId[a.stokId] || {}; return {stokId:a.stokId,qty:coreNum(a.qty),bahan:roll.bahan || '',satuan:roll.satuan || '',invoice:roll.invoice || '',rollLabel:roll.rollLabel || '',ukuran:a.ukuran || ''}; }); });
         if (!admin) out.rencanaPotong.forEach(function (r) { delete r.poDraft; });
       }
     }
@@ -1390,6 +1396,27 @@ function createCore(store, env) {
     return publicUser(nu, true);
   };
 
+  /* Hubungan keluarga SKU BigSeller dengan barang aplikasi (layar "Stok & PO ulang") disimpan di pengaturan, supaya
+     tidak hilang bila perangkat owner berganti atau datanya terhapus. Yang disimpan hanya hubungan dan pengaturan per
+     barang; angka stok BigSeller tetap di perangkat. Seluruh peta dikirim tiap kali: kiriman terakhir yang berlaku. */
+  actions.saveStokJualLink = function (p) {
+    var me = auth(p); mustAdmin(me);
+    var masuk = p.link, bersih = {};
+    if (!masuk || typeof masuk !== 'object' || masuk instanceof Array) fail('Daftar hubungan SKU tidak sah.');
+    Object.keys(masuk).forEach(function (k) {
+      var kunci = String(k), v = masuk[k], o = {};
+      if (!/^[A-Za-z0-9][A-Za-z0-9 ._\/-]{0,59}$/.test(kunci)) fail('Kode SKU tidak sah: ' + kunci.slice(0, 30));
+      if (!v || typeof v !== 'object' || v instanceof Array) return;
+      if (v.p !== undefined && v.p !== null && v.p !== '') { var id = String(v.p); if (!/^[A-Za-z0-9._:-]{1,60}$/.test(id)) fail('Barang untuk ' + kunci + ' tidak sah.'); o.p = id; }
+      if (v.batas !== undefined && v.batas !== null && v.batas !== '') { var b = Number(v.batas); if (!isFinite(b) || b < 0 || b > 1000000 || b !== Math.floor(b)) fail('Batas stok untuk ' + kunci + ' harus bilangan bulat nol atau lebih.'); o.batas = b; }
+      if (v.laku) o.laku = 1;
+      if (v.sembunyi) o.sembunyi = 1;
+      if (Object.keys(o).length) bersih[kunci] = o;
+    });
+    if (Object.keys(bersih).length > 2000 || JSON.stringify(bersih).length > 45000) fail('Daftar hubungan SKU sudah terlalu panjang.');
+    var st = settings(); st.stokJualLink = bersih; store.setSettings(st);
+    return { ok: true, jumlah: Object.keys(bersih).length };
+  };
   actions.saveProduk = function (p) {
     var me = auth(p); mustAdmin(me);
     var r = p.produk || {};
@@ -3188,13 +3215,13 @@ function createCore(store, env) {
   if (typeof coreInstallMigrationActions === 'function') coreInstallMigrationActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   if (typeof coreInstallHistoryCorrections === 'function') coreInstallHistoryCorrections(actions, { store: store, env: env, auth: auth, fail: fail });
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
-  var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveGambar: 1, importGambar: 1,
+  var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveStokJualLink: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
-  var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1 };
+  var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceOrderBatch:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, gantiCommerceGroupPayment:1, salinCommerceOrderLama:1, cancelCommerceRecord:1, restoreCommerceRecord:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
 
