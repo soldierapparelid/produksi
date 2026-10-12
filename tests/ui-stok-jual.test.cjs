@@ -95,7 +95,7 @@ test('each size is red, yellow or green from the stock, the warning level and th
 test('the screen lists what needs a new PO first in short cards, and the owner links, hides, tunes and starts a PO from a card',()=>{
   const c=ui();assert.match(run(c,'VIEWS.stokjual()'),/Belum ada data stok[\s\S]*Rincian Stok/);assert.match(run(c,'VIEWS.stokjual()'),/Unggah stok BigSeller<input type="file" accept="\.xlsx" data-c="sjFile" hidden>/);
   seed(c);let view=run(c,'VIEWS.stokjual()');
-  assert.match(view,/\[Perlu PO 2\*\]\[Diproduksi 0\]\[Aman 1\]\[Belum dihubungkan 2\]\[Semua\]/);assert.match(view,/Stok BigSeller baru saja · 3 barang · tersimpan di perangkat ini saja/);
+  assert.match(view,/\[Perlu PO 2\*\]\[Diproduksi 0\]\[Aman 1\]\[Belum dihubungkan 2\]\[Semua\]/);assert.match(view,/Stok BigSeller baru saja · 3 barang · stok tersimpan di perangkat ini · hubungan barang di perangkat ini/);
   assert.ok(view.indexOf('Kaos Uji Hijau')>0&&view.indexOf('Kaos Uji Hijau')<view.indexOf('Topi uji'),'the item with more thin sizes comes first');
   /* one small pill per size: size and stock; the colour says the rest */
   assert.match(view,/<span class="sj-sel jalan"><b>M<\/b><span class="sj-n">5<\/span><\/span><span class="sj-sel aman"><b>L<\/b><span class="sj-n">98<\/span><\/span><span class="sj-sel perlu"><b>XL<\/b><span class="sj-n">0<\/span><\/span><\/div>/);
@@ -133,7 +133,7 @@ test('the screen is reachable from the owner menu, the PO page and Lainnya; the 
   assert.match(html,/\{ id: 'stokjual', label: 'Stok & PO ulang', icon: 'box', lebih: true \},/);
   assert.match(html,/<button class="btn" data-a="tab" data-id="stokjual">Stok &amp; PO ulang<\/button>/);assert.match(html,/item\('tab', 'box', 'Stok & PO ulang', [^)]*'data-id="stokjual"'\)/);
   const blok=part('/* ---------------- STOK JUAL & PO ULANG ---------------- */','/* ---------------- TUKANG POTONG ---------------- */');
-  assert.deepEqual(blok.match(/\breq\('\w+'/g),["req('saveProduk'"],'only creating a missing item reaches the server');assert.doesNotMatch(blok,/Api\.|fetch\(/,'the file and the links stay on the device');assert.deepEqual([...new Set(blok.match(/'pk_[a-z]+'/g))].sort(),["'pk_stokjual'","'pk_stoklink'"]);
+  assert.deepEqual(blok.match(/\breq\('\w+'/g).sort(),["req('saveProduk'","req('saveStokJualLink'"],'only creating a missing item and keeping the links reach the server');assert.doesNotMatch(blok,/Api\.|fetch\(/,'the file and the links stay on the device');assert.deepEqual([...new Set(blok.match(/'pk_[a-z]+'/g))].sort(),["'pk_stokjual'","'pk_stoklink'"]);
 });
 test('an item that BigSeller has and the app does not is created from the link sheet and linked at once',async()=>{
   const c=ui();seed(c);run(c,"A.sjBarangBaru({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");
@@ -172,4 +172,26 @@ test('1541g: when the only uncut PO of the item is an old-app PO, the order butt
   const c=ui();seed(c);run(c,"var disatukan=null;function poLamaPindah(p){return p._lama?{ke:null,ukuran:['M','L']}:null;}A.poSatukan=function(el){disatukan=[el.getAttribute('data-id'),el.getAttribute('data-tambah')];};");
   run(c,"A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.equal(c.disatukan,null);assert.equal(c.opened,'p1','no old-app PO: the ordinary new-PO form');
   run(c,"opened=null;S.state.po[0]._lama=true;A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.deepEqual(plain(c.disatukan),['po1','XL']);assert.equal(c.opened,null,'the join question comes instead of a second PO');
+});
+
+test('1.5.42: the links follow the server; a change on this device is sent, and links made before this release are sent once',async()=>{
+  /* the server copy is used and mirrored on the device */
+  const c=ui();seed(c);run(c,"SJ_TUNDA=0;function isAdmin(){return true;}S.sj=null;store.pk_stoklink='{\"LAMA-1\":{\"p\":\"x\"}}';S.state.settings.stokJualLink={'SA-UJI-KBD-HJ':{p:'p1',laku:1}};S.sj={stok:sjDariBaris(sjBaris(xml,[])),link:JSON.parse(store.pk_stoklink),srv:''}");
+  assert.deepEqual(plain(run(c,'sjData().link')),{'SA-UJI-KBD-HJ':{p:'p1',laku:1}});assert.equal(c.store.pk_stoklink,'{"SA-UJI-KBD-HJ":{"p":"p1","laku":1}}');
+  assert.match(run(c,'VIEWS.stokjual()'),/hubungan barang tersimpan di server/);await new Promise(r=>setTimeout(r,20));assert.equal(c.calls.length,0,'nothing to send');
+  /* a change is sent as the whole list; the screen says so until the server has it */
+  run(c,"A.sjSembunyi({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");assert.match(run(c,'VIEWS.stokjual()'),/hubungan barang sedang dikirim ke server/);await new Promise(r=>setTimeout(r,20));
+  assert.deepEqual(plain(c.calls),[{action:'saveStokJualLink',payload:{link:{'SA-UJI-KBD-HJ':{p:'p1',laku:1},'SA-UJI-TOP-HT':{sembunyi:1}}}}]);
+  /* a newer server copy does not overwrite what is still being sent */
+  run(c,"S.state.settings.stokJualLink={'LAIN':{p:'z'}}");assert.equal(plain(run(c,'sjData().link'))['SA-UJI-TOP-HT'].sembunyi,1);
+  c.calls[0].resolve({ok:true,jumlah:2});await new Promise(r=>setTimeout(r,20));
+  assert.equal(run(c,'S.sj.kotor'),false);assert.deepEqual(plain(run(c,'S.state.settings.stokJualLink')),{'SA-UJI-KBD-HJ':{p:'p1',laku:1},'SA-UJI-TOP-HT':{sembunyi:1}});assert.match(run(c,'VIEWS.stokjual()'),/hubungan barang tersimpan di server/);
+  /* a failed send keeps the change on the device and is tried again when the screen opens */
+  run(c,"A.sjSembunyi({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");await new Promise(r=>setTimeout(r,20));c.calls[1].reject(new Error('jaringan'));await new Promise(r=>setTimeout(r,20));
+  assert.equal(run(c,'S.sj.kotor'),true);assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'].sembunyi,undefined);run(c,'VIEWS.stokjual()');await new Promise(r=>setTimeout(r,20));assert.equal(c.calls.length,3);
+  /* links made on this device before the server kept them are sent the first time the screen opens */
+  const d=ui();seed(d);run(d,"SJ_TUNDA=0;function isAdmin(){return true;}");assert.match(run(d,'VIEWS.stokjual()'),/sedang dikirim ke server/);await new Promise(r=>setTimeout(r,20));
+  assert.deepEqual(plain(d.calls),[{action:'saveStokJualLink',payload:{link:{'SA-UJI-KBD-HJ':{p:'p1'}}}}]);
+  /* someone who is not owner or admin never sends */
+  const e=ui();seed(e);run(e,"SJ_TUNDA=0;function isAdmin(){return false;}");run(e,'VIEWS.stokjual()');run(e,"A.sjSembunyi({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");await new Promise(r=>setTimeout(r,20));assert.equal(e.calls.length,0);
 });

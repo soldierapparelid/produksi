@@ -124,3 +124,26 @@ test('Ubah PO offers "Arsipkan": the PO keeps a finished status, enters the arch
  /* an ordinary save of a PO that is not archived asks for nothing else */
  h.run("S.state.settings.poSembunyi=[];requests.length=0;form.values.status='batal'");done=h.run('A.poSave(button)');await tick();h.resolve(0,{id:'done'});await done;assert.equal(h.run('requests.length'),1);assert.equal(h.run('requests[0].payload.po.status'),'batal');
 });
+
+test('1.5.42: each chosen roll can be given a size of the PO; the summary counts rolls per size and the cutter sees the weights per size',()=>{
+  const h=ui();
+  /* without sizes the row is as before */
+  assert.doesNotMatch(h.run("rollChoicesHtml('Katun',[],'')"),/data-roll-uk/);
+  const view=h.run("rollChoicesHtml('Katun',[{stokId:'rollA',qty:5,ukuran:'L'}],'',['M','L','XL'])");
+  assert.match(view,/data-roll-choice="rollA"[\s\S]*?<select data-roll-uk data-c="rollUk"><option value="">semua<\/option><option value="M">M<\/option><option value="L" selected>L<\/option><option value="XL">XL<\/option><\/select>/,'a chosen roll shows its size');
+  assert.match(view,/data-roll-choice="rollB"[\s\S]*?<select data-roll-uk data-c="rollUk" disabled><option value="">semua<\/option>/,'a roll that is not ticked cannot be given a size yet');
+  assert.match(h.run("rollChoicesHtml('Katun',[{stokId:'rollA',qty:5,ukuran:'XXL'}],'','M,L')"),/<option value="XXL" selected>XXL<\/option>/,'a size saved earlier stays selectable; the list may come as text from the picker');
+  assert.match(h.run("rollPickerHtml([],'','','',['M','L'])"),/data-roll-picker data-plan="" data-uk="M,L"/);assert.match(h.run("rollPickerHtml([],'')"),/data-uk=""/);
+  /* values and summary */
+  h.run("function pilih(id,qty,uk){var r=choice(id,qty);r.meta={'[data-roll-uk]':{value:uk}};return r;}form.choices=[pilih('rollA',5,'M'),pilih('rollB',10,'M'),pilih('rollC',2,'')]");
+  assert.deepEqual(h.json('rollPickerValues(form)'),[{stokId:'rollA',qty:5,ukuran:'M'},{stokId:'rollB',qty:10,ukuran:'M'},{stokId:'rollC',qty:2}]);
+  h.run('rollPickerRecalc(form)');assert.equal(h.run("form.meta['[data-roll-summary]'].textContent"),'3 rol · 17 kg · M 2 rol');
+  h.run("form.choices=[pilih('rollA',5,'XL'),pilih('rollB',10,'M')];rollPickerRecalc(form)");assert.equal(h.run("form.meta['[data-roll-summary]'].textContent"),'2 rol · 15 kg · M 1 rol · XL 1 rol');
+  assert.match(html,/C\.rollUk=function\(el\)/);assert.match(html,/uk=\$\('\[data-roll-uk\]',row\);\$\('\[data-roll-qty\]',row\)\.disabled=!el\.checked;if\(uk\)uk\.disabled=!el\.checked;/);
+  assert.match(html,/poPrepareHtml\(draftId,true,ukRol\) : rollBased \? rollPickerHtml\(coreParseJSON\(old\.alokasiBahan,\[\]\),old\.id,'','',ukRol\)/,'the sizes offered are those of the PO being prepared');
+  /* what the cutter sees: weights grouped per size, sizes in order, rolls for every size last */
+  h.run("var bagi={id:'p9',bahanList:[{nama:'Katun',qty:17,satuan:'kg'}],rol:4,rincianRol:[{stokId:'a',bahan:'Katun',qty:3,satuan:'kg',invoice:'BON-1',ukuran:'XL'},{stokId:'b',bahan:'Katun',qty:4,satuan:'kg',invoice:'BON-2',ukuran:'M'},{stokId:'c',bahan:'Katun',qty:5,satuan:'kg',invoice:'BON-1',ukuran:'M'},{stokId:'d',bahan:'Katun',qty:5,satuan:'kg',invoice:'BON-1',ukuran:''}]};");
+  const lihat=h.run('rencanaBahanHtml(bagi)');
+  assert.match(lihat,/<b>Ukuran M<\/b> <span class="muted">· 2 rol<\/span><\/div><div class="kg-baris"><span class="kg-rol"><i><\/i>4 <small>kg<\/small><\/span><span class="kg-rol"><i><\/i>5 <small>kg<\/small><\/span><\/div><div class="xs kg-asal"><b>Ukuran XL<\/b> <span class="muted">· 1 rol<\/span><\/div><div class="kg-baris"><span class="kg-rol"><i><\/i>3 <small>kg<\/small><\/span><\/div><div class="xs kg-asal"><b>Semua ukuran<\/b> <span class="muted">· 1 rol<\/span><\/div>/);
+  assert.doesNotMatch(lihat,/BON-/,'per size replaces per source');
+});
