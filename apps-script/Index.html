@@ -460,7 +460,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541f';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541g';</script>
 <script>
 (function () {
 'use strict';
@@ -8648,6 +8648,56 @@ function poHarusDipotong() {
     .sort(function (a, b) { return String(b.dibuat || '').localeCompare(String(a.dibuat || '')); });
 }
 /* PO aktif untuk barang yang sama yang belum punya hasil potong atau penugasan: kemungkinan PO yang sama dibuat dua kali */
+/* ---------- satukan PO lama ---------- */
+/* PO bawaan aplikasi lama ukurannya terkunci (tidak punya "Ukuran aktif"). Selama PO seperti itu belum dipotong dan
+   belum punya catatan atau bahan yang disiapkan, ukurannya yang menunggu bisa dipindahkan ke PO buatan aplikasi ini
+   untuk barang yang sama (yang sudah ada dan belum dipotong, atau PO baru), lalu PO lama dibatalkan. Di PO hasilnya
+   ukuran bisa ditambah. Memakai savePO yang sudah ada: server tidak berubah, isi baris PO lama tidak diubah. */
+function poLamaPindah(po) {
+  if (!po || po.status !== 'aktif' || po.jenis === 'pesanan' || coreParseJSON(po.ukuranAktif, []).length) return null;
+  var tot = T(po), tunggu = poUkuranPotong(po);   /* sama dengan "Harus dipotong" di kartu PO */
+  if (!tunggu.length || tot.potong > 0 || tot.kirim > 0 || tot.terima > 0 || tot.qcOk > 0) return null;
+  if (rencanaPotongBlocked(po) || ((po.cutting && po.cutting.reviewPlans) || []).length || rencanaPotongRows(po.id).some(function (r) { return r.status !== 'batal'; })) return null;
+  var kunci = String(po.nama || '').trim().toLowerCase();
+  var ke = poAktif().filter(function (p) {
+    if (p.id === po.id || p.asal === 'lama' || p.jenis === 'pesanan' || !coreParseJSON(p.ukuranAktif, []).length) return false;
+    if (po.produkId ? p.produkId !== po.produkId : String(p.nama || '').trim().toLowerCase() !== kunci) return false;
+    var x = T(p); return !(x.potong > 0) && !(x.kirim > 0);
+  }).sort(function (a, b) { return String(b.dibuat).localeCompare(String(a.dibuat)); })[0] || null;
+  return { ke: ke, ukuran: tunggu.slice() };
+}
+function poLamaPindahHtml(po) {
+  var info = poLamaPindah(po); if (!info) return '';
+  var uk = info.ukuran.map(esc).join(' · '), tujuan = info.ke ? esc(info.ke.noPO || 'PO baru') : '';
+  return '<div class="note"><b>Mau menambah ukuran?</b> Ukuran PO bawaan aplikasi lama terkunci. ' +
+    (info.ke ? 'Barang ini juga punya ' + tujuan + ' yang belum dipotong: satukan, ukuran ' + uk + ' pindah ke sana dan PO ini dibatalkan.' : 'Pindahkan ukuran ' + uk + ' ke PO baru; di sana ukuran bisa ditambah lewat Ubah. PO ini dibatalkan.') +
+    '<div class="row wrap"><button type="button" class="btn sm pri" data-a="poSatukan" data-id="' + esc(po.id) + '">' + (info.ke ? 'Satukan dengan ' + tujuan : 'Pindahkan ke PO baru') + '</button></div></div>';
+}
+function poIsiSimpan(p, tambahan) {   /* isi savePO untuk PO yang sudah ada, seperti formulir Ubah PO */
+  var o = { id: p.id, produkId: p.produkId, jenis: p.jenis, nama: p.nama, series: p.series, pelanggan: p.pelanggan || '', deadline: p.deadline || '', ukuran: p.ukuran || {}, bahan: p.bahan || '', catatan: p.catatan || '', noPO: p.noPO, status: p.status };
+  Object.keys(tambahan || {}).forEach(function (k) { o[k] = tambahan[k]; }); return o;
+}
+A.poSatukan = function (el) {
+  var id = el.getAttribute('data-id'), po = D.po[id], info = poLamaPindah(po); if (!info) return toast('PO ini tidak bisa dipindahkan. Muat data terbaru.', true);
+  var tambah = String(el.getAttribute('data-tambah') || '').split(',').filter(function (s) { return s && info.ukuran.indexOf(s) < 0; }), semua = info.ukuran.concat(tambah);
+  var asal = po.noPO || 'PO ini', tujuan = info.ke ? (info.ke.noPO || 'PO itu') : 'PO baru';
+  confirmBox({ title: info.ke ? 'Satukan dengan ' + tujuan + '?' : 'Pindahkan ke PO baru?',
+    text: 'Ukuran ' + info.ukuran.join(' · ') + ' dari ' + asal + ' masuk ke ' + tujuan + (tambah.length ? ', bersama ukuran ' + tambah.join(' · ') : '') + '. Lalu ' + asal + ' dibatalkan; belum ada catatan di dalamnya. Target pcs PO lama tidak ikut. Di ' + tujuan + ' ukuran bisa ditambah lewat Ubah.', ok: info.ke ? 'Satukan' : 'Pindahkan' }, function (btn) {
+    var ke = info.ke ? D.po[info.ke.id] : null, langkah;
+    if (info.ke && !ke) return Promise.reject(new Error('PO tujuan sudah tidak ada. Muat data terbaru.'));
+    if (ke) { var lama = coreParseJSON(ke.ukuranAktif, []); langkah = req('savePO', { expectedRevision: ke.revision, po: poIsiSimpan(ke, { ukuran: {}, ukuranAktif: lama.concat(semua.filter(function (s) { return lama.indexOf(s) < 0; })) }) }); }
+    else langkah = req('savePO', { deferMaterial: true, po: { newId: newId(), produkId: po.produkId, jenis: po.jenis, nama: po.nama, series: po.series, pelanggan: '', deadline: po.deadline || '', ukuran: {}, bahan: po.bahan || '', catatan: po.catatan || '', noPO: '', status: 'aktif', ukuranAktif: semua } });
+    return act(btn, langkah.then(function (rec) {
+      var kini = D.po[id]; if (!rec || !rec.id || !kini) throw new Error('Hasil belum lengkap. Periksa daftar PO sebelum mengulang.');
+      return req('savePO', { expectedRevision: kini.revision, po: poIsiSimpan(kini, { status: 'batal' }) }).then(function () { return rec; },
+        function (e) { throw new Error('Ukuran sudah masuk ' + (rec.noPO || tujuan) + ', tetapi ' + asal + ' belum terbatalkan' + (e && e.message ? ' (' + e.message + ')' : '') + '. Batalkan ' + asal + ' lewat Ubah.'); });
+    })).then(function (rec) {
+      closeAll(); S.tab = 'po'; render(); toast(asal + ' disatukan ke ' + (rec.noPO || tujuan) + '.');
+      if (D.po[rec.id]) openSheet(function () { return poSheet(rec.id); }, { live: true, cls: 'wide' });
+    });
+  });
+};
+/* ---------- akhir satukan PO lama ---------- */
 function poKembarBelumPotong(produkId, nama) {
   var kunci = String(nama || '').trim().toLowerCase();
   return poAktif().filter(function (p) { var tot = T(p); return (produkId ? p.produkId === produkId : String(p.nama || '').trim().toLowerCase() === kunci) && !(tot.potong > 0) && !(tot.kirim > 0); })
@@ -11769,6 +11819,8 @@ A.sjBarangSave = function (el) {
 A.sjPO = function (el) {
   var k = el.getAttribute('data-k'), l = sjData().link[k] || {}; if (!l.p || !D.produk[l.p]) return toast('Hubungkan dulu ke barangnya.', true);
   var r = sjHitung().filter(function (x) { return x.k === k; })[0], merah = r ? r.uk.filter(function (u) { return u.st === 'perlu' && u.s !== '-'; }).map(function (u) { return u.s; }) : [];
+  var poLama = typeof poLamaPindah === 'function' ? (S.state.po || []).filter(function (p) { return p.produkId === l.p && poLamaPindah(p); })[0] : null;
+  if (poLama && merah.length) return A.poSatukan({ getAttribute: function (a) { return a === 'data-id' ? poLama.id : a === 'data-tambah' ? merah.join(',') : null; } });
   if (merah.length) toast('Ukuran yang perlu: ' + merah.join(' · '));
   openPO('', l.p);
 };
@@ -12957,7 +13009,7 @@ function openPO(id, produkId) {
       fText('Nama barang', 'nama', v.nama, 'maxlength="80"') + fText('Series / kelompok', 'series', v.series, 'maxlength="60"') +
       '<div data-pesanan' + (pes ? '' : ' hidden') + '>' + fText('Nama pelanggan', 'pelanggan', v.pelanggan, 'maxlength="80"') + '</div>' +
       fTanggal(pes ? 'Deadline' : 'Target selesai (boleh kosong)', 'deadline', v.deadline || '') +
-      (selectOnly ? poActiveSizePicker(sizes,selected) : po && po.asal==='lama' ? '<div class="note">Ukuran dan jumlah riwayat lama tetap disimpan. Koreksi hasil fisik dilakukan melalui pemeriksaan riwayat.</div>' : '<div class="col gap-s"><div class="label">Target per ukuran lama (pcs)</div>' + sizeGrid(sizes,{val:v.ukuran}) + '</div>' + sumLine('Total target lama')) +
+      (selectOnly ? poActiveSizePicker(sizes,selected) : po && po.asal==='lama' ? '<div class="note">Ukuran dan jumlah riwayat lama tetap disimpan. Koreksi hasil fisik dilakukan melalui pemeriksaan riwayat.</div>' + (typeof poLamaPindahHtml === 'function' ? poLamaPindahHtml(po) : '') : '<div class="col gap-s"><div class="label">Target per ukuran lama (pcs)</div>' + sizeGrid(sizes,{val:v.ukuran}) + '</div>' + sumLine('Total target lama')) +
       (!po && poPrepareOwner() ? poNewMaterialsHtml(fid) : fText('Bahan', 'bahan', v.bahan, 'maxlength="120"')) + fCatatan(v.catatan) +
       (!po ? '<div class="note warn" data-po-prepared-notice hidden role="status"></div>' : '') +
       (po ? '<div class="f-row">' + fText('Nomor PO', 'noPO', v.noPO, 'maxlength="30"') + fSelect('Status', 'status', [['aktif', 'Aktif'], ['selesai', 'Selesai'], ['batal', 'Batal'], ['arsip', 'Arsipkan (barang kembali ke Belum PO)']], poDiarsip(po) ? 'arsip' : v.status) + '</div>' +
