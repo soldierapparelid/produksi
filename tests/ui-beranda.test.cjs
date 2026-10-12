@@ -126,6 +126,32 @@ test('recent notes can be acted on from their own row', () => {
   assert.match(view, /QC 40 pcs lolos, 2 reject/);
 });
 
+test('1.5.40: the owner fills in a repair result and removes a wrong note straight from home', () => {
+  const c = context(); isi(c);
+  /* a view that has not loaded the QC helpers keeps the plain row */
+  assert.deepEqual(json(c, 'tindakan().filter(function(x){return x.k==="qc";}).map(function(x){return [x.a,x.id,x.btn];})'), [['poOpen', 'p2', 'Lihat']]);
+  vm.runInContext("function repairQueue(poId){return poId==='p2'?[{q:{id:'q1',poId:'p2',maklonId:'atep'},uk:{L:3,XL:2},total:5}]:[];}", c);
+  const qc = json(c, 'tindakan().filter(function(x){return x.k==="qc";})');
+  assert.deepEqual(qc.map(x => [x.a, x.id, x.btn, x.lihat, x.n]), [['qcRepairOpen', 'q1', 'Isi hasil', 'p2', 5]]);
+  assert.match(qc[0].t, /5 pcs perbaikan belum diisi hasilnya/); assert.match(qc[0].d, /^Polo · PO-2 · Atep · /);
+  vm.runInContext("S.sub.todoK='qc';S.sub.todoAll='1';", c);
+  let view = vm.runInContext('VIEWS.beranda()', c);
+  assert.match(view, /data-a="poOpen" data-id="p2">Lihat<\/button><button class="btn sm" data-a="qcRepairOpen" data-id="q1">Isi hasil<\/button>/);
+  /* recent notes: what happened to the pieces is spelled out, and a wrong cut, QC or BigSeller note can be removed from its row */
+  vm.runInContext("S.sub.evAll='1';S.sub.evK='';", c); view = vm.runInContext('VIEWS.beranda()', c);
+  assert.match(view, /QC 40 pcs lolos, 2 reject, 5 masuk perbaikan, 1 offline/);
+  assert.match(view, /data-a="del" data-s="QC" data-id="q1"/); assert.match(view, /data-a="del" data-s="Gudang" data-id="g1"/);
+  assert.match(view, /data-a="del" data-s="Potong" data-id="c1"/); assert.match(view, /data-a="del" data-s="Potong" data-id="c2"/);
+  assert.doesNotMatch(view, /data-a="del" data-s="Potong" data-id="c3"/, 'a cut that was already paid stays');
+  /* a repair result is named as such; a cut made from the owner's prepared fabric keeps its record */
+  vm.runInContext("S.state.qc.push({id:'q2',poId:'p2',repairQcId:'q1',tanggal:hari,total:3,reject:2,dibuat:hari+'T15:00:00Z'});S.state.potong[0].rencanaId='r1';", c);
+  view = vm.runInContext('VIEWS.beranda()', c);
+  assert.match(view, /Hasil perbaikan: 3 pcs lolos, 2 reject/); assert.doesNotMatch(view, /data-a="del" data-s="Potong" data-id="c1"/);
+  /* the buttons belong to the owner's app only */
+  vm.runInContext("isAdmin=function(){return false;};", c);
+  assert.doesNotMatch(vm.runInContext('VIEWS.beranda()', c), /data-a="del"/);
+});
+
 test('a clean day says so, and the page actions exist', () => {
   const c = context(); isi(c);
   vm.runInContext(`S.state.setor=[];S.state.potong=[S.state.potong[1]];p1.agg.total.siapKirim=0;p1.perluPotong=[];p2.agg.maklon={};p2.agg.total.qcPerbaikan=0;p3.tahap='maklon';`, c);
