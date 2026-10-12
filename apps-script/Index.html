@@ -442,7 +442,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540c';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540d';</script>
 <script>
 (function () {
 'use strict';
@@ -11892,10 +11892,24 @@ function rencanaPotongBlocked(po) {
   return '';
 }
 function rencanaPotongOwner() { return !!(isAdmin() && me() && me().divisi === 'owner'); }
+/* Ringkas tetapi lengkap: tiap bahan satu blok (nama, jumlah rol, total) dengan kiloan tiap rolnya dalam satu baris,
+   supaya tukang potong tahu rol berapa kilo yang harus dipotong tanpa membaca belasan baris. */
 function rencanaBahanHtml(r, detail) {
-  var list = coreParseJSON(r.bahanList, []),rolls=coreParseJSON(r.rincianRol,[]),shown=detail?rolls:rolls.slice(0,2),alloc=coreParseJSON(r.alokasiBahan,[]),legacy=coreParseJSON(r.legacyBahanList,alloc.length?[]:list),unknownLegacy=legacy.length>0&&coreNum(r.legacyRol===undefined?(alloc.length?0:r.rol):r.legacyRol)===0;
-  return '<div class="col gap-s">'+(r.legacyUkuran&&r.legacyUkuran.length?'<div class="small"><b>Ukuran jatah:</b> '+r.legacyUkuran.map(esc).join(' · ')+'</div>':'')+'<span class="xs muted">Persiapan '+esc(String(r.id||'').slice(-8))+(r.dibuat?' · '+esc(String(r.dibuat).slice(0,10)):'')+'</span>' + list.map(function (b) { return '<div class="row"><span class="grow">' + esc(b.nama) + '</span><b>' + nfQty(b.qty) + ' ' + esc(satuanPendek(b.satuan)) + '</b></div>'; }).join('') +
-    '<div class="row"><span class="grow small muted">'+(unknownLegacy?'Rol yang diketahui':'Jumlah rol seluruh bahan')+'</span><b>' + nf(r.rol) + ' rol</b></div>' + (unknownLegacy?'<p class="xs muted">Ditambah bahan saldo lama; jumlah rolnya belum diketahui.</p>':'') + (rolls.length?'<div class="col gap-s small muted">'+shown.map(function(a){return '<span>'+esc(a.invoice||'Invoice')+' · '+esc(a.rollLabel||'Rol')+' · '+esc(a.bahan)+' '+nfQty(a.qty)+' '+esc(satuanPendek(a.satuan))+'</span>';}).join('')+(!detail&&rolls.length>shown.length?'<span>+'+(rolls.length-shown.length)+' rol lainnya — lihat saat mencatat hasil</span>':'')+'</div>':'') + (r.catatan ? '<p class="small muted">' + esc(r.catatan) + '</p>' : '') + '</div>';
+  var list = coreParseJSON(r.bahanList, []),rolls=coreParseJSON(r.rincianRol,[]),alloc=coreParseJSON(r.alokasiBahan,[]),legacy=coreParseJSON(r.legacyBahanList,alloc.length?[]:list),unknownLegacy=legacy.length>0&&coreNum(r.legacyRol===undefined?(alloc.length?0:r.rol):r.legacyRol)===0;
+  var per = {}, asal = {}, dipakai = {};
+  rolls.forEach(function (a) { var k = coreNormBahan(a.bahan); (per[k] = per[k] || []).push(a); asal[a.invoice || 'Invoice'] = 1; });
+  var satuAsal = Object.keys(asal).length <= 1;
+  function kiloan(items) {
+    var grup = {}, urut = [];
+    (items || []).forEach(function (a) { var s = satuAsal ? '' : (a.invoice || 'Invoice'); if (!grup[s]) { grup[s] = []; urut.push(s); } grup[s].push(a); });
+    return urut.map(function (s) { var g = grup[s]; return '<div class="small muted">' + (s ? esc(s) + ': ' : 'Kiloan rol: ') + g.map(function (a) { return nfQty(a.qty); }).join(' · ') + ' ' + esc(satuanPendek(g[0].satuan)) + '</div>'; }).join('');
+  }
+  return '<div class="col gap-s">'+(r.legacyUkuran&&r.legacyUkuran.length?'<div class="small"><b>Ukuran jatah:</b> '+r.legacyUkuran.map(esc).join(' · ')+'</div>':'') +
+    list.map(function (b) { var k = coreNormBahan(b.nama), items = per[k] || []; dipakai[k] = 1; return '<div><div class="row"><span class="grow">' + esc(b.nama) + (items.length ? ' <span class="small muted">· ' + nf(items.length) + ' rol</span>' : '') + '</span><b>' + nfQty(b.qty) + ' ' + esc(satuanPendek(b.satuan)) + '</b></div>' + kiloan(items) + '</div>'; }).join('') +
+    Object.keys(per).filter(function (k) { return !dipakai[k]; }).map(function (k) { return '<div><div class="small">' + esc(per[k][0].bahan) + ' · ' + nf(per[k].length) + ' rol</div>' + kiloan(per[k]) + '</div>'; }).join('') +
+    '<div class="row"><span class="grow small muted">'+(unknownLegacy?'Rol yang diketahui':'Jumlah rol seluruh bahan')+'</span><b>' + nf(r.rol) + ' rol</b></div>' + (unknownLegacy?'<p class="xs muted">Ditambah bahan saldo lama; jumlah rolnya belum diketahui.</p>':'') +
+    (rolls.length && satuAsal ? '<div class="xs muted">Rol dari ' + esc(Object.keys(asal)[0]) + '</div>' : '') +
+    (r.catatan ? '<p class="small muted">' + esc(r.catatan) + '</p>' : '') + '</div>';
 }
 function rencanaPotongPanel(po) {
   var review = (po.cutting && po.cutting.reviewPlans) || [], rows = rencanaPotongRows(po.id).filter(function (r) { return r.status !== 'batal'; }), owner = rencanaPotongOwner(), blocked = rencanaPotongBlocked(po);
@@ -12010,7 +12024,7 @@ function openPotong(poId, rencanaId) {
     var dariStok = !plan && rencanaPotongOwner() && (((S.state && S.state.stokRol) || []).some(function (r) { return coreNum(r.tersedia) > 0; }) || stokB.some(function (b) { return coreNum(b.legacyTersedia) > 0; }));
     return sheetHtml('Catat potong', '<div class="col" data-form="potong">' + hid('id', fid) + hid('poId', po.id) + hid('rencanaId', rencanaId || '') + hid('rencanaRevision', plan ? plan.revision : '') + poHead(po) +
       (admin ? fSelect('Tukang potong', 'userId', [['', '— pilih —']].concat(tukang.map(function (u) { return [u.id, u.nama]; })), tukang.length === 1 ? tukang[0].id : '') : '') +
-      (plan ? '<div class="card col"><h3>Bahan yang disiapkan owner</h3>' + rencanaBahanHtml(plan,true) + '<p class="xs muted">Bahan dan rol mengikuti rencana owner. Isi hasil potong per ukuran di bawah.</p></div>' : '') +
+      (plan ? '<div class="card col"><h3>Bahan yang disiapkan owner</h3>' + rencanaBahanHtml(plan,true) + '<p class="xs muted">Potong rol dengan kiloan di atas, lalu isi hasil potong per ukuran di bawah.</p></div>' : '') +
       '<div class="col gap-s"><div class="label">Hasil potong per ukuran (pcs)</div>' + sizeGrid(sp.main, { hint: hint, extra: sp.extra }) + '</div>' + sumLine('Total dipotong') +
       (plan ? (admin ? '<div class="row wrap gap-s">' + (rencanaPotongOwner() ? '<button type="button" class="btn sm" data-a="potongUbahBahan" data-po="' + esc(po.id) + '" data-id="' + esc(plan.id) + '">Ubah / tambah bahan</button>' : '') + '<button type="button" class="btn ghost sm" data-a="potongOpen" data-id="' + esc(po.id) + '" data-langsung="1">Pakai bahan lain</button></div>' : '') :
         dariStok ? potongBahanHtml(fid, po, manual + fNum('Jumlah rol', 'rol', '', 'step="1"')) : '<div class="col gap-s"><div class="label">Bahan yang dipakai</div>' + manual + '</div>') +
