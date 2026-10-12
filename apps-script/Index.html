@@ -282,6 +282,16 @@ button.item:hover, a.item:hover { background: var(--surface-2); }
 .cgroup .corder { margin-left: 14px; border-left: 2px solid var(--line); }
 .cgroup .corder:last-child { border-bottom: 0; }
 .cinv-act { padding: 12px 14px; gap: 8px; align-items: center; }
+/* stok jual & PO ulang: satu kotak per ukuran, warnanya mengikuti stok dan produksi */
+.sj-uk { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px; }
+.sj-sel { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; padding: 6px 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.sj-sel b { font-size: 12px; color: var(--muted); }
+.sj-sel .sj-n { font-family: var(--f-display); font-size: 20px; font-weight: 700; line-height: 1.1; }
+.sj-sel .xs { color: var(--muted); white-space: nowrap; }
+.sj-sel.perlu { border-color: var(--bad); background: var(--bad-soft); }
+.sj-sel.perlu .sj-n { color: var(--bad); }
+.sj-sel.jalan { border-color: var(--warn); background: var(--warn-soft); }
+.sj-sel.jalan .sj-n { color: var(--warn); }
 /* kiloan tiap rol pada bahan potong: butir bulat dengan titik merah, berjajar dalam kolom sama lebar */
 .kg-blok + .kg-blok { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
 .kg-asal { margin-top: 5px; }
@@ -449,7 +459,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-potong-lanjutan-1541b';</script>
 <script>
 (function () {
 'use strict';
@@ -7380,6 +7390,7 @@ var TABS = {
     { id: 'maklon', label: 'Maklon', icon: 'people' },
     { id: 'upah', label: 'Upah', icon: 'wallet' },
     /* "lebih": tampil di menu samping pada layar lebar; di HP dibuka lewat tab Lainnya supaya menu bawah tidak sesak */
+    { id: 'stokjual', label: 'Stok & PO ulang', icon: 'box', lebih: true },
     { id: 'stok', label: 'Stok bahan', icon: 'tag', lebih: true },
     { id: 'gaji', label: 'Gaji harian', icon: 'people', lebih: true },
     { id: 'hpp', label: 'HPP produk', icon: 'tag', lebih: true },
@@ -8688,7 +8699,7 @@ VIEWS.po = function () {
     }).join('');
     return (grup.length || stripBaru ? alat + stripBaru + poLegenda(rows, d.kosong.length) + isi + more : '<div class="card">' + emptyBox(d.tabArsip ? 'Arsip masih kosong. PO selesai atau batal bisa diarsipkan dari tabnya.' : st.po.length ? 'Tidak ada PO yang cocok dengan saringan ini.' : 'Belum ada PO.', st.po.length ? '' : '<button class="btn pri sm" data-a="poNew">Buat PO pertama</button>') + '</div>') + kakiBuang + arsip;
   };
-  return '<div class="head"><div class="grow"><h1>PO</h1><div class="sub">Satu PO untuk satu barang dalam satu putaran produksi. Dikelompokkan per seri; warna menunjukkan tahapnya. "Semua barang" memuat seluruh barang, termasuk yang belum di-PO.</div></div><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
+  return '<div class="head"><div class="grow"><h1>PO</h1><div class="sub">Satu PO untuk satu barang dalam satu putaran produksi. Dikelompokkan per seri; warna menunjukkan tahapnya. "Semua barang" memuat seluruh barang, termasuk yang belum di-PO.</div></div><button class="btn" data-a="tab" data-id="stokjual">Stok &amp; PO ulang</button><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
     poPendingPlansHtml() + '<div class="tools"><div class="seg">' + [['semua', 'Semua barang'], ['aktif', 'Aktif'], ['selesai', 'Selesai'], ['batal', 'Batal'], ['arsip', 'Arsip']].map(function (o) { return '<button data-a="poStatus" data-v="' + o[0] + '"' + (f.poStatus === o[0] ? ' class="on"' : '') + '>' + o[1] + ' ' + nf(n[o[0]] || 0) + '</button>'; }).join('') + '</div>' +
     searchBox('q', 'Cari barang, nomor PO, pelanggan') + '</div>' +
     '<div class="tools">' + (f.poStatus === 'aktif' ? '<select data-c="poTahap" style="flex:1 1 180px" aria-label="Saring tahap">' + TAHAP_OPSI.map(function (o) { return '<option value="' + o[0] + '"' + (f.poTahap === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' : '') +
@@ -9075,6 +9086,7 @@ VIEWS.lain = function () {
   return '<div class="head"><h1>Lainnya</h1></div>' +
     '<div class="card row"><span class="ava l">' + esc(inisial(u.nama)) + '</span><span class="grow"><span class="b">' + esc(u.nama) + '</span><br><span class="muted small">' + esc(DIVISI[u.divisi].label) + ' · ' + esc(st.settings.namaUsaha) + '</span></span></div>' +
     '<div class="col gap-s"><div class="label">Admin</div><div class="card flush"><div class="list">' +
+    item('tab', 'box', 'Stok & PO ulang', 'stok siap jual BigSeller dicocokkan dengan PO yang jalan', 'data-id="stokjual"') +
     item('tab', 'tag', 'Stok bahan', stokTampil().length + ' bahan · pembelian, pemakaian, koreksi', 'data-id="stok"') +
     item('tab', 'people', 'Gaji harian', (st.karyawan || []).filter(function (x) { return x.aktif; }).length + ' karyawan · absen mingguan, kasbon, slip print', 'data-id="gaji"') + '</div></div></div>' +
     '<div class="col gap-s"><div class="label">Data induk</div><div class="card flush"><div class="list">' +
@@ -11544,6 +11556,192 @@ function miniKpi(items) {
 function poHead(po) {
   return '<div class="row">' + thumb(po) + '<div class="grow"><div class="b">' + esc(po.nama) + '</div><div class="xs muted">' + poMeta(po) + '</div></div></div>';
 }
+
+/* ---------------- STOK JUAL & PO ULANG ---------------- */
+/* Owner mengunggah ekspor "Rincian Stok" BigSeller (.xlsx). Tiap keluarga SKU (nomor SKU tanpa ukurannya) dihubungkan
+   sekali dengan barang di aplikasi, lalu tiap ukuran diberi warna: aman, stok tipis tetapi sedang diproduksi, atau
+   perlu PO ulang. Batas stok tipis mengikuti "Stok Peringatan" BigSeller, bisa diganti per barang.
+   Rakitan pertama: stok dan hubungan SKU disimpan di perangkat ini saja (pk_stokjual, pk_stoklink); server tidak berubah. */
+var SJ_UKURAN = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', '3XL', '4XL', '5XL'], SJ_BATAS = 10;
+function sjBaca(k, fb) { try { var v = LS.get(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } }
+function sjData() { if (!S.sj) S.sj = { stok: sjBaca('pk_stokjual', null), link: sjBaca('pk_stoklink', {}) || {} }; return S.sj; }
+function sjSimpan(apa) { var d = sjData(); return LS.set(apa === 'stok' ? 'pk_stokjual' : 'pk_stoklink', JSON.stringify(apa === 'stok' ? d.stok : d.link)); }
+/* File .xlsx adalah zip: daftar isinya dibaca dari ujung file, isinya dibuka dengan DecompressionStream (tanpa pustaka). */
+function sjUnzip(buf, nama) {
+  var dv = new DataView(buf), n = dv.byteLength, i, eocd = -1, dec = new TextDecoder();
+  for (i = n - 22; i >= Math.max(0, n - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) return Promise.reject(new Error('File ini bukan Excel (.xlsx).'));
+  var jumlah = dv.getUint16(eocd + 10, true), p = dv.getUint32(eocd + 16, true);
+  for (i = 0; i < jumlah && p + 46 <= n; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    var metode = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), lokal = dv.getUint32(p + 42, true);
+    if (dec.decode(new Uint8Array(buf, p + 46, nlen)) === nama) {
+      var awal = lokal + 30 + dv.getUint16(lokal + 26, true) + dv.getUint16(lokal + 28, true), isi = new Uint8Array(buf, awal, csize);
+      if (metode === 0) return Promise.resolve(dec.decode(isi));
+      if (metode !== 8 || typeof DecompressionStream !== 'function') return Promise.reject(new Error('Browser ini belum bisa membuka file Excel. Pakai Chrome terbaru.'));
+      return new Response(new Blob([isi]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+    }
+    p += 46 + nlen + elen + clen;
+  }
+  return Promise.resolve('');
+}
+function sjXmlTeks(s) {
+  return String(s || '').replace(/&#(\d+);/g, function (_, d) { return String.fromCharCode(+d); }).replace(/&#x([0-9a-f]+);/gi, function (_, h) { return String.fromCharCode(parseInt(h, 16)); })
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+function sjBaris(xml, shared) {
+  var rows = [], reRow = /<row\b[^>]*>([\s\S]*?)<\/row>/g, m;
+  while ((m = reRow.exec(xml))) {
+    var cells = {}, reC = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, c;
+    while ((c = reC.exec(m[1]))) {
+      var ref = (c[1].match(/\br="([A-Z]+)\d+"/) || [])[1]; if (!ref) continue;
+      var isi = c[2] || '', tipe = (c[1].match(/\bt="(\w+)"/) || [])[1], v = (isi.match(/<v>([\s\S]*?)<\/v>/) || [])[1], t;
+      if (tipe === 's') t = (shared || [])[+v] || '';
+      else if (tipe === 'inlineStr') t = (isi.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map(function (x) { return x.replace(/<[^>]+>/g, ''); }).join('');
+      else t = v === undefined ? '' : v;
+      cells[ref] = sjXmlTeks(t);
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+/* Baris ekspor menjadi keluarga SKU: { fam: { 'AB-CDE-FGH-HT': { j: judul, g: gambar, u: { M: [tersedia, peringatan, dialokasikan] } } } } */
+function sjDariBaris(rows) {
+  var head = rows[0] || {}, kol = {};
+  Object.keys(head).forEach(function (k) { kol[String(head[k]).trim().toLowerCase()] = k; });
+  var cSku = kol['nomor sku'], cJudul = kol['judul'], cGbr = kol['tautan gambar'], cTotal = kol['total stok'], cAlok = kol['stok dialokasikan pesanan'], cSedia = kol['stok tersedia seluruh gudang'], cIngat = kol['stok peringatan'];
+  if (!cSku || !(cSedia || cTotal)) throw new Error('Kolom "Nomor SKU" atau stok tidak ditemukan. Pakai file "Rincian Stok" hasil ekspor BigSeller.');
+  var fam = {}, n = 0;
+  rows.slice(1).forEach(function (r) {
+    var sku = String(r[cSku] || '').trim(); if (!sku) return;
+    var bagian = sku.split('-'), uk = bagian[bagian.length - 1].toUpperCase(), kunci = sku;
+    if (bagian.length >= 3 && (SJ_UKURAN.indexOf(uk) >= 0 || /^\d{1,3}$/.test(uk))) kunci = bagian.slice(0, -1).join('-'); else uk = '-';
+    var f = fam[kunci] || (fam[kunci] = { j: '', g: '', u: {} }), gbr = String(r[cGbr] || '');
+    if (!f.j) f.j = sjXmlTeks(String(r[cJudul] || '')).slice(0, 70);
+    if (!f.g && /^https:\/\/[\w.-]+\/[\w\/.%~-]+(\?[\w\/.%=&~-]*)?$/.test(gbr) && gbr.length < 300) f.g = gbr;
+    f.u[uk] = [Math.round(coreNum(cSedia ? r[cSedia] : r[cTotal])), Math.round(coreNum(r[cIngat])), Math.round(coreNum(r[cAlok]))]; n++;
+  });
+  return { at: new Date().toISOString(), n: n, fam: fam };
+}
+/* PO stok yang aktif untuk satu barang. Per ukuran: pcs yang masih di jalur produksi (sudah dipotong, belum masuk
+   BigSeller) dan apakah ukuran itu sudah di-PO tetapi belum dipotong. */
+function sjProduksi(produkId) {
+  var out = { po: [], uk: {} }, pr = produkId ? D.produk[produkId] : null; if (!pr) return out;
+  var nama = String(pr.nama || '').trim().toLowerCase();
+  (S.state.po || []).forEach(function (po) {
+    if (po.status !== 'aktif' || po.jenis === 'pesanan') return;
+    if (po.produkId ? po.produkId !== produkId : String(po.nama || '').trim().toLowerCase() !== nama) return;
+    var au = (po.agg && po.agg.ukuran) || {}, set = {}, ada = false;
+    poUkuranPotong(po).forEach(function (s) { set[s] = 2; });
+    Object.keys(au).forEach(function (s) { if (!set[s]) set[s] = 1; });
+    Object.keys(set).forEach(function (s) {
+      var a = au[s] || {}, jalan = Math.max(0, coreNum(a.potong) - coreNum(a.bigseller)), antre = set[s] === 2 && !(coreNum(a.potong) > 0);
+      if (!jalan && !antre) return;
+      var u = out.uk[s] || (out.uk[s] = { jalan: 0, antre: false }); u.jalan += jalan; if (antre) u.antre = true; ada = true;
+    });
+    if (ada) out.po.push(po);
+  });
+  return out;
+}
+function sjHitung() {
+  var d = sjData(), fam = (d.stok && d.stok.fam) || {}, urut = ((S.state || {}).settings || {}).ukuran || [];
+  return Object.keys(fam).map(function (k) {
+    var f = fam[k], l = d.link[k] || {}, pr = l.p ? D.produk[l.p] : null, prod = sjProduksi(pr ? l.p : ''), kelas = 'aman', kurang = 0, tersedia = 0;
+    var uk = coreSizeOrder(Object.keys(f.u), urut).map(function (s) {
+      var a = f.u[s] || [0, 0, 0], batas = l.batas !== undefined && l.batas !== null && l.batas !== '' ? coreNum(l.batas) : (a[1] > 0 ? a[1] : SJ_BATAS), p = prod.uk[s] || null, tipis = a[0] <= batas;
+      if (tipis) kurang++; tersedia += Math.max(0, a[0]);
+      return { s: s, stok: a[0], batas: batas, st: !tipis ? 'aman' : (p ? 'jalan' : 'perlu'), p: p };
+    });
+    if (uk.some(function (u) { return u.st === 'perlu'; })) kelas = 'perlu'; else if (uk.some(function (u) { return u.st === 'jalan'; })) kelas = 'jalan';
+    return { k: k, f: f, l: l, pr: pr, prod: prod, uk: uk, kelas: kelas, kurang: kurang, tersedia: tersedia };
+  });
+}
+function sjKartu(r) {
+  var l = r.l, cls = r.kelas === 'perlu' ? 'bad' : (r.kelas === 'jalan' ? 'warn' : 'ok'), label = r.kelas === 'perlu' ? 'Perlu PO ulang' : (r.kelas === 'jalan' ? 'Sedang diproduksi' : 'Stok aman'), k = esc(r.k);
+  return '<div class="po sj-kartu"><div class="row top"><span class="thumb' + (r.f.g ? ' sj-gbr" style="background-image:url(&quot;' + esc(r.f.g) + '&quot;)' : '') + '">' + (r.f.g ? '' : esc(inisial(r.pr ? r.pr.nama : r.f.j))) + '</span>' +
+    '<div class="grow col gap-s"><div class="name">' + esc(r.pr ? r.pr.nama : (r.f.j || r.k)) + '</div><div class="xs muted">' + k + (r.pr ? (r.pr.series ? ' · ' + esc(r.pr.series) : '') : ' · belum dihubungkan ke barang') + '</div>' +
+    '<div class="chips"><span class="chip ' + cls + '">' + label + '</span>' + (l.laku ? '<span class="chip info">Lagi laku</span>' : '') + (l.sembunyi ? '<span class="chip">Disembunyikan</span>' : '') + '</div></div></div>' +
+    '<div class="sj-uk">' + r.uk.map(function (u) {
+      return '<div class="sj-sel ' + u.st + '"><b>' + (u.s === '-' ? 'Stok' : esc(u.s)) + '</b><span class="sj-n">' + nf(u.stok) + '</span><span class="xs">' + (u.p ? (u.p.jalan ? '+' + nf(u.p.jalan) + ' jalan' : 'antre potong') : 'batas ' + nf(u.batas)) + '</span></div>';
+    }).join('') + '</div>' +
+    (r.prod.po.length ? '<div class="row wrap gap-s">' + r.prod.po.slice(0, 4).map(function (po) { return '<button class="btn sm ghost" data-a="poOpen" data-id="' + esc(po.id) + '">' + esc(po.noPO || 'PO') + ' · ' + esc(PO_PITA[poWarna(po)] || 'jalan') + '</button>'; }).join('') + '</div>' : '') +
+    (!r.pr && r.kelas === 'perlu' ? '<div class="xs muted">Hubungkan dulu ke barangnya supaya terlihat apakah sudah ada PO yang jalan.</div>' : '') +
+    '<div class="row wrap">' + (r.pr ? '<button class="btn sm' + (r.kelas === 'perlu' ? ' pri' : '') + '" data-a="sjPO" data-k="' + k + '">' + ic('plus', 's') + 'Buat PO</button>' : '<button class="btn sm pri" data-a="sjHubung" data-k="' + k + '">Hubungkan ke barang</button>') +
+    '<button class="btn sm ghost" data-a="sjAtur" data-k="' + k + '">Atur</button></div></div>';
+}
+VIEWS.stokjual = function () {
+  var d = sjData(), sub = S.sub.sj || 'perlu';
+  var kepala = '<div class="head"><div class="grow"><h1>Stok &amp; PO ulang</h1><div class="sub">Stok siap jual BigSeller dicocokkan dengan PO yang sedang jalan. Merah: perlu PO ulang. Kuning: stok tipis tetapi sedang diproduksi. Hijau: aman.</div></div>' +
+    '<label class="btn pri">' + ic('up') + (d.stok ? 'Perbarui stok' : 'Unggah stok BigSeller') + '<input type="file" accept=".xlsx" data-c="sjFile" hidden></label></div>';
+  if (!d.stok) return kepala + '<div class="card">' + emptyBox('Belum ada data stok. Di BigSeller buka Pergudangan > Rincian Stok > Impor & Ekspor, ekspor ke Excel, lalu unggah file .xlsx itu di sini.') + '</div>';
+  var rows = sjHitung(), n = { perlu: 0, jalan: 0, aman: 0, lepas: 0, sembunyi: 0 };
+  rows.forEach(function (r) { if (r.l.sembunyi) { n.sembunyi++; return; } n[r.kelas]++; if (!r.pr) n.lepas++; });
+  var urutKelas = { perlu: 0, jalan: 1, aman: 2 };
+  S.listFn = function () {
+    var list = rows.filter(function (r) {
+      if (sub === 'sembunyi' ? !r.l.sembunyi : r.l.sembunyi) return false;
+      if (sub === 'lepas' ? r.pr : (sub !== 'semua' && sub !== 'sembunyi' && r.kelas !== sub)) return false;
+      return cocok(S.f.q, [r.k, r.f.j, r.pr ? r.pr.nama : '', r.pr ? r.pr.series : '']);
+    }).sort(function (a, b) {
+      if (a.kelas !== b.kelas) return urutKelas[a.kelas] - urutKelas[b.kelas];
+      if (!a.l.laku !== !b.l.laku) return a.l.laku ? -1 : 1;
+      if (a.kurang !== b.kurang) return b.kurang - a.kurang;
+      return a.tersedia - b.tersedia || (a.k < b.k ? -1 : 1);
+    });
+    if (!list.length) return '<div class="card">' + emptyBox(S.f.q ? 'Tidak ada barang yang cocok.' : (sub === 'perlu' ? 'Tidak ada yang perlu PO ulang.' : 'Tidak ada barang di bagian ini.')) + '</div>';
+    return '<div class="grid g-cards">' + list.slice(0, 90).map(sjKartu).join('') + '</div>' + (list.length > 90 ? '<p class="xs muted">Menampilkan 90 dari ' + nf(list.length) + '. Pakai kotak cari untuk yang lain.</p>' : '');
+  };
+  return kepala + '<div class="xs muted">Data stok ' + esc(lalu(d.stok.at) || '') + ' · ' + nf(d.stok.n) + ' SKU · ' + nf(rows.length) + ' barang' + (n.lepas ? ' · ' + nf(n.lepas) + ' belum dihubungkan' : '') + ' · tersimpan di perangkat ini saja</div>' +
+    '<div class="tools">' + seg('sj', [['perlu', 'Perlu PO ' + nf(n.perlu)], ['jalan', 'Diproduksi ' + nf(n.jalan)], ['aman', 'Aman ' + nf(n.aman)], ['lepas', 'Belum dihubungkan ' + nf(n.lepas)], ['semua', 'Semua']].concat(n.sembunyi ? [['sembunyi', 'Disembunyikan ' + nf(n.sembunyi)]] : []), sub) +
+    searchBox('q', 'Cari barang atau kode SKU') + '</div><div id="list">' + S.listFn() + '</div>';
+};
+C.sjFile = function (el) {
+  var file = el.files && el.files[0]; if (!file) return;
+  toast('Membaca file stok…');
+  file.arrayBuffer().then(function (buf) { return Promise.all([sjUnzip(buf, 'xl/worksheets/sheet1.xml'), sjUnzip(buf, 'xl/sharedStrings.xml')]); }).then(function (x) {
+    if (!x[0]) throw new Error('Lembar pertama tidak ditemukan di file ini.');
+    var shared = (x[1].match(/<si\b[^>]*>[\s\S]*?<\/si>/g) || []).map(function (si) { return (si.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map(function (t) { return t.replace(/<[^>]+>/g, ''); }).join(''); });
+    var snap = sjDariBaris(sjBaris(x[0], shared)); if (!snap.n) throw new Error('Tidak ada baris SKU di file ini.');
+    snap.file = String(file.name || '').slice(0, 80); sjData().stok = snap;
+    var tersimpan = sjSimpan('stok'); toast(tersimpan ? nf(snap.n) + ' SKU terbaca.' : 'Stok terbaca, tetapi tidak muat disimpan di perangkat ini.', !tersimpan);
+    render();
+  }).catch(function (e) { toast((e && e.message) || 'File tidak terbaca.', true); });
+};
+/* Hubungkan keluarga SKU ke barang. Seri barang yang sudah pernah dihubungkan dengan kode seri yang sama tampil lebih dulu. */
+A.sjHubung = function (el) {
+  var k = el.getAttribute('data-k'), d = sjData(), f = ((d.stok || {}).fam || {})[k] || {}, kode = k.split('-')[1] || '', seri = {}, asal = el.closest ? el.closest('[data-form]') : null;
+  if (asal) dropForm(asal);
+  Object.keys(d.link).forEach(function (x) { var p = d.link[x].p && D.produk[d.link[x].p]; if (p && p.series && x !== k && (x.split('-')[1] || '') === kode) seri[p.series] = 1; });
+  var prods = S.state.produk.filter(function (p) { return p.aktif; }).sort(function (a, b) { var x = seri[a.series] ? 0 : 1, y = seri[b.series] ? 0 : 1; return x - y || ((a.series + a.nama) < (b.series + b.nama) ? -1 : 1); });
+  S.pick = { title: 'Barang untuk ' + k, q: '', empty: 'Tidak ada produk yang cocok.', kind: 'produk', list: prods, cb: function (id) { var l = d.link[k] || (d.link[k] = {}); l.p = id; sjSimpan('link'); render(); toast('Terhubung ke ' + ((D.produk[id] || {}).nama || 'barang') + '.'); } };
+  openSheet(function () {
+    return sheetHtml(S.pick.title, '<div class="note">' + esc(f.j || k) + '</div><label class="search">' + ic('search', 's') + '<input type="search" data-pickq value="" placeholder="Cari produk" autocomplete="off"></label><div class="card flush"><div class="list" id="pick-list">' + pickList() + '</div></div>');
+  });
+};
+A.sjPO = function (el) {
+  var k = el.getAttribute('data-k'), l = sjData().link[k] || {}; if (!l.p || !D.produk[l.p]) return toast('Hubungkan dulu ke barangnya.', true);
+  var r = sjHitung().filter(function (x) { return x.k === k; })[0], merah = r ? r.uk.filter(function (u) { return u.st === 'perlu' && u.s !== '-'; }).map(function (u) { return u.s; }) : [];
+  if (merah.length) toast('Ukuran yang perlu: ' + merah.join(' · '));
+  openPO('', l.p);
+};
+A.sjAtur = function (el) {
+  var k = el.getAttribute('data-k'), d = sjData(), l = d.link[k] || {}, f = ((d.stok || {}).fam || {})[k] || {}, pr = l.p ? D.produk[l.p] : null;
+  openSheet(function () {
+    return sheetHtml('Atur ' + k, '<div class="col" data-form="sjAtur">' + hid('k', k) + '<div class="note">' + esc(pr ? pr.nama : (f.j || k)) + '</div>' +
+      fNum('Batas stok tipis per ukuran', 'batas', l.batas === undefined || l.batas === null ? '' : l.batas, 'step="1"', 'Kosongkan untuk mengikuti "Stok Peringatan" di BigSeller (bila kosong juga di sana: ' + SJ_BATAS + ' pcs).') +
+      '<label class="check"><input type="checkbox" name="laku"' + (l.laku ? ' checked' : '') + '><span>Lagi laku: tampil paling atas</span></label>' +
+      '<label class="check"><input type="checkbox" name="sembunyi"' + (l.sembunyi ? ' checked' : '') + '><span>Sembunyikan: barang ini tidak diproduksi lagi</span></label>' +
+      (pr ? '<div class="row wrap gap-s"><button type="button" class="btn sm" data-a="sjHubung" data-k="' + esc(k) + '">Ganti barang</button><button type="button" class="btn ghost sm" data-a="sjLepas" data-k="' + esc(k) + '">Lepas hubungan</button></div>' : '') + '</div>', footSave('sjAturSave'));
+  });
+};
+A.sjAturSave = function () {
+  var f = topForm(), v = formVals(f), d = sjData(), l = d.link[v.k] || (d.link[v.k] = {});
+  if (v.batas === '' || v.batas === undefined || v.batas === null) delete l.batas; else l.batas = Math.max(0, Math.round(coreNum(v.batas)));
+  if (v.laku) l.laku = 1; else delete l.laku; if (v.sembunyi) l.sembunyi = 1; else delete l.sembunyi;
+  if (!sjSimpan('link')) toast('Tidak muat disimpan di perangkat ini.', true);
+  dropForm(f); render();
+};
+A.sjLepas = function (el) { var k = el.getAttribute('data-k'), d = sjData(), f = el.closest('[data-form]'); if (d.link[k]) delete d.link[k].p; sjSimpan('link'); if (f) dropForm(f); render(); toast('Hubungan dilepas.'); };
 
 /* ---------------- TUKANG POTONG ---------------- */
 /* PO yang menunggu bahan tetap terlihat. Hasil potong memakai catatan pekerja,
