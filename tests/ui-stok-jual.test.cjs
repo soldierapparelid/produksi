@@ -151,6 +151,10 @@ test('an item that BigSeller has and the app does not is created from the link s
 });
 test('thin sizes join a PO of the same item that is not cut yet instead of becoming a second PO',async()=>{
   const c=ui();seed(c);run(c,"D.po.po1=S.state.po[0];S.state.po[0].agg={ukuran:{}};S.state.po[0]._belum=['M','L']");
+  /* a PO that came from the old app keeps its sizes: there is nothing to add to, so the button stays "Buat PO" */
+  assert.match(run(c,'VIEWS.stokjual()'),/data-a="sjPO" data-k="SA-UJI-KBD-HJ">Buat PO/);assert.doesNotMatch(run(c,'VIEWS.stokjual()'),/sjTambah/,'no active-size list: sizes cannot be added');
+  run(c,"S.state.po[0].ukuranAktif='[\"M\",\"L\"]';S.state.po[0].asal='lama'");assert.doesNotMatch(run(c,'VIEWS.stokjual()'),/sjTambah/,'an old-app PO is never offered');
+  run(c,"S.state.po[0].asal=''");
   let view=run(c,'VIEWS.stokjual()');
   assert.match(view,/<b>Perlu PO:<\/b> XL<\/div><div class="small muted"><b>Antre potong:<\/b> M · L<\/div>/);
   assert.match(view,/class="btn sm pri" data-a="sjTambah" data-k="SA-UJI-KBD-HJ" data-id="po1">Tambah ke PO-1<\/button>/);assert.doesNotMatch(view,/data-a="sjPO"/,'one button: no second PO for the same item');
