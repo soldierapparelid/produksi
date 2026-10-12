@@ -282,6 +282,10 @@ button.item:hover, a.item:hover { background: var(--surface-2); }
 .cgroup .corder { margin-left: 14px; border-left: 2px solid var(--line); }
 .cgroup .corder:last-child { border-bottom: 0; }
 .cinv-act { padding: 12px 14px; gap: 8px; align-items: center; }
+/* kiloan tiap rol pada bahan potong: butir bulat dengan titik merah */
+.kg-baris { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 5px; }
+.kg-rol { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); font-size: 13px; font-weight: 700; white-space: nowrap; }
+.kg-rol i { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; }
 .cinv .corder:last-child { border-bottom: 0; }
 
 /* kartu PO */
@@ -442,7 +446,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540d';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261012-owner-koreksi-1540e';</script>
 <script>
 (function () {
 'use strict';
@@ -11902,7 +11906,7 @@ function rencanaBahanHtml(r, detail) {
   function kiloan(items) {
     var grup = {}, urut = [];
     (items || []).forEach(function (a) { var s = satuAsal ? '' : (a.invoice || 'Invoice'); if (!grup[s]) { grup[s] = []; urut.push(s); } grup[s].push(a); });
-    return urut.map(function (s) { var g = grup[s]; return '<div class="small muted">' + (s ? esc(s) + ': ' : 'Kiloan rol: ') + g.map(function (a) { return nfQty(a.qty); }).join(' · ') + ' ' + esc(satuanPendek(g[0].satuan)) + '</div>'; }).join('');
+    return urut.map(function (s) { var g = grup[s]; return '<div class="kg-baris"><span class="small muted">' + (s ? esc(s) : 'Kiloan rol') + '</span>' + g.map(function (a) { return '<span class="kg-rol"><i></i>' + nfQty(a.qty) + ' ' + esc(satuanPendek(a.satuan)) + '</span>'; }).join('') + '</div>'; }).join('');
   }
   return '<div class="col gap-s">'+(r.legacyUkuran&&r.legacyUkuran.length?'<div class="small"><b>Ukuran jatah:</b> '+r.legacyUkuran.map(esc).join(' · ')+'</div>':'') +
     list.map(function (b) { var k = coreNormBahan(b.nama), items = per[k] || []; dipakai[k] = 1; return '<div><div class="row"><span class="grow">' + esc(b.nama) + (items.length ? ' <span class="small muted">· ' + nf(items.length) + ' rol</span>' : '') + '</span><b>' + nfQty(b.qty) + ' ' + esc(satuanPendek(b.satuan)) + '</b></div>' + kiloan(items) + '</div>'; }).join('') +
