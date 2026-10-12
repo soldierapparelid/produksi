@@ -144,8 +144,9 @@ test('1.5.40: a PO made in the last two days is listed first under "Baru dibuat"
   assert.match(strip,/<h3>Baru dibuat<\/h3><span class="xs muted">2 PO dalam 2 hari terakhir/);
   assert.ok(at(strip,'data-id="n1"')<at(strip,'data-id="n2"'),'newest first');
   for(const id of ['o1','i1','s1'])assert.ok(!strip.includes('data-id="'+id+'"'),id+' is not new, was imported, or is finished');
-  assert.match(strip,/Polo Baru[\s\S]*?PO-9 · Zulu · dibuat tadi/);
-  assert.ok(at(view,'id="po-baru"')<at(view,'<h3>Alfa</h3>'),'above the series');assert.match(view.slice(at(view,'<h3>Zulu</h3>')),/data-id="n1"/,'and still inside its own series');
+  assert.match(strip,/Polo Baru[\s\S]*?PO-9 · Zulu[\s\S]*?Dibuat tadi/);
+  assert.ok(at(view,'id="po-baru"')<at(view,'<h3>Alfa</h3>'),'above the series');const sisa=view.slice(at(view,'po-legenda'));assert.ok(!sisa.includes('data-id="n1"')&&!sisa.includes('data-id="n2"'),'a new PO is shown once: not repeated in its series');assert.ok(!view.includes('<h3>Zulu</h3>'),'a series whose only PO is new has nothing left to list');assert.match(sisa,/data-id="o1"/);
+  h.run('seed([fixture[0]],[])');const hanyaBaru=h.run('VIEWS.po()');assert.match(hanyaBaru,/id="po-baru"/);assert.ok(!hanyaBaru.includes('Tidak ada PO'),'only new POs: still a list, not the empty note');h.run('seed(fixture,[])');
   /* a search, a stage filter or another tab shows the plain list */
   h.run("S.f.q='polo'");assert.ok(!h.run('VIEWS.po()').includes('po-baru'));h.run("S.f.q='';S.f.poTahap='kirim'");assert.ok(!h.run('VIEWS.po()').includes('po-baru'));
   h.run("S.f.poTahap='';S.f.poStatus='selesai'");assert.ok(!h.run('VIEWS.po()').includes('po-baru'));
