@@ -17,7 +17,7 @@ function ui(){
     function toast(s,e){messages.push([s,!!e]);}function render(){rendered++;}function emptyBox(s){return s;}function searchBox(){return '';}
     function cocok(q,parts){q=String(q||'').toLowerCase();return !q||parts.join(' ').toLowerCase().indexOf(q)>=0;}
     function seg(k,o,cur){return o.map(function(x){return '['+x[1]+(x[0]===cur?'*':'')+']';}).join('');}
-    function poUkuranPotong(po){return po._belum||[];}function poWarna(po){return po._tahap||'maklon';}
+    function poUkuranPotong(po){return po._belum||[];}function poWarna(po){return po._tahap||'maklon';}function T(po){diproyeksi++;return {};}function workflowFor(po){return po.workflow||{ukuran:{}};}var diproyeksi=0;
     function openPO(id,p){opened=p;}function openSheet(fn){sheet=fn();}function sheetHtml(t,b,f){return t+b+(f||'');}function pickList(){return '';}
     function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fNum(l,n,v){return '<input name="'+n+'" value="'+esc(v)+'">';}function footSave(a){return a;}
     function topForm(){return form;}function formVals(){return Object.assign({},form.values);}function dropForm(){closed++;}
@@ -51,7 +51,7 @@ function sheetXml(){
 }
 function seed(c){
   c.xml=sheetXml();run(c,"S.sj={stok:sjDariBaris(sjBaris(xml,[])),link:{'SA-UJI-KBD-HJ':{p:'p1'}}};");
-  run(c,"D.produk.p1={id:'p1',nama:'Kaos Uji Hijau',series:'UJI',aktif:true};S.state.produk=[D.produk.p1];S.state.po=[{id:'po1',status:'aktif',jenis:'stok',produkId:'p1',noPO:'PO-1',agg:{ukuran:{M:{potong:30,bigseller:0},L:{potong:10,bigseller:10}}}}];");
+  run(c,"D.produk.p1={id:'p1',nama:'Kaos Uji Hijau',series:'UJI',aktif:true};S.state.produk=[D.produk.p1];S.state.po=[{id:'po1',status:'aktif',jenis:'stok',produkId:'p1',noPO:'PO-1',agg:{ukuran:{M:{potong:30,bigseller:0},L:{potong:10,qcOk:10}}}}];");
 }
 function plain(x){return JSON.parse(JSON.stringify(x));}
 
@@ -81,7 +81,12 @@ test('each size is red, yellow or green from the stock, the warning level and th
   run(c,"S.state.po[0]._belum=['XL']");assert.equal(lihat()['SA-UJI-KBD-HJ'][0],'jalan','a size that waits to be cut counts as running');
   run(c,"S.state.po[0].jenis='pesanan'");assert.equal(lihat()['SA-UJI-KBD-HJ'][1],'M:perlu:20 L:aman:20 XL:perlu:10','a customer order is not stock production');
   run(c,"S.state.po[0].jenis='stok';S.state.po[0].status='selesai'");assert.equal(lihat()['SA-UJI-KBD-HJ'][0],'perlu','a finished PO no longer counts');
-  run(c,"S.state.po[0].status='aktif';S.sj.link['SA-UJI-KBD-HJ'].batas=200");assert.equal(lihat()['SA-UJI-KBD-HJ'][1],'M:jalan:200 L:perlu:200 XL:jalan:200','the owner sets another level for the item; pieces already in BigSeller are not counted as running');
+  run(c,"S.state.po[0].status='aktif';S.sj.link['SA-UJI-KBD-HJ'].batas=200");assert.equal(lihat()['SA-UJI-KBD-HJ'][1],'M:jalan:200 L:perlu:200 XL:jalan:200','the owner sets another level for the item; pieces that passed QC are not counted as running');
+  /* running = cut and not through QC yet; the BigSeller note plays no part, and a size whose QC is finished is not running */
+  run(c,"S.state.po[0].agg.ukuran.L={potong:10,qcOk:4,qcOffline:1,qcReject:1,reject:1,bigseller:0}");assert.equal(plain(run(c,"sjProduksi('p1')")).uk.L.jalan,3);
+  run(c,"S.state.po[0].agg.ukuran.L={potong:10,qcOk:0,bigseller:10}");assert.equal(plain(run(c,"sjProduksi('p1')")).uk.L.jalan,10,'a BigSeller note without QC does not finish the size');
+  run(c,"S.state.po[0].workflow={ukuran:{L:{complete:true},M:{complete:false}}}");assert.deepEqual(Object.keys(plain(run(c,"sjProduksi('p1')")).uk),['XL','M'],'a size that finished QC is no longer in production');assert.ok(c.diproyeksi>0,'the PO figures are projected before they are read');
+  run(c,"S.state.po[0].agg.ukuran.L={potong:10,qcOk:10};delete S.state.po[0].workflow");
   /* a PO without a product id is matched by the item name */
   run(c,"delete S.sj.link['SA-UJI-KBD-HJ'].batas;S.state.po[0].produkId='';S.state.po[0].nama=' kaos uji hijau '");assert.equal(lihat()['SA-UJI-KBD-HJ'][0],'jalan');
 });
@@ -91,9 +96,9 @@ test('the screen lists what needs a new PO first and the owner links, tunes and 
   assert.match(view,/\[Perlu PO 2\*\]\[Diproduksi 0\]\[Aman 1\]\[Belum dihubungkan 2\]\[Semua\]/);assert.match(view,/5 SKU · 3 barang · 2 belum dihubungkan · tersimpan di perangkat ini saja/);
   assert.ok(view.indexOf('Kaos Uji Hijau')>0&&view.indexOf('Kaos Uji Hijau')<view.indexOf('Topi uji'),'the item with more thin sizes comes first');
   assert.match(view,/<div class="sj-sel jalan"><b>M<\/b><span class="sj-n">5<\/span><span class="xs">\+30 jalan<\/span><\/div><div class="sj-sel aman"><b>L<\/b><span class="sj-n">98<\/span><span class="xs">batas 20<\/span><\/div><div class="sj-sel perlu"><b>XL<\/b><span class="sj-n">0<\/span><span class="xs">batas 10<\/span><\/div>/);
-  assert.match(view,/background-image:url\(&quot;https:\/\/img\.example\.test\/sku\/a\.jpg\?imageView2\/1\/w\/300\/h\/300&quot;\)/);assert.match(view,/data-a="poOpen" data-id="po1">PO-1 · Di penjahit/);assert.match(view,/class="btn sm pri" data-a="sjPO" data-k="SA-UJI-KBD-HJ"/);
+  assert.match(view,/background-image:url\(&quot;https:\/\/img\.example\.test\/sku\/a\.jpg\?imageView2\/1\/w\/300\/h\/300&quot;\)/);assert.match(view,/data-a="poOpen" data-id="po1">PO-1 · di penjahit/);assert.match(view,/<span class="chip bad">Perlu PO ulang<\/span><span class="chip">Warna HJ<\/span>/,'the colour code of the SKU is shown');assert.match(html,/qc: 'menunggu QC'/);assert.match(view,/class="btn sm pri" data-a="sjPO" data-k="SA-UJI-KBD-HJ"/);
   assert.match(view,/SA-UJI-TOP-HT · belum dihubungkan ke barang[\s\S]*data-a="sjHubung" data-k="SA-UJI-TOP-HT">Hubungkan ke barang/);assert.doesNotMatch(view,/Barang satuan|javascript:/);
-  run(c,"S.sub.sj='aman'");assert.match(run(c,'VIEWS.stokjual()'),/Barang satuan[\s\S]*<b>Stok<\/b><span class="sj-n">50/);
+  run(c,"S.sub.sj='aman'");assert.match(run(c,'VIEWS.stokjual()'),/Barang satuan[\s\S]*<b>Stok<\/b><span class="sj-n">50/);assert.doesNotMatch(run(c,'VIEWS.stokjual()'),/Warna /,'a SKU without the usual parts has no colour mark');
   /* start a PO for the linked item */
   run(c,"A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.equal(c.opened,'p1');assert.deepEqual(plain(c.messages.slice(-1)),[['Ukuran yang perlu: XL',false]]);
   run(c,"opened=null;A.sjPO({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");assert.equal(c.opened,null);assert.equal(c.messages.slice(-1)[0][1],true);
