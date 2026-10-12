@@ -12,6 +12,13 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - **HPP.** PO yang punya catatan lanjutan dihitung utuh (seluruh bahan dibagi seluruh pcs) dan potongannya tidak dipakai sebagai acuan XL tersendiri (`commerce-hpp.js`). Sebelum semua ukuran dipotong, HPP kain PO itu masih terlalu tinggi karena bahannya baru dibagi ke ukuran yang sudah dipotong.
 - Rilis ini mengubah server: pasang `Core.gs` dan `Index.html` di Apps Script, lalu Merge.
 
+### Rakitan 1541b - layar "Stok & PO ulang" (tampilan saja, server tidak berubah)
+
+- Menu owner baru **Stok & PO ulang** (juga tombol di halaman PO dan di Lainnya). Owner mengunggah ekspor **Rincian Stok** BigSeller (`.xlsx`); file dibaca di perangkat (`sjUnzip`, `sjBaris`, `sjDariBaris`), tidak dikirim ke mana pun.
+- Nomor SKU dikelompokkan per barang: bagian terakhir adalah ukuran (`AB-CDE-FGH-HT-L` menjadi keluarga `AB-CDE-FGH-HT`, ukuran L). Tiap keluarga dihubungkan sekali dengan barang di aplikasi ("Hubungkan ke barang").
+- Tiap ukuran berwarna: **merah** stok tipis dan belum ada PO stok yang jalan (perlu PO ulang), **kuning** stok tipis tetapi sedang diproduksi (ada pcs yang sudah dipotong dan belum masuk BigSeller, atau ukuran itu antre potong), **hijau** aman. Batas stok tipis mengikuti kolom "Stok Peringatan" BigSeller; bisa diganti per barang lewat "Atur", yang juga menandai "Lagi laku" (tampil paling atas) atau menyembunyikan barang yang tidak diproduksi lagi. PO pesanan pelanggan tidak dihitung sebagai produksi stok.
+- Rakitan ini menyimpan stok dan hubungan SKU **di perangkat itu saja** (`pk_stokjual`, `pk_stoklink` di localStorage); belum ikut ke perangkat lain. Memindahkannya ke server menunggu rilis server berikutnya.
+
 ## Rilis 1.5.40 - owner mengoreksi dari Beranda, PO baru langsung terlihat
 
 - **PO yang harus dipotong tampil paling atas.** Daftar PO disusun per seri, sehingga PO baru dan PO lain yang belum dipotong bisa jatuh jauh di bawah dan dikira tidak tersimpan (pada 12 Okt satu barang sampai dibuatkan dua PO). Tab Aktif dan Semua barang sekarang dibuka dengan bagian **Harus dipotong**: semua PO aktif yang masih punya ukuran untuk dipotong (`poHarusDipotong`), terbaru di atas, sebagai kartu PO biasa; PO buatan 2 hari terakhir diberi keterangan kapan dibuat. Selama berada di sana PO itu **tidak diulang di serinya**, dan baru masuk ke serinya setelah semua ukurannya dipotong. Bagian ini tidak tampil saat mencari atau menyaring tahap/jenis. (Rakitan pertama menampilkan bagian "Baru dibuat" yang mengulang PO di serinya; rakitan `1540b` menghilangkan pengulangan itu; rakitan `1540c` menggantinya dengan "Harus dipotong".)
