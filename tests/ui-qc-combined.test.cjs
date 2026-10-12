@@ -7,6 +7,7 @@ function harness(){
     var S={state:{setor:[],qc:[]}},D={po:{p:{id:'p',noPO:'PO-1',nama:'Kaos'}}},A={},R={},choices=[],view='',requests=[],toasts=[],activeForm;
     function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
     function nf(n){return String(n);}function tgl(s){return s;}function namaUser(s){return s;}function newId(){return 'batch-1';}
+    var repairs=[];function repairQueue(){return repairs;}function qcPoGroups(){return [];}function qcHistoricalNotes(){return '';}function ic(){return '';}
     function antreanQC(){return choices;}function qcBalance(){return {waiting:0};}function poHead(p){return p.nama;}
     function hid(n,v){return '<input name="'+n+'" value="'+v+'">';}function sumLine(){return '';}
     function fTanggal(){return '<input name="tanggal">';}function fCatatan(){return '';}
@@ -19,10 +20,25 @@ function harness(){
     function recalc(f){R.qcCombined(f);}
   `+html.slice(start,end)+`
     return {S,D,A,R,groups:qcCombinedGroups,grid:qcCombinedGrid,open:openQC,view:function(){return view;},requests,toasts,
-      load:function(rows){choices=rows;S.state.setor=rows.map(function(r){return r.s;});},setForm:function(f){activeForm=f;}};
+      load:function(rows){choices=rows;S.state.setor=rows.map(function(r){return r.s;});},setForm:function(f){activeForm=f;},repair:function(rows){repairs=rows;}};
   `)();
 }
 function row(id,n,opts={}) {return {s:Object.assign({id,poId:'p',maklonId:'w',noSlip:'SS-'+id,tanggal:'2026-10-01',status:'diterima',ukuran:{L:n},upah:1100},opts),uk:{L:n},sisa:n};}
+test('1.5.40: a PO with new counts and a repair still waiting for its result offers both, so the repair is not stuck behind new deliveries',()=>{
+  const h=harness(),perbaikan=[{q:{id:'q1',poId:'p',setorId:'a',maklonId:'w',tanggal:'2026-10-05'},uk:{L:3},total:3}];
+  h.load([row('a',50),row('b',92)]);h.repair(perbaikan);h.open('p');let view=h.view();
+  assert.match(view,/Pilih hitungan atau perbaikan/);
+  assert.match(view,/data-a="qcCombinedOpen" data-id="p">Periksa hitungan baru · 142 pcs<\/button>/);
+  assert.match(view,/data-a="qcRepairOpen" data-id="q1">Isi hasil perbaikan 2026-10-05 · L 3 · w<\/button>/);
+  assert.ok(!view.includes('data-qc-row'),'the count form is not opened until it is chosen');
+  /* only a repair: the same list, without the count button */
+  h.load([]);h.open('p');view=h.view();assert.ok(!view.includes('qcCombinedOpen'));assert.match(view,/data-a="qcRepairOpen" data-id="q1"/);
+  /* only new counts: straight to the combined form, as before */
+  h.load([row('a',50)]);h.repair([]);h.open('p');assert.match(h.view(),/data-qc-row="L"/);
+  /* the repair result form asks for good or reject in plain words */
+  assert.match(html,/\[\['ok','Bagus \/ OK'\],\['offline','Offline'\],\['reject','Reject \(jelek\)'\]\]/);
+  assert.match(html,/A\.qcCombinedOpen = function \(el\) \{ openCombinedQC\(el\.getAttribute\('data-id'\)\); \};/);
+});
 test('two accepted counts for one PO, worker and rate open directly as one 142-piece size field',()=>{
   const h=harness();h.load([row('a',50),row('b',92)]);h.open('p');const view=h.view();
   assert.equal(h.groups('p').length,1);assert.equal(h.groups('p')[0].ukuran.L,142);
