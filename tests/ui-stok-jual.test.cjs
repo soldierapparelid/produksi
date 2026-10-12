@@ -21,6 +21,8 @@ function ui(){
     function openPO(id,p){opened=p;}function openSheet(fn){sheet=fn();}function sheetHtml(t,b,f){return t+b+(f||'');}function pickList(){return '';}
     function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fNum(l,n,v){return '<input name="'+n+'" value="'+esc(v)+'">';}function footSave(a){return a;}
     function topForm(){return form;}function formVals(){return Object.assign({},form.values);}function dropForm(){closed++;}
+    var calls=[],sheetsClosed=0;function closeSheet(){sheetsClosed++;}function newId(){return 'id-baru';}function act(el,p){return p;}function quiet(e){messages.push([e&&e.message,true]);}
+    function req(action,payload){return new Promise(function(resolve,reject){calls.push({action:action,payload:payload,resolve:resolve,reject:reject});});}
   `,c);
   vm.runInContext(part('/* ---------------- STOK JUAL & PO ULANG ---------------- */','/* ---------------- TUKANG POTONG ---------------- */'),c);
   return c;
@@ -103,7 +105,7 @@ test('the screen lists what needs a new PO first and the owner links, tunes and 
   run(c,"A.sjPO({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.equal(c.opened,'p1');assert.deepEqual(plain(c.messages.slice(-1)),[['Ukuran yang perlu: XL',false]]);
   run(c,"opened=null;A.sjPO({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");assert.equal(c.opened,null);assert.equal(c.messages.slice(-1)[0][1],true);
   /* link an item: the choice is stored on this device */
-  run(c,"A.sjHubung({getAttribute:function(){return 'SA-UJI-TOP-HT';}});S.pick.cb('p1')");assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'].p,'p1');assert.match(c.sheet,/Barang untuk SA-UJI-TOP-HT[\s\S]*Topi uji/);
+  run(c,"A.sjHubung({getAttribute:function(){return 'SA-UJI-TOP-HT';}});S.pick.cb('p1')");assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'].p,'p1');assert.match(c.sheet,/Barang untuk SA-UJI-TOP-HT[\s\S]*Topi uji<\/div><div class="xs muted">SA-UJI-TOP-HT · warna HT<\/div>[\s\S]*data-a="sjBarangBaru" data-k="SA-UJI-TOP-HT">Belum ada di aplikasi: buat barang baru/,'the sheet shows what BigSeller knows about the item and offers to create it');
   /* tune: own level, selling well, hidden */
   run(c,"A.sjAtur({getAttribute:function(){return 'SA-UJI-KBD-HJ';}})");assert.match(c.sheet,/Atur SA-UJI-KBD-HJ[\s\S]*Kaos Uji Hijau[\s\S]*name="laku"[\s\S]*name="sembunyi"[\s\S]*data-a="sjLepas"/);
   run(c,"form.values={k:'SA-UJI-KBD-HJ',batas:'30',laku:true,sembunyi:false};A.sjAturSave()");assert.deepEqual(JSON.parse(c.store.pk_stoklink)['SA-UJI-KBD-HJ'],{p:'p1',batas:30,laku:1});
@@ -116,5 +118,19 @@ test('the screen is reachable from the owner menu, the PO page and Lainnya; the 
   assert.match(html,/\{ id: 'stokjual', label: 'Stok & PO ulang', icon: 'box', lebih: true \},/);
   assert.match(html,/<button class="btn" data-a="tab" data-id="stokjual">Stok &amp; PO ulang<\/button>/);assert.match(html,/item\('tab', 'box', 'Stok & PO ulang', [^)]*'data-id="stokjual"'\)/);
   const blok=part('/* ---------------- STOK JUAL & PO ULANG ---------------- */','/* ---------------- TUKANG POTONG ---------------- */');
-  assert.doesNotMatch(blok,/\breq\(|Api\.|fetch\(/,'the file and the links stay on the device');assert.deepEqual([...new Set(blok.match(/'pk_[a-z]+'/g))].sort(),["'pk_stokjual'","'pk_stoklink'"]);
+  assert.deepEqual(blok.match(/\breq\('\w+'/g),["req('saveProduk'"],'only creating a missing item reaches the server');assert.doesNotMatch(blok,/Api\.|fetch\(/,'the file and the links stay on the device');assert.deepEqual([...new Set(blok.match(/'pk_[a-z]+'/g))].sort(),["'pk_stokjual'","'pk_stoklink'"]);
+});
+test('an item that BigSeller has and the app does not is created from the link sheet and linked at once',async()=>{
+  const c=ui();seed(c);run(c,"A.sjBarangBaru({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");
+  assert.equal(c.sheetsClosed,1,'the product list sheet closes first');assert.match(c.sheet,/Barang baru untuk SA-UJI-TOP-HT[\s\S]*name="newId" value="id-baru"[\s\S]*name="nama"[\s\S]*name="series" list="dl-sj-seri" value="UJI"[\s\S]*<option value="UJI">[\s\S]*sjBarangSave/,'the series is guessed from an item already linked under the same series code');
+  run(c,"form.values={k:'SA-UJI-TOP-HT',newId:'id-baru',nama:'  ',series:''};A.sjBarangSave({})");assert.equal(c.calls.length,0);assert.equal(c.messages.slice(-1)[0][1],true);
+  run(c,"form.values={k:'SA-UJI-TOP-HT',newId:'id-baru',nama:'Topi Rimba Hitam',series:'UJI'};A.sjBarangSave({});A.sjBarangSave({})");
+  assert.equal(c.calls.length,1,'a second tap while saving is ignored');assert.deepEqual(plain(c.calls[0]),{action:'saveProduk',payload:{produk:{newId:'id-baru',nama:'Topi Rimba Hitam',series:'UJI',tarifPotong:0,tarifJahit:0,catatan:''}}});
+  run(c,"D.produk['id-baru']={id:'id-baru',nama:'TOPI RIMBA HITAM',series:'UJI',aktif:true};S.state.produk.push(D.produk['id-baru'])");c.calls[0].resolve({id:'id-baru'});await new Promise(r=>setTimeout(r,10));
+  assert.equal(JSON.parse(c.store.pk_stoklink)['SA-UJI-TOP-HT'].p,'id-baru');assert.equal(c.closed,1);assert.deepEqual(plain(c.messages.slice(-1)),[['Barang dibuat dan terhubung.',false]]);
+  run(c,"S.sub.sj='semua'");assert.match(run(c,'VIEWS.stokjual()'),/TOPI RIMBA HITAM<\/div><div class="xs muted">SA-UJI-TOP-HT · UJI/);
+  run(c,"A.sjBarangBaru({getAttribute:function(){return 'SA-XYZ-LAIN-HT';}})");assert.match(c.sheet,/name="series" list="dl-sj-seri" value=""/,'no guess for a series code that was never linked');
+  /* a refused save keeps the form and links nothing */
+  const g=ui();seed(g);run(g,"form.values={k:'SA-UJI-TOP-HT',newId:'x',nama:'Kaos Uji Hijau',series:'UJI'};A.sjBarangSave({})");g.calls[0].reject(new Error('Produk KAOS UJI HIJAU (UJI) sudah ada.'));await new Promise(r=>setTimeout(r,10));
+  assert.equal(g.store.pk_stoklink,undefined);assert.equal(g.closed,0);assert.match(g.messages.slice(-1)[0][0],/sudah ada/);run(g,"A.sjBarangSave({})");assert.equal(g.calls.length,2,'the owner can try again');
 });
