@@ -141,8 +141,8 @@ test('trimmed history always offers explicit old-data loading, including when cu
 
 test('verified pending sizes keep a mixed imported PO visible even when aggregate target is already met',()=>{
  const c=ui();evaluate(c,`S.state.rencanaPotong=[];po.total=10;po.ukuran={M:10};po.agg={total:{potong:10}};po.cutting={verified:true,ukuran:['M','XL','XXL'],pendingUkuran:['XL','XXL'],needsReview:false};`);
- let out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Belum dipotong:<\/b> XL · XXL/);assert.match(out,/Menunggu bahan dari owner/);assert.doesNotMatch(out,/data-a="potongOpen"/);assert.equal(c.kpis[1][1],'1');
- evaluate(c,"po.cutting.pendingUkuran=['XXL'];po.agg.total.potong=17");out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Belum dipotong:<\/b> XXL/);assert.doesNotMatch(out,/Belum dipotong:<\/b> XL ·/);
+ let out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Harus dipotong<\/span><span class="sz-aktif potong">XL<\/span><span class="sz-aktif potong">XXL<\/span>/);assert.match(out,/Menunggu bahan dari owner/);assert.doesNotMatch(out,/data-a="potongOpen"/);assert.equal(c.kpis[1][1],'1');
+ evaluate(c,"po.cutting.pendingUkuran=['XXL'];po.agg.total.potong=17");out=evaluate(c,"VIEWS['p-kerja']()");assert.match(out,/Harus dipotong<\/span><span class="sz-aktif potong">XXL<\/span><\/div>/);assert.doesNotMatch(out,/<span class="sz-aktif potong">XL<\/span>/);
  evaluate(c,"po.cutting.pendingUkuran=[];po.agg.total.potong=22");assert.equal(evaluate(c,"VIEWS['p-kerja']();kpis[1][1]"),'0');
 });
 test('size picker includes verified source sizes without changing target quantities and ignores unverified additions',()=>{
@@ -185,11 +185,11 @@ test('owner without a preparation picks rolls from stock: kilos follow the rolls
 test('1.5.41: a PO cut in part from the owner fabric is a continuing job with its own form, not a PO waiting for fabric',()=>{
   const c=ui();evaluate(c,`plan.status='terpakai';po.cutting={ukuran:['M','L','XL'],pendingUkuran:['L','XL'],lanjut:'plan'};po.agg={total:{potong:20}};S.state.potong=[{id:'first',poId:'po',userId:'worker',tanggal:'2026-10-08',total:20,ukuran:{M:20},rencanaId:'plan'}];`);
   const out=evaluate(c,"VIEWS['p-kerja']()");
-  assert.match(out,/Lanjut potong · bahan sudah ada/);assert.match(out,/<b>Belum dipotong:<\/b> L · XL/);assert.match(out,/data-a="potongOpen" data-id="po" data-lanjut="1"/);
+  assert.match(out,/Lanjut potong · bahan sudah ada/);assert.match(out,/<span class="xs muted">Harus dipotong<\/span><span class="sz-aktif potong">L<\/span><span class="sz-aktif potong">XL<\/span><\/div><div class="small muted">Sudah dipotong untuk PO: 20 pcs/);assert.doesNotMatch(out,/Bahan sudah tercatat\. Cukup isi/,'the label already says it');assert.match(out,/data-a="potongOpen" data-id="po" data-lanjut="1"/);
   assert.match(out,/Katun &lt;biru>/,'the fabric of the first cut stays visible');assert.doesNotMatch(out,/Menunggu bahan dari owner|data-rencana="plan"/);
   assert.equal(c.kpis[0][1],'1');assert.equal(c.kpis[1][1],'0');
   /* the done tab says which sizes are still open */
-  evaluate(c,"S.sub.pkerja='sudah'");assert.match(evaluate(c,'S.listFn()'),/20 pcs dipotong[\s\S]*<b>Belum dipotong:<\/b> L · XL/);evaluate(c,"S.sub.pkerja='perlu'");
+  evaluate(c,"S.sub.pkerja='sudah'");assert.match(evaluate(c,'S.listFn()'),/20 pcs dipotong[\s\S]*Harus dipotong<\/span><span class="sz-aktif potong">L<\/span><span class="sz-aktif potong">XL<\/span>/);evaluate(c,"S.sub.pkerja='perlu'");
   /* the form: only the open sizes, no fabric fields */
   evaluate(c,"el={getAttribute:function(k){return {'data-id':'po','data-lanjut':'1'}[k];},closest:function(){return form;}};A.potongOpen(el)");
   assert.match(c.rendered,/Lanjutan potong/);assert.match(c.rendered,/name="lanjut" value="1"/);assert.match(c.rendered,/<input data-size="L"><input data-size="XL">/);
@@ -209,4 +209,15 @@ test('1.5.41: the owner sees a partly cut PO as continuing in the PO sheet and t
   evaluate(c,"po.cutting.lanjut=''");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/Dipotong sebagian/);
   assert.match(html,/if \(po\.cutting && po\.cutting\.lanjut\) return false;/,'such a PO is not labelled as waiting for fabric');
   assert.match(html,/Boleh simpan satu ukuran dulu\. Ukuran lain dicatat menyusul dari daftar Potong; bahan ini dihitung sekali saja\./);
+});
+
+test('1542b: every cutter card says which sizes must be cut, without opening the PO',()=>{
+  const c=ui();evaluate(c,"po.cutting={ukuran:['M','L','XL'],pendingUkuran:['M','L','XL']};");
+  let out=evaluate(c,"VIEWS['p-kerja']()");
+  assert.match(out,/Bahan siap dipotong<\/span><div class="po-ukuran kecil"><span class="xs muted">Harus dipotong<\/span><span class="sz-aktif potong">M<\/span><span class="sz-aktif potong">L<\/span><span class="sz-aktif potong">XL<\/span><\/div>/,'a ready card lists the sizes right under its label');
+  /* a job from the old app that is for one size says so through its own line, not twice */
+  evaluate(c,"plan.legacyUkuran=['XL']");out=evaluate(c,"VIEWS['p-kerja']()");assert.doesNotMatch(out,/Harus dipotong/);assert.match(out,/Ukuran jatah:<\/b> XL/);
+  /* a PO that waits for fabric */
+  const w=ui();evaluate(w,"S.state.rencanaPotong=[];po.cutting={ukuran:['M','L'],pendingUkuran:['L']};");assert.match(evaluate(w,"VIEWS['p-kerja']()"),/Menunggu bahan dari owner<\/span><div class="po-ukuran kecil"><span class="xs muted">Harus dipotong<\/span><span class="sz-aktif potong">L<\/span><\/div>/);
+  assert.doesNotMatch(html.slice(html.indexOf("VIEWS['p-kerja'] ="),html.indexOf("VIEWS['p-riwayat'] =")),/Belum dipotong:/,'one wording on every card');
 });

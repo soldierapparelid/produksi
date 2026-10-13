@@ -47,9 +47,9 @@ const rows=[
   ['javascript:alert(1)','SA-UJI-TOP-HT-58','Topi uji','3.0','0.0','3.0','0.0'],
   ['','TANPAUKURAN','Barang satuan','50.0','0.0','50.0','0.0']
 ];
-function sheetXml(){
+function sheetXml(isi=rows){
   const cols='ABCDEFG',cell=(ref,v,num)=>num?`<c r="${ref}" s="2" t="n"><v>${v}</v></c>`:`<c r="${ref}" s="1" t="inlineStr"><is><t>${v}</t></is></c>`;
-  return '<?xml version="1.0"?><worksheet><sheetData>'+[headers].concat(rows).map((r,i)=>`<row r="${i+1}" ht="30.0">`+r.map((v,j)=>cell(cols[j]+(i+1),v,i>0&&j>=3)).join('')+'</row>').join('\n')+'</sheetData></worksheet>';
+  return '<?xml version="1.0"?><worksheet><sheetData>'+[headers].concat(isi).map((r,i)=>`<row r="${i+1}" ht="30.0">`+r.map((v,j)=>cell(cols[j]+(i+1),v,i>0&&j>=3)).join('')+'</row>').join('\n')+'</sheetData></worksheet>';
 }
 function seed(c){
   c.xml=sheetXml();run(c,"S.sj={stok:sjDariBaris(sjBaris(xml,[])),link:{'SA-UJI-KBD-HJ':{p:'p1'}}};");
@@ -194,4 +194,22 @@ test('1.5.42: the links follow the server; a change on this device is sent, and 
   assert.deepEqual(plain(d.calls),[{action:'saveStokJualLink',payload:{link:{'SA-UJI-KBD-HJ':{p:'p1'}}}}]);
   /* someone who is not owner or admin never sends */
   const e=ui();seed(e);run(e,"SJ_TUNDA=0;function isAdmin(){return false;}");run(e,'VIEWS.stokjual()');run(e,"A.sjSembunyi({getAttribute:function(){return 'SA-UJI-TOP-HT';}})");await new Promise(r=>setTimeout(r,20));assert.equal(e.calls.length,0);
+});
+
+test('1542b: a size that is already in an active PO is yellow whatever its stock, so the whole PO shows on the card',()=>{
+  const c=ui();seed(c);run(c,"S.state.po[0].agg.ukuran.L={};S.state.po[0]._belum=['L']");run(c,"S.sub.sj='semua'");const view=run(c,'VIEWS.stokjual()');
+  assert.match(view,/<span class="sj-sel jalan"><b>M<\/b><span class="sj-n">5<\/span><\/span><span class="sj-sel jalan"><b>L<\/b><span class="sj-n">98<\/span><\/span><span class="sj-sel perlu"><b>XL<\/b><span class="sj-n">0<\/span><\/span>/,'L has plenty of stock but waits to be cut in the PO: yellow like M');
+  assert.match(view,/<b>Perlu PO:<\/b> XL<\/div><div class="small muted"><b>Antre potong:<\/b> L<\/div><div class="small muted"><b>Sedang diproduksi:<\/b> M 30<\/div>/);
+  assert.equal(plain(run(c,'sjHitung()')).filter(r=>r.k==='SA-UJI-KBD-HJ')[0].kelas,'perlu','the colour of a pill does not change what still needs a PO');
+  assert.match(view,/Kuning: ukuran itu sudah di-PO atau sedang diproduksi/);
+});
+test('1542b: a second BigSeller file only replaces the stock numbers; links, own levels and hidden items stay',async()=>{
+  const c=ui();seed(c);run(c,"S.sj.link={'SA-UJI-KBD-HJ':{p:'p1',batas:7,laku:1},'SA-UJI-TOP-HT':{sembunyi:1}};sjSimpan('link');S.sub.sj='semua'");
+  const sebelum=c.store.pk_stoklink,url='https://img.example.test/sku/a.jpg';
+  const kedua=[[url,'SA-UJI-KBD-HJ-M','Kaos uji','200.0','0.0','200.0','20.0'],[url,'SA-UJI-KBD-HJ-L','Kaos uji','3.0','0.0','3.0','20.0'],[url,'SA-UJI-KBD-HJ-XL','Kaos uji','0.0','0.0','0.0','0.0'],['','SA-UJI-TOP-HT-58','Topi uji','90.0','0.0','90.0','0.0'],['','SA-UJI-BRU-HT-M','Barang baru','1.0','0.0','1.0','0.0']];
+  c.buf=zip([['xl/worksheets/sheet1.xml',sheetXml(kedua),true]]);c.el={files:[{name:'kedua.xlsx',arrayBuffer:()=>Promise.resolve(c.buf)}]};run(c,'C.sjFile(el)');await new Promise(r=>setTimeout(r,80));
+  assert.equal(c.store.pk_stoklink,sebelum,'the links are not touched by a new file');assert.equal(JSON.parse(c.store.pk_stokjual).file,'kedua.xlsx');
+  const hasil=Object.fromEntries(plain(run(c,'sjHitung()')).map(r=>[r.k,[r.pr?r.pr.nama:'',r.l.sembunyi||0,r.uk.map(u=>u.s+':'+u.stok+':'+u.st+':'+u.batas).join(' ')]]));
+  assert.deepEqual(hasil,{'SA-UJI-KBD-HJ':['Kaos Uji Hijau',0,'M:200:aman:7 L:3:perlu:7 XL:0:perlu:7'],'SA-UJI-TOP-HT':['',1,'58:90:aman:10'],'SA-UJI-BRU-HT':['',0,'M:1:perlu:10']},'still linked to the same item with its own level; only the numbers are new; an item that left the file is gone and a new one waits to be linked');
+  const view=run(c,'VIEWS.stokjual()');assert.match(view,/Kaos Uji Hijau<\/div><div class="xs muted">SA-UJI-KBD-HJ · UJI · lagi laku/);assert.match(view,/\[Belum dihubungkan 1\]/);assert.match(view,/\[Disembunyikan 1\]/);assert.doesNotMatch(view,/Barang satuan/);
 });

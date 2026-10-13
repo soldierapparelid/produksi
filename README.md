@@ -8,6 +8,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - **Hubungan SKU tersimpan di server.** Hubungan keluarga SKU BigSeller dengan barang, batas per barang, tanda "lagi laku" dan "sembunyikan" (layar Stok & PO ulang) disimpan di pengaturan `stokJualLink` lewat aksi baru `saveStokJualLink` (owner/admin; hanya dikirim ke owner/admin). Hubungan yang sudah dibuat di perangkat sebelum rilis ini dikirim otomatis saat layar itu dibuka. Angka stok BigSeller tetap di perangkat: unggah ulang file ekspor di perangkat lain.
 - Rilis ini mengubah server: pasang `Core.gs` dan `Index.html` di Apps Script, lalu Merge.
 
+### Rakitan 1542b - layar tukang potong lebih ringkas (tampilan saja, server tidak berubah)
+
+- Kartu tukang potong menulis ukuran yang harus dipotong sebagai butir oranye ("Harus dipotong M L XL") pada kartu siap, lanjutan dan menunggu bahan; butir kiloan lebih kecil dan berjajar tanpa satuan di tiap butir, rol per ukuran satu baris per ukuran dengan butir ukurannya di depan, baris "Total N rol" hanya bila bahannya lebih dari satu atau rolnya tidak dirinci (sumber rol tinggal di formulir). Di Stok & PO ulang, ukuran yang sudah masuk PO aktif selalu kuning, bukan hanya yang stoknya tipis.
+
 ## Rilis 1.5.41 - hasil potong disimpan per ukuran (potong lanjutan)
 
 - **Simpan satu ukuran dulu, lanjut besok.** PO baru yang sebagian ukurannya sudah dipotong dari bahan persiapan owner tidak lagi kembali ke "Menunggu bahan dari owner". Di layar tukang potong ia tampil sebagai **"Lanjut potong · bahan sudah ada"** dengan ukuran yang belum dipotong; tukang mengisi ukuran berikutnya lalu menyimpan lagi.
