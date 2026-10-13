@@ -94,6 +94,7 @@ test('invoice and thermal receipt show the items, the totals and what is still o
  c.rec=record;c.st={kopSlip:'SOLDIER APPAREL',kopSub:'SOLDIERAPPAREL.ID',alamat:'Jl. Usaha 9'};
  const inv=vm.runInContext('coreNotaInvoiceHtml(rec,st,{})',c);
  assert.match(inv,/^<!doctype html><html lang="id">/);assert.match(inv,/@page\{size:A4 portrait;margin:14mm\}/);assert.ok(!/<script|<img/i.test(inv));
+ assert.ok(!/color:#fff|background:#1b1f24/.test(inv),'nothing depends on a printed background: PDF and browser print drop it');assert.match(inv,/\.jumlah \.total td\{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold/);
  assert.match(inv,/<div class="usaha">SOLDIER APPAREL<\/div><div class="kecil">SOLDIERAPPAREL\.ID<\/div><div class="kecil">Jl\. Usaha 9<\/div>/);assert.match(inv,/No\. <b>SA-261013-007<\/b><\/div><div class="kecil">Tanggal 13 Okt 2026<\/div>/);
  assert.match(inv,/<div class="nama">Toko &amp; Uji<\/div><div class="kecil">0800<\/div><div class="kecil">Jl\. Contoh 1<\/div>/);assert.match(inv,/border-color:#b26a00">DP \/ BELUM LUNAS<\/span>/);
  assert.match(inv,/<tr><td class="tengah">1<\/td><td><b>Oblong<\/b><div class="kecil">Hitam<\/div><\/td><td class="tengah">XL<\/td><td class="tengah">12<\/td><td class="kanan">Rp 4\.500<\/td><td class="tengah">-<\/td><td class="kanan">Rp 54\.000<\/td><\/tr>/);
