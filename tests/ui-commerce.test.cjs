@@ -529,3 +529,88 @@ test('the supplier screen keeps models, payment history and corrections while co
   h.run(`S.state.me.divisi='admin';A.commerceInvoiceHapus(${el('o1','b')})`);assert.match(h.json('messages').at(-1).text,/Hanya owner/);
   assert.match(html,/data-a="commerceGroupInvoice">Buka invoice<\/button>/);
 });
+
+/* ---------- 1.5.43: nota penjualan (invoice, struk, edit, arsip, hapus) dan "Hapus PO" pembelian ---------- */
+const notaRows=()=>[
+  {id:'n1',noNota:'SA-1',revision:'r1',status:'dp',date:'2026-10-13',customer:{name:'Budi',phone:'08',address:'Jl. A'},items:[{id:'i',name:'Oblong',color:'Hitam',size:'L',qty:10,price:5000,discPercent:0,subtotal:50000}],subtotal:50000,discountAmount:0,shipping:0,total:50000,totalPaid:20000,balance:30000,payments:[{id:'p',jumlah:20000,tanggal:'2026-10-13',metode:'cash'}],events:[{id:'p'}]},
+  {id:'n2',noNota:'SA-2',revision:'r2',status:'lunas',date:'2026-10-12',customer:{name:'Ani'},items:[],total:10,totalPaid:10,balance:0,payments:[],events:[],archived:true},
+  {id:'n3',noNota:'SA-3',revision:'r3',status:'batal',cancelled:true,cancelledBy:'owner',cancelReason:'Salah input',date:'2026-10-11',customer:{name:'Cici'},items:[],total:10,totalPaid:0,balance:10,payments:[],events:[]},
+  {id:'n4',noNota:'SA-4',revision:'r4',status:'lunas',legacy:true,date:'2026-10-01',customer:{name:'Lama'},items:[],total:10,totalPaid:10,balance:0,payments:[{id:'q',jumlah:10}],events:[{id:'q'}]}];
+const notaEl=(id,extra={})=>`{disabled:false,classList:{add:function(){},remove:function(){}},getAttribute:function(k){var x=${JSON.stringify({'data-m':'nota','data-id':id,...extra})};return x[k]===undefined?null:x[k];}}`;
+
+test('1.5.43: the nota list opens with active notas; archived and deleted ones have their own filters',()=>{
+  const h=harness();h.seed('nota',{notes:notaRows()});const view=h.run('VIEWS.nota()');
+  assert.match(view,/Nota aktif/);assert.match(view,/Arsip \(1\)/);assert.match(view,/Dihapus \/ dibatalkan \(1\)/);
+  let list=h.run('S.listFn()');assert.match(list,/data-id="n1"/);assert.match(list,/data-id="n4"/);assert.ok(!list.includes('data-id="n2"')&&!list.includes('data-id="n3"'));
+  h.run("S.f['commerceStatus-nota']='arsip'");list=h.run('S.listFn()');assert.match(list,/data-id="n2"/);assert.match(list,/<span class="chip info">Arsip<\/span>/);assert.ok(!list.includes('data-id="n1"'));
+  h.run("S.f['commerceStatus-nota']='batal'");list=h.run('S.listFn()');assert.match(list,/data-id="n3"/);assert.match(list,/<span class="chip">Dihapus<\/span>/);assert.ok(!list.includes('data-id="n2"'));
+  h.run("S.f['commerceStatus-nota']='lunas'");list=h.run('S.listFn()');assert.match(list,/data-id="n4"/);assert.ok(!list.includes('data-id="n2"'),'an archived paid nota stays in the archive');
+  assert.equal(h.requests.length,0);
+});
+
+test('1.5.43: the nota sheet offers edit, invoice, receipt, PDF, archive and delete as plain buttons',()=>{
+  const h=harness();h.seed('nota',{notes:notaRows()});let s=h.run("commerceNotaRincian('n1')");
+  assert.match(s,/<h2>Nota SA-1<\/h2>/);assert.match(s,/<b>Oblong<\/b> <span class="small muted">Hitam · L<\/span><br><span class="small muted">10 pcs × Rp5000<\/span><\/span><b>Rp50000<\/b>/);
+  assert.match(s,/<dt>Total<\/dt><dd class="b">Rp50000<\/dd><dt>Sudah dibayar<\/dt><dd class="b">Rp20000<\/dd><dt>Sisa<\/dt><dd class="b">Rp30000<\/dd>/);assert.ok(!s.includes('Subtotal'),'no discount or shipping: no extra lines');
+  assert.match(s,/data-a="commercePaymentOpen" data-m="nota" data-id="n1">Catat pembayaran/);assert.match(s,/data-a="commerceNotaOpen" data-id="n1">Edit nota/,'a nota with a payment can still be edited');
+  assert.match(s,/data-a="commerceNotaArsip" data-m="nota" data-id="n1" data-v="1">Arsipkan/);assert.match(s,/data-a="commerceCancelOpen" data-m="nota" data-id="n1">Hapus nota/);
+  assert.match(s,/data-a="commerceNotaCetak" data-m="nota" data-id="n1">Cetak invoice<\/button><button class="btn" data-a="commerceNotaStruk" data-m="nota" data-id="n1">Struk thermal<\/button><button class="btn pri" data-a="commerceNotaPdf" data-m="nota" data-id="n1">Unduh PDF/);
+  s=h.run("commerceNotaRincian('n2')");assert.match(s,/data-v="0">Keluarkan dari arsip/);assert.match(s,/<span class="chip info">Arsip<\/span>/);
+  s=h.run("commerceNotaRincian('n3')");assert.match(s,/sudah dihapus dan tidak dihitung\. Alasan: Salah input/);assert.match(s,/data-a="commerceRestore" data-m="nota" data-id="n3">Kembalikan nota/);assert.ok(!s.includes('Edit nota')&&!s.includes('Arsipkan')&&!s.includes('Hapus nota')&&!s.includes('Catat pembayaran'));assert.match(s,/commerceNotaCetak/,'a deleted nota can still be printed');
+  s=h.run("commerceNotaRincian('n4')");assert.match(s,/Nota dari data lama disimpan tetap\./);assert.ok(!s.includes('Edit nota')&&!s.includes('Hapus nota'),'an old paid nota is neither edited nor deleted here');assert.match(s,/>Arsipkan</);
+  h.run('A.commerceNotaDetail('+notaEl('n1')+')');assert.match(h.run('lastSheet'),/<h2>Nota SA-1<\/h2>/);
+  const admin=harness();admin.run("S.state.me={id:'adm',divisi:'admin'};");admin.seed('nota',{notes:notaRows()});s=admin.run("commerceNotaRincian('n1')");assert.ok(!s.includes('Hapus nota'));assert.match(s,/Edit nota/);assert.match(s,/>Arsipkan</);assert.ok(!admin.run("commerceNotaRincian('n3')").includes('Kembalikan nota'));
+  assert.match(h.run("commerceNotaRincian('tidak-ada')"),/belum tersedia/);
+});
+
+test('1.5.43: invoice, thermal receipt and PDF are made from the saved nota',async()=>{
+  const h=harness();h.seed('nota',{notes:notaRows()});
+  h.run("var cetakan=[],tutup=0,ls={},LS={get:function(k){return ls[k]===undefined?null:ls[k];},set:function(k,v){ls[k]=String(v);}};function closeSheet(){tutup++;}function dokumenCetakBuka(html,o){cetakan.push({html:html,o:o});return Promise.resolve({preview:true});}function coreNotaInvoiceHtml(r,s,o){return 'INV '+r.id+' '+(o.logo||'tanpa-logo');}function coreNotaStrukHtml(r,s,o){return 'STRUK '+r.id+' '+o.lebar;}var LOGO_SRC='data:image/webp;base64,AAAA';");
+  await h.run('A.commerceNotaCetak('+notaEl('n1')+')');assert.equal(h.run('cetakan[0].html'),'INV n1 data:image/webp;base64,AAAA');assert.deepEqual(h.json('[cetakan[0].o.nama,cetakan[0].o.tanda]'),['invoice','.invoice']);
+  h.run('A.commerceNotaStruk('+notaEl('n1')+')');assert.match(h.run('lastSheet'),/<h2>Struk thermal<\/h2>/);
+  assert.match(h.run('lastSheet'),/<button class="btn pri" data-a="commerceNotaStrukCetak" data-m="nota" data-id="n1" data-w="58">Kertas 58 mm<\/button><button class="btn" data-a="commerceNotaStrukCetak" data-m="nota" data-id="n1" data-w="80">Kertas 80 mm/);
+  await h.run('A.commerceNotaStrukCetak('+notaEl('n1',{'data-w':'80'})+')');assert.equal(h.run('cetakan[1].html'),'STRUK n1 80');assert.equal(h.run('ls.pk_struk_lebar'),'80');assert.equal(h.run('tutup'),1);
+  /* the page of a receipt is as long as the receipt itself */
+  h.run("var gaya=[],dok={querySelector:function(){return {getBoundingClientRect:function(){return {height:378};}};},createElement:function(){return {};},head:{appendChild:function(x){gaya.push(x.textContent);}}};cetakan[1].o.siap(dok);");assert.deepEqual(h.json('gaya'),['@page{size:80mm 107mm;margin:0}']);
+  h.run('A.commerceNotaStruk('+notaEl('n1')+')');assert.match(h.run('lastSheet'),/<button class="btn" data-a="commerceNotaStrukCetak" data-m="nota" data-id="n1" data-w="58">Kertas 58 mm<\/button><button class="btn pri"[^>]*data-w="80">/,'the last width is the marked one');
+  await h.run('A.commerceNotaPdf('+notaEl('n1')+')');assert.deepEqual(h.json('pdfs[0]'),{action:'makeCommercePdf',payload:{module:'nota',id:'n1'}},'no picture tools in this test: the PDF is asked for without a logo');
+  h.run("commerceNotaLogoPng.hasil='data:image/png;base64,BBBB'");await h.run('A.commerceNotaPdf('+notaEl('n1')+')');assert.deepEqual(h.json('pdfs[1].payload'),{module:'nota',id:'n1',logo:'data:image/png;base64,BBBB'});
+  h.run("Api.mode=function(){return 'demo';}");h.seed('nota',{notes:notaRows()});await h.run('A.commerceNotaPdf('+notaEl('n1')+')');assert.equal(h.run('cetakan.length'),3,'the demo has no server PDF: it prints');assert.equal(h.run('pdfs.length'),2);
+  h.run('A.commerceNotaCetak('+notaEl('tidak-ada')+')');assert.match(h.json('messages').at(-1).text,/belum tersedia/);
+});
+
+test('1.5.43: archive is one tap; deleting a paid nota also corrects its payments; a deleted nota can come back',async()=>{
+  const h=harness();h.seed('nota',{notes:notaRows()});h.run("var tutup=0;function closeSheet(){tutup++;}");
+  const tunggu=h.run('A.commerceNotaArsip('+notaEl('n1',{'data-v':'1'})+')');assert.equal(h.requests[0].action,'arsipCommerceNota');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{id:'n1',expectedRevision:'r1',arsip:true,withState:true});
+  const baru=notaRows();baru[0].archived=true;baru[0].revision='r1b';h.requests[0].resolve({record:baru[0],commerce:reply('nota',{notes:baru},11)});await tunggu;await turn();
+  assert.equal(h.run("commerceRecord('nota','n1').archived"),true,'the list in the answer is used at once');assert.equal(h.run('tutup'),1);assert.match(h.json('messages').at(-1).text,/masuk arsip/);
+  const lepas=h.run('A.commerceNotaArsip('+notaEl('n1',{'data-v':'0'})+')');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[1].payload)),{id:'n1',expectedRevision:'r1b',arsip:false,withState:true});
+  h.requests[1].resolve({record:notaRows()[0],commerce:reply('nota',{notes:notaRows()},12)});await lepas;await turn();assert.equal(h.run("commerceRecord('nota','n1').archived"),undefined);assert.equal(h.run('tutup'),1,'taking a nota out of the archive keeps its sheet open');
+  /* delete: the reason is already filled in; a paid nota asks the server to correct the payments too */
+  const d=harness();d.seed('nota',{notes:notaRows()});d.run('A.commerceCancelOpen('+notaEl('n1')+')');
+  assert.match(d.run('lastSheet'),/<h2>Hapus nota<\/h2>/);assert.match(d.run('lastSheet'),/<b>Nota SA-1<\/b> dihapus dari daftar/);assert.match(d.run('lastSheet'),/Pembayaran yang sudah dicatat \(Rp20000\) ikut dikoreksi/);assert.match(d.run('lastSheet'),/<textarea name="catatan">Salah input<\/textarea>/);
+  d.run("currentForm.values={id:'n1',revision:'r1',catatan:'Salah input'};currentForm.module='nota';currentForm._commerceScope=commerceScope();A.commerceCancelSave(null)");
+  assert.equal(d.requests[0].action,'cancelCommerceRecord');assert.deepEqual(JSON.parse(JSON.stringify(d.requests[0].payload)),{module:'nota',id:'n1',expectedRevision:'r1',catatan:'Salah input',voidAll:true,withState:true});
+  const u=harness(),belum=notaRows();belum[0].totalPaid=0;belum[0].payments=[];belum[0].events=[];u.seed('nota',{notes:belum});u.run('A.commerceCancelOpen('+notaEl('n1')+')');assert.ok(!u.run('lastSheet').includes('ikut dikoreksi'));
+  u.run("currentForm.values={id:'n1',revision:'r1',catatan:'Salah input'};currentForm.module='nota';currentForm._commerceScope=commerceScope();A.commerceCancelSave(null)");assert.deepEqual(JSON.parse(JSON.stringify(u.requests[0].payload)),{module:'nota',id:'n1',expectedRevision:'r1',catatan:'Salah input',withState:true});
+  /* bring a deleted nota back */
+  const k=harness();k.seed('nota',{notes:notaRows()});k.run('A.commerceRestore('+notaEl('n3')+')');assert.match(k.run('lastSheet'),/<h2>Kembalikan nota<\/h2>/);assert.match(k.run('lastSheet'),/tidak kembali otomatis/);
+  k.run("currentForm.values={id:'n3',revision:'r3'};currentForm.module='nota';currentForm._commerceScope=commerceScope();A.commerceRestoreSave(null)");assert.equal(k.requests[0].action,'restoreCommerceRecord');assert.deepEqual(JSON.parse(JSON.stringify(k.requests[0].payload)),{module:'nota',id:'n3',expectedRevision:'r3',withState:true});
+});
+
+test('1.5.43: editing a paid nota explains the limit and refuses a total below what was paid',()=>{
+  const h=harness();h.seed('nota',{notes:notaRows()});h.run('A.commerceNotaOpen('+notaEl('n1')+')');assert.match(h.run('lastSheet'),/Nota ini sudah dibayar <b>Rp20000<\/b>/);
+  h.form({id:'n1',revision:'r1',date:'2026-10-13',customerName:'Budi',customerType:'walkin',phone:'',address:'',discountPercent:'0',shipping:'0',notes:''},'nota',[{id:'i',values:{lineName:'Oblong',size:'L',color:'Hitam',qty:'1',price:'19999',discPercent:'0'}}]);
+  h.run("currentForm._commerceOriginal=commerceRecord('nota','n1');A.commerceNotaSave(null)");assert.equal(h.requests.length,0);assert.match(h.json('messages').at(-1).text,/lebih kecil dari yang sudah dibayar Rp20000/);
+  h.run("currentForm.rows[0].values.price='20000';A.commerceNotaSave(null)");assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceNota');assert.equal(h.requests[0].payload.expectedRevision,'r1');assert.equal(h.requests[0].payload.record.items[0].price,20000);
+  const baru=harness();baru.seed('nota',{notes:[]});baru.run("A.commerceNotaOpen({getAttribute:function(){return null;}})");assert.ok(!baru.run('lastSheet').includes('sudah dibayar'));
+});
+
+test('1.5.43: "Hapus PO" is a plain button in the purchase invoice, outside "Kelola PO", with the reason filled in',()=>{
+  const h=harness();h.seed('pembelian',{suppliers:[],products:[],orders:[{id:'o9',revision:'r9',status:'dp',productName:'Kaos',items:[],totalHarga:10,totalPaid:1,balance:9}]});
+  const tombol=h.run("commerceOrderLifecycle(commerceRecord('pembelian','o9'))");
+  assert.match(tombol,/^<button class="btn sm ghost" style="color:var\(--bad\)" data-a="commerceCancelOpen" data-m="pembelian" data-id="o9" data-mode="archived">Hapus PO<\/button><details class="small"><summary>Kelola PO<\/summary><div class="row wrap"><button class="btn sm" data-a="commerceCancelOpen" data-m="pembelian" data-id="o9" data-mode="inactive">Nonaktifkan PO<\/button><\/div><\/details>$/);
+  h.run("A.commerceCancelOpen({getAttribute:function(k){return k==='data-m'?'pembelian':k==='data-mode'?'archived':'o9';}})");assert.match(h.run('lastSheet'),/<h2>Hapus PO<\/h2>/);assert.match(h.run('lastSheet'),/<textarea name="catatan">Salah input<\/textarea>/);assert.equal(h.run('currentForm._commerceVoidAll'),false);
+  h.run("A.commerceCancelOpen({getAttribute:function(k){return k==='data-m'?'pembelian':k==='data-mode'?'inactive':'o9';}})");assert.match(h.run('lastSheet'),/<textarea name="catatan"><\/textarea>/,'pausing a PO still asks for its own reason');
+  h.run("S.state.me={id:'adm',divisi:'admin'};");assert.equal(h.run("commerceOrderLifecycle({id:'o9',status:'dp'})"),'','an admin gets neither button');
+});

@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.43 - invoice nota penjualan, struk thermal, edit/arsip/hapus nota, Hapus PO pembelian
+
+- Nota penjualan: invoice A4 baru untuk pelanggan (logo, nomor, tanggal, pelanggan, tabel barang, subtotal/diskon/ongkir/total, sudah dibayar, sisa, riwayat pembayaran, tanda tangan). "Cetak invoice" memakai pratinjau cetak di perangkat; "Unduh PDF" dibuat server dari susunan yang sama (`coreNotaInvoiceHtml`), logo dikirim perangkat sebagai PNG kecil.
+- "Struk thermal": struk sempit untuk kertas 58 mm atau 80 mm (`coreNotaStrukHtml`); tinggi halaman mengikuti panjang struknya.
+- Nota buatan aplikasi ini boleh diedit walau sudah ada pembayaran (harga, jumlah, ukuran, barang, diskon, ongkir, pelanggan). Pembayaran tidak disentuh: total baru tidak boleh di bawah yang sudah dibayar dan tanggal nota tidak boleh sesudah pembayarannya. Isi sebelum diubah disimpan bersama notanya (`_notaChanges`, 12 perubahan terakhir). Nota dari data lama tetap terkunci.
+- Arsip nota (aksi `arsipCommerceNota`, owner/admin): hanya menyembunyikan nota dari daftar aktif; status dan uangnya tidak berubah. "Hapus nota" (owner): nota dibatalkan, pembayaran yang masih berlaku ikut dikoreksi (`voidAll`), riwayat tetap ada; "Kembalikan nota" lewat `restoreCommerceRecord`. Daftar nota terbuka dengan "Nota aktif"; saringan baru "Arsip" dan "Dihapus / dibatalkan".
+- Pembelian: tombol "Hapus PO" tampil langsung di rincian invoice (sebelumnya di dalam "Kelola PO"), alasannya sudah terisi "Salah input". Servernya tidak berubah: PO dipindah ke arsip, riwayat DP dan penerimaan tetap.
+
 ## Rilis 1.5.42 - rol per ukuran, hubungan SKU tersimpan di server
 
 - **Rol per ukuran.** Di "Siapkan bahan potong", tiap rol yang dicentang punya pilihan **Ukuran** (ukuran PO yang masih harus dipotong, atau "semua"). Ringkasannya menyebut jumlahnya ("6 rol · 142 kg · M 2 rol · L 1 rol · XL 3 rol"). Server menyimpannya pada `alokasiBahan` (`{stokId, qty, ukuran}`, `coreRollSelection`) dan mengirimnya di `rincianRol`. Di kartu dan formulir tukang potong kiloan rol dikelompokkan per ukuran ("Ukuran M · 2 rol"). Pembagian ini petunjuk untuk tukang: pemakaian stok tidak berubah, seluruh bahan persiapan tetap tercatat terpakai pada potongan pertama.
