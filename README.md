@@ -14,6 +14,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 
 - Diperiksa di PDF server asli: pengubah PDF membuang warna latar, sehingga judul tabel dan baris TOTAL (huruf putih di atas latar gelap) tampak pucat. Invoice sekarang memakai huruf gelap dengan garis tebal, jadi sama jelasnya di PDF, di cetak browser, dan di layar.
 
+### Rakitan 1543c - potong lanjutan untuk PO bawaan aplikasi lama (nomor versi tetap; server)
+
+- PO bawaan aplikasi lama yang baru dipotong sebagian ukuran (misalnya M dulu) sekarang bisa dilanjutkan ukuran berikutnya lewat "Lanjut potong", sama seperti PO baru, asalkan potongan pertamanya memakai persiapan bahan yang dibuat di aplikasi ini. Bahannya tidak dihitung lagi. PO lama yang dipotong dari jatah bahan lama (satu ukuran per jatah) tetap menunggu bahan untuk ukuran lainnya.
+
 ## Rilis 1.5.42 - rol per ukuran, hubungan SKU tersimpan di server
 
 - **Rol per ukuran.** Di "Siapkan bahan potong", tiap rol yang dicentang punya pilihan **Ukuran** (ukuran PO yang masih harus dipotong, atau "semua"). Ringkasannya menyebut jumlahnya ("6 rol · 142 kg · M 2 rol · L 1 rol · XL 3 rol"). Server menyimpannya pada `alokasiBahan` (`{stokId, qty, ukuran}`, `coreRollSelection`) dan mengirimnya di `rincianRol`. Di kartu dan formulir tukang potong kiloan rol dikelompokkan per ukuran ("Ukuran M · 2 rol"). Pembagian ini petunjuk untuk tukang: pemakaian stok tidak berubah, seluruh bahan persiapan tetap tercatat terpakai pada potongan pertama.
