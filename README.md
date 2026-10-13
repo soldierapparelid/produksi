@@ -12,6 +12,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 
 - Kartu tukang potong menulis ukuran yang harus dipotong sebagai butir oranye ("Harus dipotong M L XL") pada kartu siap, lanjutan dan menunggu bahan; butir kiloan lebih kecil dan berjajar tanpa satuan di tiap butir, rol per ukuran satu baris per ukuran dengan butir ukurannya di depan, baris "Total N rol" hanya bila bahannya lebih dari satu atau rolnya tidak dirinci (sumber rol tinggal di formulir). Di Stok & PO ulang, ukuran yang sudah masuk PO aktif selalu kuning, bukan hanya yang stoknya tipis.
 
+### Rakitan 1542c - cetak daftar potong (tampilan saja, server tidak berubah)
+
+- Di halaman PO, bagian "Harus dipotong" punya tombol "Cetak daftar potong" (owner/admin). Hasilnya lembar A4 tegak, enam PO per lembar: gambar barang, nomor PO dan seri, ukuran yang harus dipotong, bahan yang disiapkan (kiloan tiap rol, per ukuran bila dibagi), kotak kosong untuk menulis hasil per ukuran, tanggal dan nama pemotong. PO yang bahannya sudah siap dicetak lebih dulu; yang belum ditandai "Menunggu bahan". Pratinjaunya memakai cara yang sama dengan cetak slip; tidak ada data yang dikirim ke server.
+
 ## Rilis 1.5.41 - hasil potong disimpan per ukuran (potong lanjutan)
 
 - **Simpan satu ukuran dulu, lanjut besok.** PO baru yang sebagian ukurannya sudah dipotong dari bahan persiapan owner tidak lagi kembali ke "Menunggu bahan dari owner". Di layar tukang potong ia tampil sebagai **"Lanjut potong · bahan sudah ada"** dengan ukuran yang belum dipotong; tukang mengisi ukuran berikutnya lalu menyimpan lagi.

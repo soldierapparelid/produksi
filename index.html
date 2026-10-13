@@ -346,6 +346,8 @@ button.po:hover { border-color: var(--accent); }
 .po-seri { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .po-seri-h { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
 .po-seri-h h3 { font-family: var(--f-display); font-size: 18px; letter-spacing: .04em; text-transform: uppercase; }
+.po-seri-h.alat { flex-wrap: wrap; align-items: center; }
+.po-seri-h.alat .btn { margin-left: auto; }
 .po-legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 14px; font-size: 12.5px; color: var(--ink-2); }
 .po-leg { display: inline-flex; align-items: center; gap: 6px; }
 .po-leg i { width: 12px; height: 12px; border-radius: 3px; background: var(--w, var(--muted)); }
@@ -466,7 +468,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261013-potong-ringkas-1542b';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261013-cetak-potong-1542c';</script>
 <script>
 (function () {
 'use strict';
@@ -8775,7 +8777,7 @@ VIEWS.po = function () {
     var perluPotong = (f.poStatus === 'aktif' || f.poStatus === 'semua') && !f.q && !f.poTahap && !f.poJenis ? poHarusDipotong().filter(function (p) { return rows.indexOf(p) >= 0; }) : [], idAtas = {}, batasBaru = Date.now() - 2 * 86400000;
     perluPotong.forEach(function (p) { idAtas[p.id] = 1; });
     var grup = poKelompok(rows.filter(function (p) { return !idAtas[p.id]; }).slice(0, 90), d.kosong.slice(0, 150));
-    var stripBaru = perluPotong.length ? '<section class="po-seri" id="po-potong"><div class="po-seri-h"><h3>Harus dipotong</h3><span class="xs muted">' + nf(perluPotong.length) + ' PO · terbaru di atas · sesudah dipotong pindah ke serinya</span></div><div class="grid g-cards">' +
+    var stripBaru = perluPotong.length ? '<section class="po-seri" id="po-potong"><div class="po-seri-h alat"><h3>Harus dipotong</h3><span class="xs muted">' + nf(perluPotong.length) + ' PO · terbaru di atas · sesudah dipotong pindah ke serinya</span>' + (admin ? '<button class="btn sm" data-a="potongCetak">' + ic('list', 's') + 'Cetak daftar potong</button>' : '') + '</div><div class="grid g-cards">' +
       perluPotong.map(function (p) { var kapan = Date.parse(p.dibuat); return poCard(p, isFinite(kapan) && kapan >= batasBaru ? '<div class="xs muted">Dibuat ' + esc(lalu(p.dibuat)) + '</div>' : ''); }).join('') + '</div></section>' : '';
     var isi = grup.map(function (g) {
       return '<section class="po-seri"><div class="po-seri-h"><h3>' + esc(g.nama || 'Tanpa seri') + '</h3><span class="xs muted">' + [g.po.length ? nf(g.po.length) + ' PO' : '', g.produk.length ? nf(g.produk.length) + ' belum di-PO' : ''].filter(Boolean).join(' · ') + '</span></div>' +
@@ -9483,6 +9485,156 @@ function slipCetak(list) {
     } catch (error) { fail(error); }
   });
 }
+/* ---------- cetak daftar potong ---------- */
+/* Pegangan kerja tukang potong di kertas: A4 tegak, enam PO per lembar (2 x 3). Tiap kotak memuat gambar barang, ukuran
+   yang harus dipotong, bahan yang disiapkan owner (kiloan tiap rol, per ukuran bila rolnya dibagi) dan tempat menulis
+   hasil. Hanya membaca data yang sudah ada di perangkat: tidak ada yang dikirim ke server. */
+var POTONG_CETAK_PER_LEMBAR = 6, POTONG_CETAK_URUT = { siap: 0, lanjut: 1, tunggu: 2, periksa: 3 };
+var POTONG_CETAK_TAHAP = { siap: 'Bahan siap', lanjut: 'Lanjut potong', tunggu: 'Menunggu bahan', periksa: 'Perlu diperiksa' };
+var POTONG_CETAK_CSS = [
+  '@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}',
+  'html,body{margin:0;background:#fff;color:#161b22;font-family:"Segoe UI",Roboto,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+  '.lembar{width:194mm;height:279mm;margin:0 auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto repeat(3,minmax(0,1fr));gap:3.5mm;overflow:hidden;page-break-after:always;break-after:page}',
+  '.lembar:last-child{page-break-after:auto;break-after:auto}',
+  '.kepala{grid-column:1/-1;display:flex;align-items:flex-end;gap:4mm;border-bottom:.6mm solid #161b22;padding-bottom:1.5mm}',
+  '.kepala .merek{font-size:7pt;letter-spacing:.2em;text-transform:uppercase;color:#6b7684}',
+  '.kepala h1{margin:0;font-size:16pt;line-height:1.05;letter-spacing:.05em;text-transform:uppercase}',
+  '.kepala .info{margin-left:auto;text-align:right;font-size:7.5pt;line-height:1.4;color:#4a5563}',
+  '.kartu{--f:9pt;font-size:var(--f);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border:.35mm solid #cfd6df;border-radius:3mm;background:#fff}',
+  '.kartu>header{display:flex;align-items:center;gap:2mm;padding:1.3mm 2.5mm;background:#161b22;color:#fff;font-size:8pt}',
+  '.kartu>header .no{font-weight:700;letter-spacing:.04em;white-space:nowrap}',
+  '.kartu>header .seri{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:6.5pt;letter-spacing:.1em;text-transform:uppercase;opacity:.75}',
+  '.kartu>header .tahap{padding:.5mm 2mm;border-radius:10mm;background:#f2b632;color:#161b22;font-size:6.5pt;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}',
+  '.t-siap>header .tahap,.t-lanjut>header .tahap{background:#9bd65a}.t-periksa>header .tahap{background:#ff9d92}',
+  '.atas{display:flex;gap:2.5mm;padding:2.2mm 2.5mm 0}',
+  '.foto{flex:none;width:25mm;height:25mm;border:.3mm solid #dfe4ea;border-radius:2.5mm;background:#f1f3f6;object-fit:cover}',
+  'span.foto{display:flex;align-items:center;justify-content:center;font-size:16pt;font-weight:700;color:#9aa4b1}',
+  '.judul{flex:1;min-width:0}',
+  '.kartu h2{margin:0 0 1mm;font-size:1.28em;line-height:1.12;letter-spacing:.02em;text-transform:uppercase}',
+  '.label{margin-bottom:.6mm;font-size:.68em;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#6b7684}',
+  '.ukuran{display:flex;flex-wrap:wrap;gap:1.2mm}',
+  '.ukuran .uk{display:inline-flex;align-items:baseline;gap:1mm;padding:.6mm 2.6mm;border-radius:1.8mm;background:#f2b632;color:#161b22;font-size:1.45em;font-weight:800;line-height:1.15}',
+  '.ukuran .uk small{font-size:.5em;font-weight:700}',
+  '.ket{margin-top:.8mm;font-size:.8em;color:#4a5563}',
+  '.isi{flex:1;min-height:0;overflow:hidden;padding:1.6mm 2.5mm 0}',
+  '.bahan{padding:.8mm 0;border-top:.25mm solid #e3e7ec}.label+.bahan{padding-top:0;border-top:0}',
+  '.bn{display:flex;align-items:baseline;gap:2mm}.bn span{flex:1;min-width:0;font-weight:600}.bn b{white-space:nowrap}',
+  '.rol{display:flex;flex-wrap:wrap;align-items:center;gap:.9mm;margin-top:.7mm}',
+  '.rol span{padding:0 1.8mm;border:.25mm solid #b9c2cd;border-radius:10mm;font-size:.88em;line-height:1.45;font-variant-numeric:tabular-nums}',
+  '.rol b{min-width:8mm;padding:.2mm 1.2mm;border-radius:1.2mm;background:#161b22;color:#fff;font-size:.8em;text-align:center}',
+  '.belum{padding:1.5mm 2mm;border:.3mm dashed #b9c2cd;border-radius:2mm;font-size:.9em;color:#4a5563}',
+  '.cat{margin-top:.8mm;font-size:.8em;font-style:italic;color:#4a5563}.ringkas .cat{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.ringkas .foto{width:18mm;height:18mm}',
+  '.kartu>footer{margin-top:1.2mm;padding:1.4mm 2.5mm 2mm;border-top:.25mm solid #e3e7ec;background:#fafbfc}',
+  '.penuh>footer::before{content:"Bahan selengkapnya ada di aplikasi";display:block;margin-bottom:.8mm;font-size:.72em;color:#b3261e}',
+  '.hasil{display:flex;gap:1.2mm}.hasil span{position:relative;flex:1;min-width:0;height:9.5mm;border:.3mm solid #8d98a6;border-radius:1.6mm;background:#fff}',
+  '.hasil b{position:absolute;left:1.2mm;top:.5mm;font-size:.72em;color:#6b7684}',
+  '.ttd{display:flex;align-items:flex-end;gap:1.5mm;margin-top:1.6mm;font-size:.75em;color:#6b7684}.ttd i{flex:1;height:3.2mm;border-bottom:.25mm solid #8d98a6}',
+  '@media screen{body{padding:10px 0;background:#e6eaef}.lembar{box-sizing:content-box;margin:0 auto 12px;padding:8mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18)}}'
+].join('');
+/* Yang bahannya sudah siap di depan, supaya lembar pertama berisi pekerjaan yang bisa langsung dikerjakan. */
+function potongCetakData(list) {
+  return (list || []).map(function (po, i) {
+    var c = po.cutting || {}, blok = rencanaPotongBlocked(po);
+    var siap = blok ? [] : rencanaPotongRows(po.id).filter(function (r) { return r.status === 'siap' && !r.legacyBlocked; });
+    var awal = !blok && !siap.length && c.lanjut ? rencanaPotongById(c.lanjut) : null;   /* potong lanjutan: bahannya dari persiapan pertama */
+    var ref = gambarRef(po), img = ref ? S.img[ref.id] : null, target = po.ukuran || {};
+    return { po: po, i: i, tahap: blok ? 'periksa' : siap.length ? 'siap' : c.lanjut ? 'lanjut' : 'tunggu', rencana: siap.length ? siap : (awal ? [awal] : []),
+      ukuran: poUkuranPotong(po).map(function (s) { return { s: s, target: coreNum(target[s]) }; }),
+      gambar: img && img.ver === ref.ver && img.data ? img.data : '', sudah: coreNum(T(po).potong) };
+  }).sort(function (a, b) { return POTONG_CETAK_URUT[a.tahap] - POTONG_CETAK_URUT[b.tahap] || a.i - b.i; });
+}
+function potongCetakBahan(r) {
+  var list = coreParseJSON(r.bahanList, []), rolls = coreParseJSON(r.rincianRol, []), per = {}, dipakai = {};
+  rolls.forEach(function (a) { var k = coreNormBahan(a.bahan); (per[k] = per[k] || []).push(a); });
+  var adaUk = rolls.some(function (a) { return !!a.ukuran; });
+  function kiloan(items) {
+    var grup = {}, urut = [];
+    items.forEach(function (a) { var s = adaUk ? (a.ukuran || '') : ''; if (!grup[s]) { grup[s] = []; urut.push(s); } grup[s].push(a); });
+    if (adaUk) urut = coreSizeOrder(urut.filter(function (s) { return s; })).concat(grup[''] ? [''] : []);
+    return urut.map(function (s) { return '<div class="rol">' + (adaUk ? '<b>' + esc(s || 'semua') + '</b>' : '') + grup[s].map(function (a) { return '<span>' + nfQty(a.qty) + '</span>'; }).join('') + '</div>'; }).join('');
+  }
+  function blok(nama, qty, satuan, items) { return '<div class="bahan"><div class="bn"><span>' + esc(nama) + (items.length ? ' · ' + nf(items.length) + ' rol' : '') + '</span>' + (qty ? '<b>' + nfQty(qty) + ' ' + esc(satuanPendek(satuan)) + '</b>' : '') + '</div>' + kiloan(items) + '</div>'; }
+  return list.map(function (b) { var k = coreNormBahan(b.nama); dipakai[k] = 1; return blok(b.nama, coreNum(b.qty), b.satuan, per[k] || []); }).join('') +
+    Object.keys(per).filter(function (k) { return !dipakai[k]; }).map(function (k) { return blok(per[k][0].bahan, 0, '', per[k]); }).join('') +
+    (r.legacyUkuran && r.legacyUkuran.length ? '<div class="cat">Ukuran jatah: ' + r.legacyUkuran.map(esc).join(' · ') + '</div>' : '') + (r.catatan ? '<div class="cat">' + esc(r.catatan) + '</div>' : '');
+}
+function potongCetakKartu(x) {
+  var po = x.po, sub = [poSeri(po), po.pelanggan].filter(Boolean).join(' · ');
+  var bahan = x.rencana.map(potongCetakBahan).join('') || '<div class="belum">' + (x.tahap === 'periksa' ? 'Catatan PO perlu diperiksa owner sebelum dipotong.' : 'Bahan belum disiapkan owner.') + (po.bahan ? ' Rencana bahan: ' + esc(po.bahan) : '') + '</div>';
+  var ket = [x.sudah ? 'Sudah dipotong ' + nf(x.sudah) + ' pcs' : '', po.deadline ? 'Deadline ' + esc(tgl(po.deadline)) : ''].filter(Boolean).join(' · ');
+  return '<article class="kartu t-' + x.tahap + '"><header><span class="no">' + esc(po.noPO || 'PO') + '</span><span class="seri">' + esc(sub) + '</span><span class="tahap">' + POTONG_CETAK_TAHAP[x.tahap] + '</span></header>' +
+    '<div class="atas">' + (x.gambar ? '<img class="foto" src="' + esc(x.gambar) + '" alt="">' : '<span class="foto">' + esc(inisial(po.nama)) + '</span>') +
+    '<div class="judul"><h2>' + esc(po.nama) + '</h2><div class="label">Harus dipotong</div><div class="ukuran">' + x.ukuran.map(function (u) { return '<span class="uk">' + esc(u.s) + (u.target ? '<small>' + nf(u.target) + ' pcs</small>' : '') + '</span>'; }).join('') + '</div>' + (ket ? '<div class="ket">' + ket + '</div>' : '') + '</div></div>' +
+    '<div class="isi"><div class="label">Bahan</div>' + bahan + (po.catatan ? '<div class="cat">Catatan PO: ' + esc(po.catatan) + '</div>' : '') + '</div>' +
+    '<footer><div class="label">Hasil potong (pcs)</div><div class="hasil">' + x.ukuran.map(function (u) { return '<span><b>' + esc(u.s) + '</b></span>'; }).join('') + '</div><div class="ttd"><span>Tanggal</span><i></i><span>Pemotong</span><i></i></div></footer></article>';
+}
+function potongCetakHtml(data, kini) {
+  var lembar = [], n = data.length, siap = data.filter(function (x) { return x.tahap === 'siap' || x.tahap === 'lanjut'; }).length;
+  for (var i = 0; i < n; i += POTONG_CETAK_PER_LEMBAR) lembar.push(data.slice(i, i + POTONG_CETAK_PER_LEMBAR));
+  var cap = (kini || new Date()).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Daftar potong</title><style>' + POTONG_CETAK_CSS + '</style></head><body>' +
+    lembar.map(function (isi, h) {
+      return '<section class="lembar"><div class="kepala"><div><div class="merek">Soldier Produksi</div><h1>Daftar potong</h1></div><div class="info">' + nf(n) + ' PO · ' + nf(siap) + ' bahan siap' + (n - siap ? ' · ' + nf(n - siap) + ' belum' : '') +
+        '<br>Dicetak ' + esc(cap) + ' WIB · lembar ' + (h + 1) + '/' + lembar.length + '</div></div>' + isi.map(potongCetakKartu).join('') + '</section>';
+    }).join('') + '</body></html>';
+}
+/* kecilkan huruf sampai bahan muat di kotaknya; bila belum muat, gambar dikecilkan dan catatan panjang dipendekkan jadi dua baris (berakhir "…");
+   yang tetap tidak muat diberi tanda. Kiloan bahan tidak pernah dipotong diam-diam. */
+function potongCetakPaskan(doc) {
+  Array.prototype.slice.call(doc.querySelectorAll('.kartu')).forEach(function (k) {
+    var isi = k.querySelector('.isi'), f = 9; if (!isi) return;
+    function lebih() { return isi.scrollHeight > isi.clientHeight + 1; }
+    while (lebih() && f > 7.5) { f -= 0.25; k.style.setProperty('--f', f + 'pt'); }
+    if (lebih()) k.classList.add('ringkas');
+    while (lebih() && f > 6.5) { f -= 0.25; k.style.setProperty('--f', f + 'pt'); }
+    if (lebih()) k.classList.add('penuh');
+  });
+}
+/* Pratinjau yang selalu terlihat, seperti cetak slip: perintah cetak tidak boleh tampak tidak terjadi apa-apa. */
+function potongCetakBuka(html) {
+  return new Promise(function (resolve, reject) {
+    var done = false, overlay = null, frame = null, timer, batas, tombol, label;
+    function tutup() { clearTimeout(timer); clearTimeout(batas); if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); var i = slipPreviews.indexOf(tutup); if (i >= 0) slipPreviews.splice(i, 1); if (!done) { done = true; resolve({ closed: true }); } }
+    function gagal(e) { if (done) return; done = true; clearTimeout(timer); if (label) label.textContent = e.message; reject(e); }
+    function cetak(win) {
+      try { win.focus(); win.print(); label.textContent = 'Pilih printer dan kertas A4. Untuk menyimpan berkasnya, pilih Simpan sebagai PDF.'; }
+      catch (e) { label.textContent = 'Browser belum membuka dialog cetak. Tekan Cetak / Simpan PDF lagi, atau Ctrl+P.'; }
+    }
+    function siap(win, doc) {
+      if (done || !doc || !doc.querySelector('.lembar')) return;   /* load pertama iframe bisa masih about:blank */
+      var gambar = Array.prototype.slice.call(doc.images || []);
+      var tunggu = Promise.all(gambar.map(function (g) { return g.complete ? null : new Promise(function (ok) { g.onload = ok; g.onerror = ok; }); }));
+      Promise.race([tunggu, new Promise(function (ok) { batas = setTimeout(ok, 2000); })]).then(function () {
+        clearTimeout(batas); if (done) return;
+        try {
+          potongCetakPaskan(doc); tombol.disabled = false; tombol.onclick = function () { cetak(win); };
+          label.textContent = 'Pratinjau daftar potong. Tekan Cetak / Simpan PDF bila dialog cetak belum muncul.';
+          if (typeof window.PK_UJI_CETAK === 'function') window.PK_UJI_CETAK(doc, frame); else cetak(win);
+          done = true; clearTimeout(timer); resolve({ preview: true });
+        } catch (e) { gagal(e); }
+      }, gagal);
+    }
+    timer = setTimeout(function () { gagal(new Error('Pratinjau cetak belum siap. Tutup pratinjau lalu coba lagi.')); }, 15000);
+    try {
+      overlay = document.createElement('div'); overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-label', 'Pratinjau daftar potong'); overlay.setAttribute('aria-modal', 'true');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:white;display:flex;flex-direction:column';
+      var alat = document.createElement('div'); alat.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 12px;background:#eef2f6;font:14px Arial,sans-serif;color:#182638';
+      tombol = document.createElement('button'); tombol.type = 'button'; tombol.textContent = 'Cetak / Simpan PDF'; tombol.disabled = true; tombol.style.cssText = 'padding:10px 18px;font:inherit;cursor:pointer';
+      label = document.createElement('span'); label.setAttribute('role', 'status'); label.textContent = 'Menyiapkan daftar potong…'; label.style.cssText = 'flex:1;min-width:160px';
+      var keluar = document.createElement('button'); keluar.type = 'button'; keluar.textContent = 'Tutup pratinjau'; keluar.style.cssText = 'padding:10px 18px;font:inherit;cursor:pointer'; keluar.onclick = tutup;
+      frame = document.createElement('iframe'); frame.title = 'Pratinjau daftar potong'; frame.style.cssText = 'width:100%;flex:1;border:0;background:#e6eaef';
+      frame.onload = function () { try { siap(frame.contentWindow, frame.contentDocument); } catch (e) { gagal(e); } };
+      frame.srcdoc = html; alat.appendChild(tombol); alat.appendChild(label); alat.appendChild(keluar); overlay.appendChild(alat); overlay.appendChild(frame); slipPreviews.push(tutup); document.body.appendChild(overlay);
+    } catch (e) { gagal(e); }
+  });
+}
+A.potongCetak = function (el) {
+  /* persis PO yang tampil di bagian "Harus dipotong" halaman PO */
+  var tampil = poDaftar().rows, data = potongCetakData(poHarusDipotong().filter(function (p) { return tampil.indexOf(p) >= 0; }));
+  if (!data.length) return toast('Tidak ada PO yang harus dipotong.', true);
+  return act(el, potongCetakBuka(potongCetakHtml(data))).catch(quiet);
+};
+/* ---------- akhir cetak daftar potong ---------- */
 function slipDocumentActions(enabled) {
   var disabled = enabled ? '' : ' disabled';
   return '<button class="btn" data-a="slipDokCetak"' + disabled + '>Cetak A4</button><button class="btn pri" data-a="slipDokPdf"' + disabled + '>' + ic('down') + (Api.mode() === 'demo' ? 'Simpan PDF' : 'Unduh PDF') + '</button>';
