@@ -10,6 +10,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - Arsip nota (aksi `arsipCommerceNota`, owner/admin): hanya menyembunyikan nota dari daftar aktif; status dan uangnya tidak berubah. "Hapus nota" (owner): nota dibatalkan, pembayaran yang masih berlaku ikut dikoreksi (`voidAll`), riwayat tetap ada; "Kembalikan nota" lewat `restoreCommerceRecord`. Daftar nota terbuka dengan "Nota aktif"; saringan baru "Arsip" dan "Dihapus / dibatalkan".
 - Pembelian: tombol "Hapus PO" tampil langsung di rincian invoice (sebelumnya di dalam "Kelola PO"), alasannya sudah terisi "Salah input". Servernya tidak berubah: PO dipindah ke arsip, riwayat DP dan penerimaan tetap.
 
+### Rakitan 1543b - invoice tanpa latar gelap (nomor versi tetap; server dan tampilan)
+
+- Diperiksa di PDF server asli: pengubah PDF membuang warna latar, sehingga judul tabel dan baris TOTAL (huruf putih di atas latar gelap) tampak pucat. Invoice sekarang memakai huruf gelap dengan garis tebal, jadi sama jelasnya di PDF, di cetak browser, dan di layar.
+
 ## Rilis 1.5.42 - rol per ukuran, hubungan SKU tersimpan di server
 
 - **Rol per ukuran.** Di "Siapkan bahan potong", tiap rol yang dicentang punya pilihan **Ukuran** (ukuran PO yang masih harus dipotong, atau "semua"). Ringkasannya menyebut jumlahnya ("6 rol · 142 kg · M 2 rol · L 1 rol · XL 3 rol"). Server menyimpannya pada `alokasiBahan` (`{stokId, qty, ukuran}`, `coreRollSelection`) dan mengirimnya di `rincianRol`. Di kartu dan formulir tukang potong kiloan rol dikelompokkan per ukuran ("Ukuran M · 2 rol"). Pembagian ini petunjuk untuk tukang: pemakaian stok tidak berubah, seluruh bahan persiapan tetap tercatat terpakai pada potongan pertama.
