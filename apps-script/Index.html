@@ -345,6 +345,11 @@ button.po:hover { border-color: var(--accent); }
 .po-seri-h h3 { font-family: var(--f-display); font-size: 18px; letter-spacing: .04em; text-transform: uppercase; }
 .po-seri-h.alat { flex-wrap: wrap; align-items: center; }
 .po-seri-h.alat .btn { margin-left: auto; }
+.cetak-pilih { display: grid; gap: 8px; }
+.cetak-baris { align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; min-width: 0; }
+.cetak-baris .thumb { width: 40px; height: 40px; }
+.cetak-baris .grow { min-width: 0; }
+@media (min-width: 760px) { .cetak-pilih { grid-template-columns: 1fr 1fr; } }
 .po-legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 14px; font-size: 12.5px; color: var(--ink-2); }
 .po-leg { display: inline-flex; align-items: center; gap: 6px; }
 .po-leg i { width: 12px; height: 12px; border-radius: 3px; background: var(--w, var(--muted)); }
@@ -465,7 +470,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261013-cetak-potong-1542c';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261013-cetak-pilih-1542d';</script>
 <script>
 (function () {
 'use strict';
@@ -9625,10 +9630,36 @@ function potongCetakBuka(html) {
     } catch (e) { gagal(e); }
   });
 }
-A.potongCetak = function (el) {
+/* Pilih PO yang dicetak: daftar centang seperti "Karyawan yang dicetak" di slip gaji. Pilihan diingat selama aplikasi terbuka. */
+function potongCetakDaftar() {
   /* persis PO yang tampil di bagian "Harus dipotong" halaman PO */
-  var tampil = poDaftar().rows, data = potongCetakData(poHarusDipotong().filter(function (p) { return tampil.indexOf(p) >= 0; }));
-  if (!data.length) return toast('Tidak ada PO yang harus dipotong.', true);
+  var tampil = poDaftar().rows; return potongCetakData(poHarusDipotong().filter(function (p) { return tampil.indexOf(p) >= 0; }));
+}
+function potongCetakTidak() { if (!S.potongCetakPilih) S.potongCetakPilih = { tidak: {} }; return S.potongCetakPilih.tidak; }
+function potongCetakSheet() {
+  var data = potongCetakDaftar(), tidak = potongCetakTidak(), n = data.filter(function (x) { return !tidak[x.po.id]; }).length;
+  var siap = data.filter(function (x) { return x.tahap === 'siap' || x.tahap === 'lanjut'; }).length;
+  var body = !data.length ? emptyBox('Tidak ada PO yang harus dipotong.') :
+    '<div class="row wrap gap-s"><span class="label grow">PO yang dicetak</span><button class="btn ghost sm" data-a="potongCetakSemua" data-v="1">Pilih semua</button>' + (siap && siap < data.length ? '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="siap">Bahan siap saja</button>' : '') + '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="0">Kosongkan</button></div>' +
+    '<div class="cetak-pilih">' + data.map(function (x) {
+      var po = x.po, ok = x.tahap === 'siap' || x.tahap === 'lanjut';
+      return '<label class="check cetak-baris"><input type="checkbox" data-c="potongCetakCek" data-id="' + esc(po.id) + '"' + (tidak[po.id] ? '' : ' checked') + '>' + thumb(po) +
+        '<span class="grow col gap-s"><b>' + esc(po.nama) + '</b><span class="xs muted">' + esc(po.noPO || 'PO') + '</span><span class="po-ukuran kecil">' + x.ukuran.map(function (u) { return '<span class="sz-aktif potong">' + esc(u.s) + '</span>'; }).join('') + '</span></span>' +
+        '<span class="chip ' + (ok ? 'ok' : x.tahap === 'periksa' ? 'bad' : 'warn') + '">' + POTONG_CETAK_TAHAP[x.tahap] + '</span></label>';
+    }).join('') + '</div>' +
+    '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(n / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' : 'Belum ada PO dipilih.') + '</div>';
+  return sheetHtml('Cetak daftar potong', '<div class="col">' + body + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
+}
+A.potongCetak = function () { openSheet(potongCetakSheet, { live: true, cls: 'wide' }); };
+C.potongCetakCek = function (el) { var tidak = potongCetakTidak(), id = el.getAttribute('data-id'); if (el.checked) delete tidak[id]; else tidak[id] = 1; paintTop(); };
+A.potongCetakSemua = function (el) {
+  var v = el.getAttribute('data-v'), tidak = (S.potongCetakPilih = { tidak: {} }).tidak;
+  if (v !== '1') potongCetakDaftar().forEach(function (x) { if (v === '0' || (x.tahap !== 'siap' && x.tahap !== 'lanjut')) tidak[x.po.id] = 1; });
+  paintTop();
+};
+A.potongCetakJalan = function (el) {
+  var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
+  if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
   return act(el, potongCetakBuka(potongCetakHtml(data))).catch(quiet);
 };
 /* ---------- akhir cetak daftar potong ---------- */
