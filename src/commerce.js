@@ -72,7 +72,8 @@ function coreCommerceSlipModel(module,record,context) {
 }
 /* ---------- nota penjualan: invoice dan struk ---------- */
 /* Dokumen untuk pelanggan. Dipakai perangkat (pratinjau cetak) dan server (PDF), jadi susunannya tabel dengan CSS
-   sederhana. Semua teks dari catatan di-escape; logo hanya diterima sebagai gambar base64 kecil. */
+   sederhana. Tidak ada yang bergantung pada warna latar: pengubah PDF dan cetak browser membuangnya, jadi penegasan
+   memakai garis dan huruf tebal. Semua teks dari catatan di-escape; logo hanya diterima sebagai gambar base64 kecil. */
 function coreNotaEsc(v) { return String(v === undefined || v === null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function coreNotaTgl(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(m[3]) + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][Number(m[2]) - 1] + ' ' + m[1] : String(s || '-'); }
 function coreNotaLogo(v) { return typeof v === 'string' && v.length <= 60000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+\/=]+$/.test(v) ? v : ''; }
@@ -98,9 +99,9 @@ function coreNotaInvoiceHtml(record, settings, opt) {
     '.usaha{font-size:17pt;font-weight:bold;letter-spacing:1px}.kecil{font-size:8.5pt;color:#5b6470}.judul{font-size:22pt;font-weight:bold;letter-spacing:3px}' +
     '.kanan{text-align:right}.tengah{text-align:center}.info td{padding-top:14px}.label{font-size:8pt;letter-spacing:1.5px;text-transform:uppercase;color:#5b6470}' +
     '.nama{font-size:13pt;font-weight:bold}.cap{display:inline-block;padding:4px 12px;border:2px solid #1b1f24;font-size:10pt;font-weight:bold;letter-spacing:1.5px}' +
-    '.barang{margin-top:16px}.barang th{background:#1b1f24;color:#fff;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
+    '.barang{margin-top:16px}.barang th{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
     '.barang td{padding:7px 8px;border-bottom:1px solid #d9dee4}.barang th.kanan,.barang td.kanan{text-align:right}.barang th.tengah,.barang td.tengah{text-align:center}.barang tr{page-break-inside:avoid}' +
-    '.bawah{margin-top:12px;page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{background:#1b1f24;color:#fff;font-weight:bold;font-size:12.5pt;padding:8px}' +
+    '.bawah{margin-top:12px;page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold;font-size:12.5pt;padding:8px}' +
     '.jumlah .sisa td{font-weight:bold;font-size:12pt;border-top:1px solid #d9dee4}.kotak{border:1px solid #d9dee4;padding:8px 10px;font-size:9.5pt;margin-bottom:10px}' +
     '.bayar td{padding:3px 8px 3px 0;font-size:9.5pt}.ttd{margin-top:34px;page-break-inside:avoid}.ttd td{width:50%;text-align:center;font-size:9.5pt}.ttd .ruang{height:58px}' +
     '.kaki{margin-top:22px;padding-top:8px;border-top:1px solid #d9dee4;font-size:8.5pt;color:#5b6470;text-align:center}' +
