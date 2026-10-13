@@ -8,7 +8,9 @@ function ui(){
   const c=vm.createContext({console,Promise,Date,setTimeout,clearTimeout});
   vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);
   vm.runInContext(`
-    var A={},S={img:{},state:{po:[],settings:{ukuran:['M','L','XL','XXL']}}},messages=[],dicetak=[],rencana=[],slipPreviews=[];
+    var A={},C={},S={img:{},state:{po:[],settings:{ukuran:['M','L','XL','XXL']}}},messages=[],dicetak=[],rencana=[],slipPreviews=[],lembar=null,digambar=0;
+    function openSheet(fn,opt){lembar={render:fn,opt:opt};}function paintTop(){digambar++;}function sheetHtml(t,b,f){return '<h2>'+t+'</h2>'+b+'<footer>'+(f||'')+'</footer>';}
+    function emptyBox(s){return '<div class="empty">'+s+'</div>';}function thumb(o){return '<span class="thumb">'+o.id+'</span>';}function ic(){return '';}
     function esc(s){return String(s===undefined||s===null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
     function nf(n){return String(n||0);}function nfQty(n){return String(n).replace('.',',');}function satuanPendek(u){return u==='yard'?'yd':(u==='meter'?'m':'kg');}
     function tgl(s){return 'tgl '+s;}function inisial(s){return String(s||'?').charAt(0).toUpperCase();}
@@ -77,8 +79,36 @@ test('the button sits in "Harus dipotong" for owner and admin, prints the POs sh
   assert.match(html,/<div class="po-seri-h alat"><h3>Harus dipotong<\/h3>[^\n]*?' \+ \(admin \? '<button class="btn sm" data-a="potongCetak">' \+ ic\('list', 's'\) \+ 'Cetak daftar potong<\/button>' : ''\) \+ '<\/div>/);
   assert.ok(!/\breq\(|Api\.call\(/.test(blok),'reads only what is already on the device');
   const c=ui();run(c,seed);run(c,"S.state.po[0]._sembunyi=true;");
-  await run(c,'A.potongCetak(null)');
+  run(c,'A.potongCetak(null)');assert.equal(run(c,'dicetak.length'),0,'the button opens the list to tick first');assert.deepEqual(plain(run(c,'lembar.opt')),{live:true,cls:'wide'});
+  await run(c,"A.potongCetakJalan(null)");
   const cetak=plain(run(c,'dicetak'));assert.equal(cetak.length,1);assert.equal(cetak[0].split('<article class="kartu').length-1,4);assert.ok(!cetak[0].includes('Polo Tunggu'),'a PO that is not in the list on screen is not printed');
-  run(c,'S.state.po=[];');run(c,'A.potongCetak(null)');
-  assert.deepEqual(plain(run(c,'messages')),[['Tidak ada PO yang harus dipotong.',true]]);assert.equal(run(c,'dicetak.length'),1);
+});
+
+test('1542d: the owner ticks which POs are printed; all are ticked at first and the choice is kept while the app is open',async()=>{
+  const c=ui();run(c,seed);run(c,'A.potongCetak(null)');
+  const el=(id,on)=>`{checked:${on},getAttribute:function(){return ${JSON.stringify(id)};}}`,tombol=v=>`{getAttribute:function(){return ${JSON.stringify(v)};}}`;
+  let view=run(c,'lembar.render()');
+  assert.match(view,/^<h2>Cetak daftar potong<\/h2>/);assert.equal(view.split('data-c="potongCetakCek"').length-1,5);assert.equal(view.split(' checked>').length-1,5,'everything is ticked at first');
+  assert.ok(view.indexOf('data-id="b"')<view.indexOf('data-id="c"')&&view.indexOf('data-id="c"')<view.indexOf('data-id="a"'),'same order as the print: fabric ready first');
+  assert.match(view,/<label class="check cetak-baris"><input type="checkbox" data-c="potongCetakCek" data-id="b" checked><span class="thumb">b<\/span><span class="grow col gap-s"><b>Polo Siap<\/b><span class="xs muted">PO-02<\/span><span class="po-ukuran kecil"><span class="sz-aktif potong">M<\/span><span class="sz-aktif potong">L<\/span><\/span><\/span><span class="chip ok">Bahan siap<\/span><\/label>/);
+  assert.match(view,/data-id="a" checked>[\s\S]*?<span class="chip warn">Menunggu bahan<\/span>/);assert.match(view,/data-id="d" checked>[\s\S]*?<span class="chip bad">Perlu diperiksa<\/span>/);assert.match(view,/<b>Kaos &lt;script><\/b>/);
+  assert.match(view,/data-a="potongCetakSemua" data-v="1">Pilih semua<\/button><button class="btn ghost sm" data-a="potongCetakSemua" data-v="siap">Bahan siap saja<\/button><button class="btn ghost sm" data-a="potongCetakSemua" data-v="0">Kosongkan<\/button>/);
+  assert.match(view,/5 PO dipilih · 1 lembar A4 \(6 PO per lembar\)\./);assert.match(view,/<button class="btn pri" data-a="potongCetakJalan">Cetak 5 PO<\/button>/);
+  /* untick two: only the rest is printed, and the header of the sheet counts the chosen ones */
+  run(c,`C.potongCetakCek(${el('a',false)});C.potongCetakCek(${el('d',false)})`);assert.equal(run(c,'digambar'),2);
+  view=run(c,'lembar.render()');assert.match(view,/data-id="a">/);assert.match(view,/data-id="b" checked>/);assert.match(view,/3 PO dipilih · 1 lembar A4/);assert.match(view,/Cetak 3 PO<\/button>/);
+  await run(c,'A.potongCetakJalan(null)');
+  let doc=run(c,'dicetak[0]');assert.equal(doc.split('<article class="kartu').length-1,3);assert.ok(!doc.includes('Polo Tunggu')&&!doc.includes('Polo Periksa'));assert.match(doc,/3 PO · 2 bahan siap · 1 belum/);
+  /* tick one back, then the quick buttons */
+  run(c,`C.potongCetakCek(${el('a',true)})`);assert.match(run(c,'lembar.render()'),/4 PO dipilih/);
+  run(c,`A.potongCetakSemua(${tombol('siap')})`);view=run(c,'lembar.render()');assert.match(view,/2 PO dipilih/);assert.match(view,/data-id="b" checked>/);assert.match(view,/data-id="c" checked>/);assert.match(view,/data-id="e">/);
+  run(c,`A.potongCetakSemua(${tombol('0')})`);view=run(c,'lembar.render()');assert.match(view,/Belum ada PO dipilih\./);assert.match(view,/data-a="potongCetakJalan" disabled>Cetak<\/button>/);
+  run(c,'A.potongCetakJalan(null)');assert.deepEqual(plain(run(c,'messages')),[['Centang dulu PO yang mau dicetak.',true]]);assert.equal(run(c,'dicetak.length'),1,'nothing chosen: nothing is printed');
+  run(c,`A.potongCetakSemua(${tombol('1')})`);assert.match(run(c,'lembar.render()'),/5 PO dipilih/);
+  /* eight chosen POs need two sheets; the choice survives closing and opening the list */
+  run(c,"for(var i=0;i<3;i++)S.state.po.push({id:'x'+i,nama:'Tambahan '+i,noPO:'PO-1'+i,_potong:['M']});");run(c,`C.potongCetakCek(${el('x0',false)})`);
+  run(c,'lembar=null;A.potongCetak(null)');view=run(c,'lembar.render()');assert.match(view,/7 PO dipilih · 2 lembar A4/);assert.match(view,/data-id="x0">/);
+  /* nothing to cut: a plain note, no print button that works */
+  run(c,'S.state.po=[];');view=run(c,'lembar.render()');assert.match(view,/Tidak ada PO yang harus dipotong\./);assert.match(view,/data-a="potongCetakJalan" disabled>/);
+  assert.match(html,/\.cetak-baris \{ align-items: center;/);
 });
