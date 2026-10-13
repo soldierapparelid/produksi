@@ -929,12 +929,20 @@ function createCore(store, env) {
   function validateWorkers(wf) {
     store.read('SlipKirim').concat(store.read('SlipSetor')).forEach(function (r) { var worker = findUser(r.maklonId), p = wf[r.poId]; if (p && (!worker || worker.divisi !== 'jahit')) { var pesan = 'Pekerja asal ' + r.id + ' tidak dikenal.'; p.issues.push(pesan); p.complete = false; if (p.lama) return; if (p.blockingIssues) p.blockingIssues.push(pesan); p.readyQC = false; Object.keys(p.ukuran).forEach(function (s) { p.ukuran[s].readyQC = false; p.ukuran[s].complete = false; }); } });
     if (typeof coreCutPlanRows === 'function') coreCutPlanRows(store.read('RencanaPotong'), store.read('Potong')).forEach(function (r) { var p = wf[r.poId]; if (p && r.status === 'siap') { p.pendingCutPlans = true; p.complete = false; } });
-    /* Potong lanjutan (1.5.41): PO baru yang sebagian ukurannya sudah dipotong dari bahan persiapan owner boleh dilanjutkan
+    /* Potong lanjutan (1.5.41): PO yang sebagian ukurannya sudah dipotong dari bahan persiapan owner boleh dilanjutkan
        ukuran berikutnya tanpa persiapan baru. Bahannya sudah tercatat pada potongan pertama, jadi tidak dihitung lagi.
-       Tidak berlaku selama owner menyiapkan bahan baru untuk PO itu, dan tidak untuk PO bawaan aplikasi lama.
+       Tidak berlaku selama owner menyiapkan bahan baru untuk PO itu.
+       PO bawaan aplikasi lama (1543c): boleh dilanjutkan bila potongan itu memakai persiapan bahan yang dibuat di aplikasi
+       ini, karena persiapan itu memuat bahan untuk semua ukurannya. Jatah bahan lama berlaku untuk satu ukuran saja,
+       jadi sesudah jatah lama terpakai ukuran lainnya tetap menunggu bahannya sendiri.
        Nilainya id persiapan potongan pertama, supaya tukang tetap melihat rol yang dipakai. */
-    var potongRencana = {}; store.read('Potong').forEach(function (r) { if (r.rencanaId) potongRencana[r.poId] = r.rencanaId; });
-    Object.keys(potongRencana).forEach(function (id) { var p = wf[id]; if (p && !p.lama && p.cutting && p.cutting.verified && !p.pendingCutPlans && (p.pendingCutSizes || []).length) p.cutting.lanjut = potongRencana[id]; });
+    var potongRencana = {}, poLanjut = {}; store.read('Potong').forEach(function (r) { if (r.rencanaId) potongRencana[r.poId] = r.rencanaId; });
+    if (Object.keys(potongRencana).length) store.read('PO').forEach(function (r) { if (potongRencana[r.id]) poLanjut[r.id] = r; });
+    Object.keys(potongRencana).forEach(function (id) {
+      var p = wf[id]; if (!p || !p.cutting || !p.cutting.verified || p.pendingCutPlans || !(p.pendingCutSizes || []).length) return;
+      if (p.lama && coreLegacyCutPlanScope(poLanjut[id], potongRencana[id], p.cutting)) return;
+      p.cutting.lanjut = potongRencana[id];
+    });
     return wf;
   }
   function legacyExtras() { return { gudangLama: store.read('GudangLama'), settlements: store.read('LegacySettlement'), historyCorrections: store.read('KoreksiRiwayat'), ukuranLepas: settings().poUkuranLepas }; }
