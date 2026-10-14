@@ -576,7 +576,9 @@ function coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras) {
       Object.keys(all).forEach(function (s) {
         if (all[s] <= 0 || coreNum(maps.perbaikan[s]) < 0) p.issues.push('Kategori QC ' + q.id + ' tidak sah.');
         seen[s] = (seen[s] || 0) + all[s];
-        if (source && (old ? seen[s] > coreNum(coreMap(source.ukuran)[s]) : seen[s] !== coreNum(coreMap(source.ukuran)[s]))) p.issues.push('QC ' + q.id + ' harus mencakup tepat seluruh hitungan ukuran ' + s + '.');
+        /* QC bertahap (1543d): satu ukuran pada satu hitungan boleh diperiksa dalam beberapa catatan. Yang belum
+           diperiksa tetap siap QC; yang salah hanyalah hasil yang melebihi hitungannya. */
+        if (source && seen[s] > coreNum(coreMap(source.ukuran)[s])) p.issues.push('QC ' + q.id + ' melebihi hitungan ukuran ' + s + '.');
       });
     }
   });
@@ -653,9 +655,10 @@ function corePayroll(potong, setor, qc, slipUpah, extras) {
        It earns on the original QC/movement date and tariff, never as a second HF. */
     if ((qc || []).some(function (q) { return q.setorId === s.id && !q.repairQcId && coreLegacyInfo(q, 'qc') && (!q.autoFromCount || !(qc || []).some(function (peer) { return peer.setorId === s.id && !peer.repairQcId && !peer.autoFromCount; })); })) return;
     var sourceSizes = coreMap(s.ukuran), inspected = {}, ok = {}, issues = [];
-    (qc || []).forEach(function (q) { if (q.setorId !== s.id || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, s, issues); Object.keys(maps).forEach(function (f) { Object.keys(maps[f]).forEach(function (size) { inspected[size] = true; }); }); Object.keys(maps.ok).forEach(function (size) { ok[size] = (ok[size] || 0) + coreNum(maps.ok[size]); }); });
+    (qc || []).forEach(function (q) { if (q.setorId !== s.id || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, s, issues); Object.keys(maps).forEach(function (f) { Object.keys(maps[f]).forEach(function (size) { inspected[size] = (inspected[size] || 0) + coreNum(maps[f][size]); }); }); Object.keys(maps.ok).forEach(function (size) { ok[size] = (ok[size] || 0) + coreNum(maps.ok[size]); }); });
     if (coreSumSizes(sourceSizes) !== coreNum(s.total)) issues.push('Hitungan belum dirinci per ukuran.');
-    Object.keys(sourceSizes).forEach(function (size) { var total = inspected[size] ? (ok[size] || 0) : coreNum(sourceSizes[size]); var uk = {}; uk[size] = total;
+    Object.keys(sourceSizes).forEach(function (size) { /* QC bertahap: yang sudah diperiksa dihitung OK-nya, yang belum diperiksa tetap dihitung penuh seperti sebelum QC */
+      var total = inspected[size] ? (ok[size] || 0) + Math.max(0, coreNum(sourceSizes[size]) - inspected[size]) : coreNum(sourceSizes[size]); var uk = {}; uk[size] = total;
       add({ id: 'setor:' + s.id + ':' + size, sourceId: s.id, poId: s.poId, pegawaiId: s.maklonId, jenis: 'jahit', tanggal: s.tanggal, total: total, rate: coreNum(s.upah), ref: s.noSlip, ukuran: uk, size: size, inspected: !!inspected[size], issues: issues.slice(), imporSumber: coreMap(s.imporSumber) }); });
   });
   (qc || []).forEach(function (q) {
@@ -2576,8 +2579,10 @@ function createCore(store, env) {
       Object.keys(inspected).forEach(function (s) {
         var u = wf.ukuran[s]; if (!u || !u.readyQC) fail('Ukuran ' + s + ' belum punya hitungan fisik yang bisa diperiksa.');
         var reviewReason = coreQcReviewReason(slip,qcRows,s); if (reviewReason) fail(reviewReason);
-        if (previous[s]) fail('Hitungan ukuran ' + s + ' pada slip ini sudah di-QC.');
-        if (inspected[s] !== coreNum(basis[s])) fail('OK + offline + perbaikan + reject ukuran ' + s + ' harus tepat seluruh hitungan slip (' + coreNum(basis[s]) + ').');
+        /* QC bertahap: boleh sebagian dari hitungan slip; sisanya tetap menunggu QC */
+        var sisaQc = coreNum(basis[s]) - coreNum(previous[s]);
+        if (sisaQc <= 0) fail('Hitungan ukuran ' + s + ' pada slip ini sudah di-QC.');
+        if (inspected[s] > sisaQc) fail('Hasil QC ukuran ' + s + ' melebihi sisa hitungan slip ini (' + sisaQc + ' pcs).');
       });
     }
     return { id: id, poId: po.id, userId: me.id, maklonId: mk.id, tanggal: tanggalQc, ukuran: JSON.stringify(ukuran),
@@ -2658,7 +2663,7 @@ function createCore(store, env) {
           if (mode) { if (q.repairQcId === base.id) basis = sumMaps([basis,coreQcMaps(q,slip,[]).perbaikan]); }
           else if (q.setorId === slip.id && !q.repairQcId && !(q.autoFromCount && coreLegacyInfo(q,'qc'))) {
             var maps = coreQcMaps(q,slip,[]), used = sumMaps([maps.ok,maps.offline,maps.perbaikan,maps.reject]);
-            Object.keys(used).forEach(function (s) { if (used[s]) delete basis[s]; });
+            Object.keys(used).forEach(function (s) { if (used[s]) basis[s] = coreNum(basis[s]) - used[s]; });
           }
         });
         Object.keys(basis).forEach(function (s) {
@@ -2672,8 +2677,8 @@ function createCore(store, env) {
       if (!coreSumSizes(inspected)) fail('Isi hasil QC untuk setiap kelompok.');
       if (mode && coreSumSizes(g.perbaikanUkuran)) fail('Hasil perbaikan harus berupa OK, offline, atau reject.');
       Object.keys(inspected).forEach(function (s) {
-        if (!mode && inspected[s] !== coreNum(totalBasis[s]) && reviewSizes[s]) fail(reviewSizes[s]);
-        if (mode ? inspected[s] > coreNum(totalBasis[s]) : inspected[s] !== coreNum(totalBasis[s])) fail('Jumlah hasil QC ukuran ' + s + ' harus ' + (mode ? 'tidak melebihi' : 'tepat') + ' sisa sumber terpilih (' + coreNum(totalBasis[s]) + ' pcs).');
+        if (!mode && inspected[s] > coreNum(totalBasis[s]) && reviewSizes[s]) fail(reviewSizes[s]);
+        if (inspected[s] > coreNum(totalBasis[s])) fail('Jumlah hasil QC ukuran ' + s + ' harus tidak melebihi sisa sumber terpilih (' + coreNum(totalBasis[s]) + ' pcs).');
       });
       /* Apply the displayed allocation policy, not proportional rounding. Each
          source keeps its worker, original tariff, payment credit and repair link. */
@@ -2686,8 +2691,7 @@ function createCore(store, env) {
           fields.forEach(function (f) { var n = Math.min(capacity,coreNum(remaining[f][s])); if (n) { child[f][s] = n; remaining[f][s] -= n; capacity -= n; } });
         });
         if (!coreSumSizes(sumMaps(fields.map(function (f) { return child[f]; })))) {
-          if (!mode) fail('Ada sumber terpilih tanpa ukuran yang dapat diperiksa. Buka kembali antrean QC.');
-          return;
+          return;   /* QC bertahap: hitungan yang belum terjangkau hasil kali ini dilewati dan tetap menunggu */
         }
         var id = prefix + pending.length;
         if (qcById[id]) fail('Identitas catatan QC sudah digunakan. Muat ulang sebelum melanjutkan.');
