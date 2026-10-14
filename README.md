@@ -24,6 +24,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - Beranda owner/admin: bagian "Progres QC", per PO berapa yang sudah QC dan berapa yang belum, dengan butir per ukuran ("beres" atau "60/100").
 - Cetak: tombol "Kartu jalan PO" di lembar "Cetak daftar potong". Empat kartu memanjang per lembar A4; tiap kartu memuat gambar, nomor PO, ukuran, bahan, dan lima kotak isian (Potong, Jahit, Hitung, QC, Gudang) untuk tanggal, jumlah, dan paraf. Hanya tambahan: daftar potong tidak berubah dan tidak ada data yang ditulis.
 
+### Rakitan 1543e - "Atur harga" untuk potongan (tampilan saja, server tidak berubah)
+
+- "Atur harga" pada catatan potong (dari Perlu tindakan > Harga kosong atau Catatan terbaru) gagal dengan "Formulir belum memiliki versi data": `findSlip` tidak mengenal `'potong'` dan mencari di daftar slip upah, sehingga versi catatannya kosong. Sekarang catatan potong ditemukan; formulir harga tidak dibuka bila catatannya belum termuat.
+
 ## Rilis 1.5.42 - rol per ukuran, hubungan SKU tersimpan di server
 
 - **Rol per ukuran.** Di "Siapkan bahan potong", tiap rol yang dicentang punya pilihan **Ukuran** (ukuran PO yang masih harus dipotong, atau "semua"). Ringkasannya menyebut jumlahnya ("6 rol · 142 kg · M 2 rol · L 1 rol · XL 3 rol"). Server menyimpannya pada `alokasiBahan` (`{stokId, qty, ukuran}`, `coreRollSelection`) dan mengirimnya di `rincianRol`. Di kartu dan formulir tukang potong kiloan rol dikelompokkan per ukuran ("Ukuran M · 2 rol"). Pembagian ini petunjuk untuk tukang: pemakaian stok tidak berubah, seluruh bahan persiapan tetap tercatat terpakai pada potongan pertama.
