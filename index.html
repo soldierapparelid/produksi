@@ -473,7 +473,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261014-qc-bertahap-1543d';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261014-harga-potong-1543e';</script>
 <script>
 (function () {
 'use strict';
@@ -8282,7 +8282,8 @@ A.pickGo = function (el) { var cb = S.pick.cb; var id = el.getAttribute('data-id
 
 /* ---------- slip ---------- */
 function findSlip(type, id) {
-  var list = type === 'kirim' ? S.state.kirim : (type === 'setor' ? S.state.setor : S.state.upah);
+  /* 1543e: 'potong' juga dikenal; sebelumnya jatuh ke daftar slip upah sehingga "Atur harga" potongan tidak punya versi data */
+  var list = type === 'kirim' ? S.state.kirim : (type === 'setor' ? S.state.setor : (type === 'potong' ? S.state.potong : S.state.upah));
   for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
   return null;
 }
@@ -8366,6 +8367,7 @@ function slipSheet(type, id) {
 A.hargaOpen = function (el) {
   var sheet = el.getAttribute('data-s'), id = el.getAttribute('data-id'), cur = coreNum(el.getAttribute('data-v'));
   var record=findSlip(sheet==='Potong'?'potong':'setor',id), revision=record&&record.revision;
+  if (!revision) return toast('Catatan ini belum termuat di perangkat. Muat ulang data lalu coba lagi.', true);
   openSheet(function () {
     return sheetHtml('Harga per pcs', '<div class="col" data-form="harga">' + hid('sheet', sheet) + hid('id', id) + hid('revision', revision || '') +
       fNum(sheet === 'Potong' ? 'Harga potong / pcs (Rp)' : 'Harga jahit / pcs (Rp)', 'harga', cur || '', 'step="50"', 'Berlaku untuk catatan ini saja. Harga bawaan tiap barang diatur di Lainnya › Produk.') + '</div>',

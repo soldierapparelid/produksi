@@ -58,7 +58,7 @@ test('a counted delivery is inspected by QC right away, slip by slip, while the 
   assert.throws(() => qc('qc00002', 'count01', { M: 20 }), /sudah di-QC/);
   assert.throws(() => qc('qc00003', 'count01', { L: 5 }), /belum punya hitungan fisik/);
   a.count({ M: 20 }, 'count02');
-  assert.throws(() => qc('qc00004', 'count02', { M: 19 }), /seluruh hitungan slip/, 'one slip is still inspected as a whole');
+  assert.throws(() => qc('qc00004', 'count02', { M: 21 }), /melebihi sisa hitungan slip ini \(20 pcs\)/, 'a slip is never inspected beyond its count');
   w = a.state().po[0].workflow;
   assert.equal(w.ukuran.M.countComplete, true); assert.equal(w.ukuran.M.siapQC, 20); assert.equal(w.readyQC, true);
   qc('qc00005', 'count02', { M: 20 });
@@ -102,10 +102,10 @@ test('assignment/count reject wrong sizes and cumulative over-capacity including
   assert.equal(a.state().po[0].workflow.ukuran.M.readyQC, true);
 });
 
-test('QC categorizes exactly its entire source size; all-reject is authoritative zero payroll', () => {
+test('QC may never exceed its source size; all-reject is authoritative zero payroll', () => {
   const a = app(); a.seed({ M: 40 }); a.count({ M: 40 });
   assert.equal(a.pay().find(r => r.jenis === 'jahit').total, 40);
-  assert.throws(() => a.inspect({ M: 35 }), /tepat seluruh/);
+  assert.throws(() => a.inspect({ M: 41 }), /melebihi sisa hitungan slip ini \(40 pcs\)/);
   a.inspect({}, { rejectUkuran: { M: 40 }, reject: 40 });
   const pay = a.pay().find(r => r.jenis === 'jahit'); assert.equal(pay.total, 0); assert.equal(pay.available, 0);
   assert.equal(a.state().po[0].workflow.complete, true);

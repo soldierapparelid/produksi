@@ -66,9 +66,19 @@ test('one save sends frozen source revisions and all groups in one request',asyn
   assert.equal(h.requests.length,1);assert.equal(h.requests[0].a,'simpanQCGabungan');
   assert.deepEqual(h.requests[0].p.qc.kelompok[0].sources,sources);assert.equal(h.requests[0].p.qc.kelompok[0].ukuran.L,140);assert.equal(f.closed,true);
 });
-test('incomplete category totals do not submit or close the form',()=>{
-  const h=harness(),group={maps:{ok:{L:100},offline:{},perbaikan:{},reject:{}},getAttribute:()=>JSON.stringify([{setorId:'a',expectedRevision:'r'}]),find:()=>[{getAttribute:k=>k==='data-qc-row'?'L':'142'}]},f={values:{id:'batch-1',poId:'p'},find:()=>[group]};h.setForm(f);h.A.qcCombinedSave({});
-  assert.equal(h.requests.length,0);assert.match(h.toasts[0],/142/);assert.equal(f.closed,undefined);
+test('1543d: a partial result is sent as it is and the rest stays in the queue; more than counted or nothing at all is not sent',async()=>{
+  const grup=(maps,n='142')=>({maps,getAttribute:()=>JSON.stringify([{setorId:'a',expectedRevision:'r'}]),find:()=>[{getAttribute:k=>k==='data-qc-row'?'L':n}]});
+  const h=harness(),f={values:{id:'batch-1',poId:'p'},find:()=>[grup({ok:{L:100},offline:{},perbaikan:{L:2},reject:{}})]};h.setForm(f);await h.A.qcCombinedSave({});
+  assert.equal(h.requests.length,1);assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].p.qc.kelompok)),[{sources:[{setorId:'a',expectedRevision:'r'}],ukuran:{L:100},offlineUkuran:{},perbaikanUkuran:{L:2},rejectUkuran:{}}]);
+  assert.equal(f.closed,true);assert.match(h.toasts[0],/Sisa 40 pcs tetap di Antrean QC/);
+  const lebih=harness(),g={values:{id:'batch-1',poId:'p'},find:()=>[grup({ok:{L:143},offline:{},perbaikan:{},reject:{}})]};lebih.setForm(g);lebih.A.qcCombinedSave({});
+  assert.equal(lebih.requests.length,0);assert.match(lebih.toasts[0],/melebihi yang siap diperiksa \(142 pcs\)/);assert.equal(g.closed,undefined);
+  const kosong=harness(),k={values:{id:'batch-1',poId:'p'},find:()=>[grup({ok:{},offline:{},perbaikan:{},reject:{}})]};kosong.setForm(k);kosong.A.qcCombinedSave({});
+  assert.equal(kosong.requests.length,0);assert.match(kosong.toasts[0],/Boleh sebagian/);
+  /* a group left empty is skipped; the filled one is sent */
+  const dua=harness(),d={values:{id:'batch-1',poId:'p'},find:()=>[grup({ok:{},offline:{},perbaikan:{},reject:{}}),grup({ok:{L:142},offline:{},perbaikan:{},reject:{}})]};dua.setForm(d);await dua.A.qcCombinedSave({});
+  assert.equal(dua.requests[0].p.qc.kelompok.length,1);assert.match(dua.toasts[0],/Sisa 142 pcs tetap di Antrean QC/);
+  assert.match(html,/Boleh sebagian dulu<\/b>: isi yang sudah selesai diperiksa saja/);assert.match(html,/if \(n > expected\) throw new Error\('Ukuran ' \+ size \+ ': hasil ' \+ n \+ ' pcs, maksimal ' \+ expected \+ ' pcs\.'\);/);
 });
 test('QC combined writes use the existing workflow connection guard',()=>{
   const workflow=html.match(/var workflowWrite = \/\^\(([^\n]+)\)\$\//);assert.ok(workflow);assert.match(workflow[1],/simpanQCGabungan/);
