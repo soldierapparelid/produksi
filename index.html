@@ -473,7 +473,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261013-lanjut-po-lama-1543c';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261014-qc-bertahap-1543d';</script>
 <script>
 (function () {
 'use strict';
@@ -1052,7 +1052,9 @@ function coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras) {
       Object.keys(all).forEach(function (s) {
         if (all[s] <= 0 || coreNum(maps.perbaikan[s]) < 0) p.issues.push('Kategori QC ' + q.id + ' tidak sah.');
         seen[s] = (seen[s] || 0) + all[s];
-        if (source && (old ? seen[s] > coreNum(coreMap(source.ukuran)[s]) : seen[s] !== coreNum(coreMap(source.ukuran)[s]))) p.issues.push('QC ' + q.id + ' harus mencakup tepat seluruh hitungan ukuran ' + s + '.');
+        /* QC bertahap (1543d): satu ukuran pada satu hitungan boleh diperiksa dalam beberapa catatan. Yang belum
+           diperiksa tetap siap QC; yang salah hanyalah hasil yang melebihi hitungannya. */
+        if (source && seen[s] > coreNum(coreMap(source.ukuran)[s])) p.issues.push('QC ' + q.id + ' melebihi hitungan ukuran ' + s + '.');
       });
     }
   });
@@ -1129,9 +1131,10 @@ function corePayroll(potong, setor, qc, slipUpah, extras) {
        It earns on the original QC/movement date and tariff, never as a second HF. */
     if ((qc || []).some(function (q) { return q.setorId === s.id && !q.repairQcId && coreLegacyInfo(q, 'qc') && (!q.autoFromCount || !(qc || []).some(function (peer) { return peer.setorId === s.id && !peer.repairQcId && !peer.autoFromCount; })); })) return;
     var sourceSizes = coreMap(s.ukuran), inspected = {}, ok = {}, issues = [];
-    (qc || []).forEach(function (q) { if (q.setorId !== s.id || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, s, issues); Object.keys(maps).forEach(function (f) { Object.keys(maps[f]).forEach(function (size) { inspected[size] = true; }); }); Object.keys(maps.ok).forEach(function (size) { ok[size] = (ok[size] || 0) + coreNum(maps.ok[size]); }); });
+    (qc || []).forEach(function (q) { if (q.setorId !== s.id || q.repairQcId || q.autoFromCount && coreLegacyInfo(q, 'qc')) return; var maps = coreQcMaps(q, s, issues); Object.keys(maps).forEach(function (f) { Object.keys(maps[f]).forEach(function (size) { inspected[size] = (inspected[size] || 0) + coreNum(maps[f][size]); }); }); Object.keys(maps.ok).forEach(function (size) { ok[size] = (ok[size] || 0) + coreNum(maps.ok[size]); }); });
     if (coreSumSizes(sourceSizes) !== coreNum(s.total)) issues.push('Hitungan belum dirinci per ukuran.');
-    Object.keys(sourceSizes).forEach(function (size) { var total = inspected[size] ? (ok[size] || 0) : coreNum(sourceSizes[size]); var uk = {}; uk[size] = total;
+    Object.keys(sourceSizes).forEach(function (size) { /* QC bertahap: yang sudah diperiksa dihitung OK-nya, yang belum diperiksa tetap dihitung penuh seperti sebelum QC */
+      var total = inspected[size] ? (ok[size] || 0) + Math.max(0, coreNum(sourceSizes[size]) - inspected[size]) : coreNum(sourceSizes[size]); var uk = {}; uk[size] = total;
       add({ id: 'setor:' + s.id + ':' + size, sourceId: s.id, poId: s.poId, pegawaiId: s.maklonId, jenis: 'jahit', tanggal: s.tanggal, total: total, rate: coreNum(s.upah), ref: s.noSlip, ukuran: uk, size: size, inspected: !!inspected[size], issues: issues.slice(), imporSumber: coreMap(s.imporSumber) }); });
   });
   (qc || []).forEach(function (q) {
@@ -3052,8 +3055,10 @@ function createCore(store, env) {
       Object.keys(inspected).forEach(function (s) {
         var u = wf.ukuran[s]; if (!u || !u.readyQC) fail('Ukuran ' + s + ' belum punya hitungan fisik yang bisa diperiksa.');
         var reviewReason = coreQcReviewReason(slip,qcRows,s); if (reviewReason) fail(reviewReason);
-        if (previous[s]) fail('Hitungan ukuran ' + s + ' pada slip ini sudah di-QC.');
-        if (inspected[s] !== coreNum(basis[s])) fail('OK + offline + perbaikan + reject ukuran ' + s + ' harus tepat seluruh hitungan slip (' + coreNum(basis[s]) + ').');
+        /* QC bertahap: boleh sebagian dari hitungan slip; sisanya tetap menunggu QC */
+        var sisaQc = coreNum(basis[s]) - coreNum(previous[s]);
+        if (sisaQc <= 0) fail('Hitungan ukuran ' + s + ' pada slip ini sudah di-QC.');
+        if (inspected[s] > sisaQc) fail('Hasil QC ukuran ' + s + ' melebihi sisa hitungan slip ini (' + sisaQc + ' pcs).');
       });
     }
     return { id: id, poId: po.id, userId: me.id, maklonId: mk.id, tanggal: tanggalQc, ukuran: JSON.stringify(ukuran),
@@ -3134,7 +3139,7 @@ function createCore(store, env) {
           if (mode) { if (q.repairQcId === base.id) basis = sumMaps([basis,coreQcMaps(q,slip,[]).perbaikan]); }
           else if (q.setorId === slip.id && !q.repairQcId && !(q.autoFromCount && coreLegacyInfo(q,'qc'))) {
             var maps = coreQcMaps(q,slip,[]), used = sumMaps([maps.ok,maps.offline,maps.perbaikan,maps.reject]);
-            Object.keys(used).forEach(function (s) { if (used[s]) delete basis[s]; });
+            Object.keys(used).forEach(function (s) { if (used[s]) basis[s] = coreNum(basis[s]) - used[s]; });
           }
         });
         Object.keys(basis).forEach(function (s) {
@@ -3148,8 +3153,8 @@ function createCore(store, env) {
       if (!coreSumSizes(inspected)) fail('Isi hasil QC untuk setiap kelompok.');
       if (mode && coreSumSizes(g.perbaikanUkuran)) fail('Hasil perbaikan harus berupa OK, offline, atau reject.');
       Object.keys(inspected).forEach(function (s) {
-        if (!mode && inspected[s] !== coreNum(totalBasis[s]) && reviewSizes[s]) fail(reviewSizes[s]);
-        if (mode ? inspected[s] > coreNum(totalBasis[s]) : inspected[s] !== coreNum(totalBasis[s])) fail('Jumlah hasil QC ukuran ' + s + ' harus ' + (mode ? 'tidak melebihi' : 'tepat') + ' sisa sumber terpilih (' + coreNum(totalBasis[s]) + ' pcs).');
+        if (!mode && inspected[s] > coreNum(totalBasis[s]) && reviewSizes[s]) fail(reviewSizes[s]);
+        if (inspected[s] > coreNum(totalBasis[s])) fail('Jumlah hasil QC ukuran ' + s + ' harus tidak melebihi sisa sumber terpilih (' + coreNum(totalBasis[s]) + ' pcs).');
       });
       /* Apply the displayed allocation policy, not proportional rounding. Each
          source keeps its worker, original tariff, payment credit and repair link. */
@@ -3162,8 +3167,7 @@ function createCore(store, env) {
           fields.forEach(function (f) { var n = Math.min(capacity,coreNum(remaining[f][s])); if (n) { child[f][s] = n; remaining[f][s] -= n; capacity -= n; } });
         });
         if (!coreSumSizes(sumMaps(fields.map(function (f) { return child[f]; })))) {
-          if (!mode) fail('Ada sumber terpilih tanpa ukuran yang dapat diperiksa. Buka kembali antrean QC.');
-          return;
+          return;   /* QC bertahap: hitungan yang belum terjangkau hasil kali ini dilewati dan tetap menunggu */
         }
         var id = prefix + pending.length;
         if (qcById[id]) fail('Identitas catatan QC sudah digunakan. Muat ulang sebelum melanjutkan.');
@@ -8583,7 +8587,7 @@ VIEWS.beranda = function () {
     '<div class="row wrap"><button class="btn pri" data-a="pegawaiOpen">Tambah pegawai</button><button class="btn" data-a="imporOpen">Impor data dari aplikasi lama</button></div></div>' : '';
 
   return '<div class="head"><div class="grow"><h1>Laporan produksi</h1><div class="sub">' + esc(tglPanjang()) + '</div></div><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
-    kosong + berandaSiaga(todo) + kpis + berandaDivisi(todo, k) +
+    kosong + berandaSiaga(todo) + kpis + berandaDivisi(todo, k) + berandaQC() +
     '<div class="grid g-2"><div class="col gap-l">' + berandaTodo(todo) +
     '<div class="card col"><h3>Barang sedang di mana</h3>' + flowHtml + '</div></div>' +
     '<div class="col gap-l"><div class="card flush"><div class="sec-h"><h3>Maklon jahit</h3><span class="label">sisa pcs</span></div><div class="list">' + mkHtml + '</div></div>' +
@@ -8660,6 +8664,33 @@ function berandaDivisi(todo, k) {
       soal(k.qcWait, nf(k.qcWait) + ' pcs dihitung, QC tertahan', 'kpiGo', 'po:lengkap') + soal(perbaikan, nf(k.perbaikan) + ' pcs sedang diperbaiki', 'todoGo', 'qc')) +
     kartu('c-jual', 'box', 'BigSeller', jml(gudang), 'pcs diinput · ' + gudang.length + ' catatan', baris('PO yang diinput', nf(Object.keys(poInput).length)),
       posisi('Belum diinput', nf(k.bs) + ' pcs', 'po:jual'), '') + '</div></div>';
+}
+/* Progres QC untuk owner (1543d): PO yang hitungannya belum habis diperiksa, dengan ukuran mana yang sudah beres dan mana
+   yang belum. Angkanya dari slip hitung yang sudah diterima dan catatan QC-nya, sama dengan Antrean QC. */
+function qcProgresPO() {
+  if (typeof qcSourceProgress !== 'function') return [];
+  var per = {}, urut = [];
+  qcSourceProgress().forEach(function (b) {
+    var po = D.po[b.s.poId]; if (!po) return;
+    var g = per[po.id]; if (!g) { g = per[po.id] = { po: po, uk: {}, hitung: 0, periksa: 0, tanggal: b.date }; urut.push(g); }
+    Object.keys(b.s.ukuran || {}).forEach(function (size) {
+      var qty = coreNum(b.s.ukuran[size]), sisa = Math.min(qty, coreNum(b.uk[size]) + coreNum(b.waitingUkuran[size]) + coreNum(b.reviewUkuran[size]));
+      if (!(qty > 0)) return;
+      var u = g.uk[size] || (g.uk[size] = { hitung: 0, periksa: 0 }); u.hitung += qty; u.periksa += qty - sisa; g.hitung += qty; g.periksa += qty - sisa;
+    });
+  });
+  return urut.filter(function (g) { return g.hitung > g.periksa; }).sort(function (a, b) { return String(a.tanggal).localeCompare(String(b.tanggal)); });
+}
+function berandaQC() {
+  var rows = qcProgresPO(); if (!rows.length) return '';
+  var semua = S.sub.qcAll === '1', tampil = semua ? rows : rows.slice(0, 6), belum = 0; rows.forEach(function (g) { belum += g.hitung - g.periksa; });
+  return '<div class="card flush" id="bd-qc"><div class="sec-h"><h3>Progres QC</h3><span class="chip warn">' + nf(belum) + ' pcs belum QC</span></div><div class="list">' + tampil.map(function (g) {
+    var sizes = coreSizeOrder(Object.keys(g.uk), (S.state.settings || {}).ukuran);
+    return '<div class="item"><span class="grow col gap-s"><span><b>' + esc(g.po.nama) + '</b> <span class="small muted">' + esc(g.po.noPO || '') + '</span></span>' +
+      '<span class="small">' + (g.periksa ? 'Sudah QC ' + nf(g.periksa) + ' dari ' + nf(g.hitung) + ' pcs · belum ' + nf(g.hitung - g.periksa) + ' pcs' : 'Belum mulai QC · ' + nf(g.hitung) + ' pcs sudah dihitung') + '</span>' +
+      '<span class="chips">' + sizes.map(function (s) { var u = g.uk[s], beres = u.periksa >= u.hitung; return '<span class="chip ' + (beres ? 'ok' : u.periksa ? 'warn' : '') + '"><b>' + esc(s) + '</b> ' + (beres ? 'beres' : nf(u.periksa) + '/' + nf(u.hitung)) + '</span>'; }).join('') + '</span></span>' +
+      '<button class="btn sm ghost" data-a="poOpen" data-id="' + esc(g.po.id) + '">Lihat</button></div>';
+  }).join('') + (rows.length > 6 ? '<button class="item lagi" data-a="sub" data-k="qcAll" data-v="' + (semua ? '' : '1') + '">' + (semua ? 'Ringkas lagi' : 'Tampilkan semua · ' + (rows.length - 6) + ' PO lagi') + '</button>' : '') + '</div></div>';
 }
 /* Perlu tindakan: semua hal tampil di sini (tidak lagi dialihkan ke tab PO), bisa disaring per jenis */
 function berandaTodo(todo) {
@@ -9765,8 +9796,9 @@ function potongCetakSheet() {
         '<span class="grow col gap-s"><b>' + esc(po.nama) + '</b><span class="xs muted">' + esc(po.noPO || 'PO') + '</span><span class="po-ukuran kecil">' + x.ukuran.map(function (u) { return '<span class="sz-aktif potong">' + esc(u.s) + '</span>'; }).join('') + '</span></span>' +
         '<span class="chip ' + (ok ? 'ok' : x.tahap === 'periksa' ? 'bad' : 'warn') + '">' + POTONG_CETAK_TAHAP[x.tahap] + '</span></label>';
     }).join('') + '</div>' +
-    '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(n / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' : 'Belum ada PO dipilih.') + '</div>';
-  return sheetHtml('Cetak daftar potong', '<div class="col">' + body + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
+    '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(n / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' : 'Belum ada PO dipilih.') + '</div>' +
+    '<div class="xs muted">Kartu jalan PO: kartu yang ikut barangnya dari potong, jahit, hitung, QC sampai gudang; ' + KARTU_JALAN_PER_LEMBAR + ' kartu memanjang per lembar A4' + (n ? ' (' + nf(Math.ceil(n / KARTU_JALAN_PER_LEMBAR)) + ' lembar)' : '') + '.</div>';
+  return sheetHtml('Cetak daftar potong', '<div class="col">' + body + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
 }
 A.potongCetak = function () { openSheet(potongCetakSheet, { live: true, cls: 'wide' }); };
 C.potongCetakCek = function (el) { var tidak = potongCetakTidak(), id = el.getAttribute('data-id'); if (el.checked) delete tidak[id]; else tidak[id] = 1; paintTop(); };
@@ -9779,6 +9811,54 @@ A.potongCetakJalan = function (el) {
   var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
   if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
   return act(el, potongCetakBuka(potongCetakHtml(data))).catch(quiet);
+};
+/* Kartu jalan PO (1543d): kartu yang ikut barangnya dari potong, jahit, hitung, QC sampai gudang. Empat kartu memanjang
+   per lembar A4, digunting pada garis putus-putus; tiap divisi menulis tanggal, jumlah dan parafnya. Hanya cetakan
+   tambahan: daftar potong tidak berubah dan tidak ada data yang ditulis. */
+var KARTU_JALAN_PER_LEMBAR = 4;
+var KARTU_JALAN_CSS = [
+  '@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}',
+  'html,body{margin:0;background:#fff;color:#161b22;font-family:"Segoe UI",Roboto,Arial,sans-serif}',
+  '.lembar{width:194mm;height:279mm;margin:0 auto;display:grid;grid-template-rows:repeat(4,minmax(0,1fr));overflow:hidden;page-break-after:always;break-after:page}',
+  '.lembar:last-child{page-break-after:auto;break-after:auto}',
+  '.kj{display:grid;grid-template-columns:44mm repeat(5,minmax(0,1fr));gap:1.6mm;min-height:0;padding:2.6mm 0;border-bottom:.3mm dashed #8d98a6}.kj:nth-child(4){border-bottom:0}',
+  '.id{display:flex;flex-direction:column;gap:.7mm;min-width:0;overflow:hidden}',
+  '.atas{display:flex;align-items:flex-end;gap:1.6mm}.foto{flex:none;width:18mm;height:18mm;border:.3mm solid #cfd6df;border-radius:2mm;object-fit:cover}',
+  'span.foto{display:flex;align-items:center;justify-content:center;font-size:12pt;font-weight:700;color:#9aa4b1}',
+  '.merek{font-size:5.6pt;letter-spacing:.16em;text-transform:uppercase;color:#6b7684}.no{font-size:12.5pt;font-weight:800;letter-spacing:.02em;line-height:1.1}',
+  '.kj h2{margin:0;font-size:9.6pt;line-height:1.15;text-transform:uppercase;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}',
+  '.seri{font-size:6.8pt;letter-spacing:.1em;text-transform:uppercase;color:#6b7684}',
+  '.pil{display:flex;flex-wrap:wrap;gap:.8mm}.pil span{padding:0 1.6mm;border:.3mm solid #161b22;border-radius:1.2mm;font-size:9.5pt;font-weight:800}',
+  '.bhn{font-size:7pt;line-height:1.25;color:#4a5563;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}',
+  '.st{display:flex;flex-direction:column;min-width:0;overflow:hidden;border:.35mm solid #161b22;border-radius:2mm}',
+  '.st h3{display:flex;align-items:center;gap:1.2mm;margin:0;padding:.9mm 1.4mm;border-bottom:.35mm solid #161b22;font-size:7.4pt;letter-spacing:.08em;text-transform:uppercase}',
+  '.st h3 b{display:inline-flex;align-items:center;justify-content:center;width:3.8mm;height:3.8mm;border:.3mm solid #161b22;border-radius:50%;font-size:6pt}',
+  '.f{flex:1;display:flex;align-items:flex-end;gap:1mm;min-height:0;padding:0 1.4mm .9mm;font-size:6.3pt;color:#4a5563;white-space:nowrap}.f i{flex:1;border-bottom:.25mm solid #8d98a6}',
+  '.uk{display:grid;grid-template-columns:1fr 1fr;gap:.5mm 1.2mm;padding:.8mm 1.4mm 0}.uk span{display:flex;align-items:flex-end;gap:.8mm;font-size:6.5pt}.uk b{min-width:5mm}.uk i{flex:1;height:3.4mm;border-bottom:.25mm solid #8d98a6}',
+  '@media screen{body{padding:10px 0;background:#e6eaef}.lembar{box-sizing:content-box;margin:0 auto 12px;padding:8mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18)}}'
+].join('');
+function kartuJalanIsi(label) { return '<div class="f"><span>' + label + '</span><i></i></div>'; }
+function kartuJalanKartu(x) {
+  var po = x.po, uk = poUkuranAktif(po), seri = [poSeri(po), po.pelanggan].filter(Boolean).join(' · ');
+  var bahan = x.rencana.map(function (r) { return coreParseJSON(r.bahanList, []).map(function (b) { return b.nama + ' ' + nfQty(b.qty) + ' ' + satuanPendek(b.satuan); }).join(', '); }).filter(Boolean).join('; ') || po.bahan || '';
+  function stasiun(n, nama, isi) { return '<section class="st"><h3><b>' + n + '</b>' + nama + '</h3>' + isi.map(function (v) { return v.charAt(0) === '<' ? v : kartuJalanIsi(v); }).join('') + '</section>'; }
+  var perUkuran = '<div class="uk">' + uk.map(function (s) { return '<span><b>' + esc(s) + '</b><i></i></span>'; }).join('') + '</div>';
+  return '<article class="kj"><div class="id"><div class="atas">' + (x.gambar ? '<img class="foto" src="' + esc(x.gambar) + '" alt="">' : '<span class="foto">' + esc(inisial(po.nama)) + '</span>') +
+    '<div><div class="merek">Kartu jalan PO</div><div class="no">' + esc(po.noPO || 'PO') + '</div></div></div><h2>' + esc(po.nama) + '</h2>' + (seri ? '<div class="seri">' + esc(seri) + '</div>' : '') +
+    '<div class="pil">' + uk.map(function (s) { return '<span>' + esc(s) + '</span>'; }).join('') + '</div>' + (bahan ? '<div class="bhn">Bahan: ' + esc(bahan) + '</div>' : '') + '</div>' +
+    stasiun(1, 'Potong', ['Tgl', perUkuran, 'Total', 'Paraf']) + stasiun(2, 'Jahit', ['Penjahit', 'Tgl kirim', 'Jml kirim', 'Tgl setor', 'Jml setor', 'Paraf']) +
+    stasiun(3, 'Hitung', ['Tgl', 'Bagus', 'Reject jahit', 'Paraf']) + stasiun(4, 'QC', ['Tgl', 'OK', 'Perbaikan', 'Reject', 'Paraf']) + stasiun(5, 'Gudang', ['Tgl masuk', 'Jumlah', 'BigSeller', 'Paraf']) + '</article>';
+}
+function kartuJalanHtml(data) {
+  var lembar = [];
+  for (var i = 0; i < data.length; i += KARTU_JALAN_PER_LEMBAR) lembar.push(data.slice(i, i + KARTU_JALAN_PER_LEMBAR));
+  return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kartu jalan PO</title><style>' + KARTU_JALAN_CSS + '</style></head><body>' +
+    lembar.map(function (isi) { return '<section class="lembar">' + isi.map(kartuJalanKartu).join('') + '</section>'; }).join('') + '</body></html>';
+}
+A.potongKartuJalan = function (el) {
+  var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
+  if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
+  return act(el, dokumenCetakBuka(kartuJalanHtml(data), { nama: 'kartu jalan PO', tanda: '.lembar' })).catch(quiet);
 };
 /* ---------- akhir cetak daftar potong ---------- */
 function slipDocumentActions(enabled) {
@@ -13165,7 +13245,7 @@ function qcCombinedGrid(group, n) {
     Object.keys(group.ukuran).map(function (size) { var qty=group.ukuran[size];
       function input(kind,label) { return '<label class="field"><span>' + label + '</span><input aria-label="' + esc(label+' ukuran '+size) + '" type="number" inputmode="numeric" min="0" max="' + qty + '" step="1" value="" placeholder="0" data-qc-size="' + esc(size) + '" data-qc-kind="' + kind + '" data-add></label>'; }
       return '<div class="card col gap-s" data-qc-row="' + esc(size) + '" data-expected="' + qty + '"><div class="row"><b class="grow">Ukuran ' + esc(size) + '</b><span>' + nf(qty) + ' pcs diperiksa</span></div>' + input('ok','Bagus / OK') +
-        '<details class="rj-lipat"><summary>Ada offline, perbaikan, atau reject?</summary><div class="qc-other-grid">' + input('offline','Offline') + input('perbaikan','Perbaikan') + input('reject','Reject') + '</div></details><p class="xs muted" data-qc-remaining>Sisa belum diisi: ' + nf(qty) + ' pcs</p></div>';
+        '<details class="rj-lipat"><summary>Ada offline, perbaikan, atau reject?</summary><div class="qc-other-grid">' + input('offline','Offline') + input('perbaikan','Perbaikan') + input('reject','Reject') + '</div></details><p class="xs muted" data-qc-remaining>Belum diisi: ' + nf(qty) + ' pcs · boleh diisi nanti</p></div>';
     }).join('') + '</section>';
 }
 function openCombinedQC(poId) {
@@ -13176,7 +13256,7 @@ function openCombinedQC(poId) {
     if(!total) return sheetHtml('Periksa QC',emptyBox('Tidak ada hitungan yang siap diperiksa. Muat ulang data untuk melihat perubahan terbaru.'));
     var balance=qcBalance(po);
     return sheetHtml('Periksa QC · '+po.noPO,'<div class="col" data-form="qcCombined">'+hid('id',fid)+hid('poId',poId)+poHead(po)+
-      '<div class="note">'+nf(total)+' pcs siap diperiksa. Isi hasil per ukuran; beberapa slip PO ini sudah dijumlahkan.'+(groups.length>1?' Penjahit atau tarif berbeda ditampilkan terpisah.':'')+'</div>'+
+      '<div class="note">'+nf(total)+' pcs siap diperiksa. Isi hasil per ukuran; beberapa slip PO ini sudah dijumlahkan. <b>Boleh sebagian dulu</b>: isi yang sudah selesai diperiksa saja, sisanya tetap di antrean dan bisa diisi nanti.'+(groups.length>1?' Penjahit atau tarif berbeda ditampilkan terpisah.':'')+'</div>'+
       (balance.waiting?'<p class="small muted">'+nf(balance.waiting)+' pcs lain masih perlu dicocokkan dan belum ikut pemeriksaan ini.</p>':'')+
       groups.map(qcCombinedGrid).join('')+sumLine('Total hasil diisi')+fTanggal('Tanggal pemeriksaan','tanggal')+fCatatan()+'</div>',footSave('qcCombinedSave','Simpan hasil QC'));
   });
@@ -13190,24 +13270,26 @@ R.qcCombined = function (form) {
   $$('[data-qc-row]',form).forEach(function (row) {
     var sum=0,valid=true; $$('[data-qc-size]',row).forEach(function (input) { var n=input.value===''?0:Number(input.value); if(!Number.isSafeInteger(n)||n<0)valid=false;else sum+=n; });
     var remaining=Number(row.getAttribute('data-expected'))-sum, note=$('[data-qc-remaining]',row);
-    note.textContent=!valid?'Isi jumlah pcs bulat, minimal nol.':remaining>0?'Sisa belum diisi: '+nf(remaining)+' pcs':remaining<0?'Melebihi hitungan '+nf(-remaining)+' pcs':'Lengkap · '+nf(sum)+' pcs';
+    note.textContent=!valid?'Isi jumlah pcs bulat, minimal nol.':remaining>0?(sum?'Diisi '+nf(sum)+' pcs · sisa '+nf(remaining)+' pcs tetap menunggu QC':'Belum diisi: '+nf(remaining)+' pcs · boleh diisi nanti'):remaining<0?'Melebihi hitungan '+nf(-remaining)+' pcs':'Lengkap · '+nf(sum)+' pcs';
     note.className='xs '+(!valid||remaining<0?'bad':remaining===0?'ok':'muted');
   });
 };
 A.qcCombinedSave = function (el) {
   var form=topForm(),v=formVals(form); if(form._qcBusy)return;
-  var kelompok=[];
+  var kelompok=[],sisaQc=0;
   try {
     $$('[data-qc-group]',form).forEach(function (group) {
       var maps=qcValues(group),sources=coreParseJSON(group.getAttribute('data-qc-sources'),[]);
       if(!sources.length)throw new Error('Sumber hitungan tidak tersedia. Tutup formulir lalu buka kembali.');
-      $$('[data-qc-row]',group).forEach(function (row) { var size=row.getAttribute('data-qc-row'),expected=Number(row.getAttribute('data-expected')),n=0; Object.keys(maps).forEach(function (kind) { n+=maps[kind][size]||0; }); if(n!==expected)throw new Error('Ukuran '+size+': isi seluruh '+nf(expected)+' pcs (bagus + offline + perbaikan + reject).'); });
-      kelompok.push({sources:sources,ukuran:maps.ok,offlineUkuran:maps.offline,perbaikanUkuran:maps.perbaikan,rejectUkuran:maps.reject});
+      /* QC bertahap: tiap ukuran boleh diisi sebagian atau dikosongkan; yang belum diisi tetap di antrean */
+      var isiGrup=0;
+      $$('[data-qc-row]',group).forEach(function (row) { var size=row.getAttribute('data-qc-row'),expected=Number(row.getAttribute('data-expected')),n=0; Object.keys(maps).forEach(function (kind) { n+=maps[kind][size]||0; }); if(n>expected)throw new Error('Ukuran '+size+': hasil '+nf(n)+' pcs melebihi yang siap diperiksa ('+nf(expected)+' pcs).'); isiGrup+=n; sisaQc+=expected-n; });
+      if(isiGrup)kelompok.push({sources:sources,ukuran:maps.ok,offlineUkuran:maps.offline,perbaikanUkuran:maps.perbaikan,rejectUkuran:maps.reject});
     });
-    if(!kelompok.length)throw new Error('Tidak ada hasil QC yang dapat disimpan.');
+    if(!kelompok.length)throw new Error('Isi hasil pemeriksaan dulu. Boleh sebagian; sisanya tetap di antrean.');
   } catch(e) { return toast(e.message,true); }
   form._qcBusy=true;
-  return act(el,req('simpanQCGabungan',{qc:{id:v.id,poId:v.poId,tanggal:v.tanggal,catatan:v.catatan,kelompok:kelompok}})).then(function () { form._qcBusy=false; dropForm(form);toast('Hasil QC tersimpan. Riwayat tiap hitungan dan upah ikut diperbarui.'); }).catch(function (error) { form._qcBusy=false; quiet(error); });
+  return act(el,req('simpanQCGabungan',{qc:{id:v.id,poId:v.poId,tanggal:v.tanggal,catatan:v.catatan,kelompok:kelompok}})).then(function () { form._qcBusy=false; dropForm(form);toast(sisaQc?'Hasil QC tersimpan. Sisa '+nf(sisaQc)+' pcs tetap di Antrean QC.':'Hasil QC tersimpan. Riwayat tiap hitungan dan upah ikut diperbarui.'); }).catch(function (error) { form._qcBusy=false; quiet(error); });
 };
 function openQC(poId, setorId, repairQcId) {
   if (!setorId && !repairQcId) {
@@ -13239,7 +13321,7 @@ function openQC(poId, setorId, repairQcId) {
     var uk = repair ? repair.uk : queue.uk;
     return sheetHtml(repair ? 'Hasil perbaikan' : 'Periksa ' + slip.noSlip,
       '<div class="col" data-form="qc">' + hid('id',fid) + hid('poId',poId) + hid('setorId',slip.id) + hid('repairQcId',repairQcId || '') + poHead(po) +
-      '<div class="note">' + esc(namaUser(slip.maklonId)) + '. ' + (repair ? 'Isi yang sudah kembali dari perbaikan: yang jadi bagus di Bagus / OK, yang tetap jelek di Reject. Yang belum kembali dikosongkan dulu dan bisa diisi lagi nanti. Tarif mengikuti hitungan asal; tanggal berikut menjadi tanggal upah perbaikan.' : 'Isi seluruh hasil untuk setiap ukuran yang ditampilkan. OK + offline + perbaikan + reject harus tepat sejumlah hitungan slip ini; sisa jahitan yang belum disetor diperiksa nanti dengan slipnya sendiri.') + '</div>' +
+      '<div class="note">' + esc(namaUser(slip.maklonId)) + '. ' + (repair ? 'Isi yang sudah kembali dari perbaikan: yang jadi bagus di Bagus / OK, yang tetap jelek di Reject. Yang belum kembali dikosongkan dulu dan bisa diisi lagi nanti. Tarif mengikuti hitungan asal; tanggal berikut menjadi tanggal upah perbaikan.' : 'Isi hasil yang sudah selesai diperiksa; boleh sebagian. Yang belum diisi tetap di antrean QC dan bisa diisi nanti. OK + offline + perbaikan + reject tidak boleh melebihi hitungan slip ini.') + '</div>' +
       qcGrid(uk,!!repair) + sumLine('Total diperiksa') + fTanggal('Tanggal pemeriksaan', 'tanggal') + fCatatan() + '</div>', footSave('qcSave'));
   });
 }
@@ -13253,7 +13335,7 @@ A.qcSave = function (el) {
     $$('[data-qc-row]', f).forEach(function (row) {
       var size = row.getAttribute('data-qc-row'), expected = Number(row.getAttribute('data-expected')), n = 0;
       Object.keys(maps).forEach(function (kind) { n += maps[kind][size] || 0; }); total += n;
-      if ((!v.repairQcId && n !== expected) || (v.repairQcId && n > expected)) throw new Error('Ukuran ' + size + ': hasil ' + n + ' pcs, ' + (v.repairQcId ? 'maksimal ' : 'harus tepat ') + expected + ' pcs.');
+      if (n > expected) throw new Error('Ukuran ' + size + ': hasil ' + n + ' pcs, maksimal ' + expected + ' pcs.');
     });
     if (!total) throw new Error('Isi hasil pemeriksaan.');
   } catch (e) { return toast(e.message,true); }
