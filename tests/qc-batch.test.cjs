@@ -74,14 +74,14 @@ test('every source is checked before writing: pending, foreign PO, wrong rate or
     if(kind==='foreign')f.change('SlipSetor','count002',{poId:'other-po'});
     if(kind==='rate')f.change('SlipSetor','count002',{upah:3000});
     if(kind==='worker')f.change('SlipSetor','count002',{maklonId:'sewer002'});
-    const input=f.intent();if(kind==='total')input.qc.kelompok[0].ukuran.L=141;if(kind==='date')input.qc.tanggal='2026-10-06';if(kind==='fraction')input.qc.kelompok[0].ukuran.L=142.1;if(kind==='boolean')input.qc.kelompok[0].ukuran.L=true;if(kind==='missing-proof')delete input.qc.kelompok[0].sources[1].expectedRevision;if(kind==='duplicate')input.qc.kelompok[0].sources.push(input.qc.kelompok[0].sources[0]);
-    noWrite(f,input,/hitungan diterima|PO yang sama|maklon dan tarif|tidak seimbang|Setoran melebihi|tepat|Tanggal QC|bilangan bulat|Versi sumber|lebih dari sekali/);
+    const input=f.intent();if(kind==='total')input.qc.kelompok[0].ukuran.L=143;if(kind==='date')input.qc.tanggal='2026-10-06';if(kind==='fraction')input.qc.kelompok[0].ukuran.L=142.1;if(kind==='boolean')input.qc.kelompok[0].ukuran.L=true;if(kind==='missing-proof')delete input.qc.kelompok[0].sources[1].expectedRevision;if(kind==='duplicate')input.qc.kelompok[0].sources.push(input.qc.kelompok[0].sources[0]);
+    noWrite(f,input,/hitungan diterima|PO yang sama|maklon dan tarif|tidak seimbang|Setoran melebihi|tidak melebihi sisa sumber|Tanggal QC|bilangan bulat|Versi sumber|lebih dari sekali/);
   }
 });
 
 test('same PO sources with different tariffs use separate groups in one write; a later invalid group prevents both',()=>{
   const f=fixture();f.change('SlipSetor','count002',{upah:3000});const st=f.state(),groups=st.setor.map(s=>({sources:[{setorId:s.id,expectedRevision:s.qcRevision}],ukuran:JSON.parse(JSON.stringify(s.ukuran))}));assert.notEqual(st.setor[0].qcGroupKey,st.setor[1].qcGroupKey);
-  const invalid=f.intent(groups);invalid.qc.kelompok[1].ukuran.L=91;noWrite(f,invalid,/tepat/);invalid.qc.kelompok[1].ukuran.L=92;const before=f.h.sheets.QC.writes;f.good('simpanQCGabungan',invalid);assert.equal(f.h.sheets.QC.writes,before+1);assert.equal(f.state().payroll.filter(r=>r.jenis==='jahit').reduce((n,r)=>n+r.total*r.rate,0),60*2000+92*3000);
+  const invalid=f.intent(groups);invalid.qc.kelompok[1].ukuran.L=93;noWrite(f,invalid,/tidak melebihi sisa sumber terpilih \(92 pcs\)/);invalid.qc.kelompok[1].ukuran.L=92;const before=f.h.sheets.QC.writes;f.good('simpanQCGabungan',invalid);assert.equal(f.h.sheets.QC.writes,before+1);assert.equal(f.state().payroll.filter(r=>r.jenis==='jahit').reduce((n,r)=>n+r.total*r.rate,0),60*2000+92*3000);
 });
 
 test('a persisted write with a lost response replays after a fresh request without duplicating warehouse or payroll',()=>{
