@@ -2,6 +2,11 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.44 - Batalkan hitungan (owner/admin)
+
+- Hitung fisik yang salah dapat dibatalkan owner/admin lewat "Batalkan hitungan" (di baris setoran pada rincian PO dan di slip setoran). Aksi server `batalHitungSetor`: status kembali `diajukan` sehingga laporan penjahit muncul lagi di Hitung fisik; jumlah, nomor slip, harga dan tanggal tetap, tidak ada baris yang dihapus, catatan diberi keterangan siapa yang membatalkan. Ditolak bila sudah di-QC, sudah terikat pembayaran, berasal dari data lama, punya koreksi fisik, atau setoran dicatat langsung oleh QC/owner (untuk itu: Hapus slip lalu catat ulang).
+- Tombol pada slip (Hitung & terima, Ubah harga, Batalkan hitungan, Hapus slip) kini di atas pratinjau slip.
+
 ## Rilis 1.5.43 - invoice nota penjualan, struk thermal, edit/arsip/hapus nota, Hapus PO pembelian
 
 - Nota penjualan: invoice A4 baru untuk pelanggan (logo, nomor, tanggal, pelanggan, tabel barang, subtotal/diskon/ongkir/total, sudah dibayar, sisa, riwayat pembayaran, tanda tangan). "Cetak invoice" memakai pratinjau cetak di perangkat; "Unduh PDF" dibuat server dari susunan yang sama (`coreNotaInvoiceHtml`), logo dikirim perangkat sebagai PNG kecil.
