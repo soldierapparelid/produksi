@@ -473,7 +473,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261016-hitung-ringkas-1543f';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261016-batal-hitung-1544';</script>
 <script>
 (function () {
 'use strict';
@@ -495,7 +495,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.43';
+var APP_VERSION = '1.5.44';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -3003,6 +3003,29 @@ function createCore(store, env) {
     return findRow('SlipSetor', rec.id);
   };
 
+  /* 1.5.44: owner/admin membatalkan hitung fisik yang salah. Laporan penjahit kembali menunggu di Hitung fisik
+     (status 'diajukan'); jumlah laporan, nomor slip dan harga tetap, tidak ada baris yang dihapus.
+     Hanya untuk laporan penjahit sendiri yang belum di-QC dan belum terikat pembayaran. */
+  actions.batalHitungSetor = function (p) {
+    var me = auth(p); mustAdmin(me);
+    if (store.fresh) ['SlipSetor', 'QC'].forEach(function (sheet) { store.fresh(sheet); });
+    var rec = findRow('SlipSetor', String(p.id || '')); if (!rec) fail('Slip setor tidak ditemukan.');
+    var proof = mutationProof('batalHitungSetor', p, { id: rec.id }, me);
+    if (checkRevision('SlipSetor', rec, p.expectedRevision, proof)) return findRow('SlipSetor', rec.id);
+    if (rec.status !== 'diterima') fail('Setoran ini belum dihitung, jadi tidak ada hitungan yang dibatalkan.');
+    if (rec.asal || Object.keys(coreMap(rec.imporSumber)).length) fail('Hitungan dari data lama tidak dapat dibatalkan.');
+    if (rec.dibuatOleh !== rec.maklonId) fail('Setoran ini dicatat langsung oleh QC/owner, bukan laporan penjahit. Hapus slipnya lalu catat ulang.');
+    if (rec.upahId || sourcePaid(rec.id) || sourceInLegacySettlement(rec.id)) fail('Hitungan ini sudah masuk pembayaran upah, tidak bisa dibatalkan.');
+    if (correctedSource('SlipSetor', rec.id)) fail('Hitungan ini punya riwayat koreksi fisik dan harus tetap utuh.');
+    if (store.read('QC').some(function (q) { return q.setorId === rec.id; })) fail('Hitungan ini sudah di-QC. Hapus catatan QC-nya dahulu.');
+    openPO(rec.poId);
+    var tanda = 'Hitungan ' + (rec.noSlip || '') + ' dibatalkan ' + (me.nama || 'owner') + ' ' + today();
+    var lama = String(rec.catatan || '');
+    var catatan = lama ? teks(lama, Math.max(0, 300 - tanda.length - 3)) + ' Â· ' + tanda : tanda;
+    store.update('SlipSetor', rec.id, Object.assign({ status: 'diajukan', diprosesOleh: '', diprosesPada: '', catatan: teks(catatan, 300) }, proof));
+    return findRow('SlipSetor', rec.id);
+  };
+
   /* harga per pcs hanya bisa diatur owner/admin, dan hanya selama belum dibayar */
   actions.ubahHarga = function (p) {
     var me = auth(p); mustAdmin(me);
@@ -3709,7 +3732,7 @@ function createCore(store, env) {
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveStokJualLink: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
-    tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1,
+    tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1, batalHitungSetor: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
@@ -6677,7 +6700,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.43';
+var UI_VERSION = '1.5.44';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -8353,12 +8376,14 @@ function slipSheet(type, id) {
   if (!rec) return sheetHtml('Slip', emptyBox('Slip ini sudah tidak ada.'));
   slipPasangCss();
   var admin = isAdmin(), belum = type === 'setor' && rec.status !== 'diterima', model = slipSingleModel(type, rec);
-  var h = '<div class="slip-pratinjau">' + slipLembar([model]) + '</div>';
+  var h = '';   /* 1.5.44: tombol di atas pratinjau slip supaya terlihat tanpa menggulir */
   if (belum && rec.status === 'diajukan' && (admin || me().divisi === 'qc')) h += '<button class="btn pri block" data-a="terimaOpen" data-id="' + esc(rec.id) + '">' + ic('check') + 'Hitung &amp; terima</button>';
   if (type === 'setor' && rec.status === 'diterima' && admin && sourceCanEditRate(rec, 'SlipSetor')) h += '<button class="btn" data-a="hargaOpen" data-s="SlipSetor" data-id="' + esc(rec.id) + '" data-v="' + rec.upah + '">' + ic('edit') + (rec.upah ? 'Ubah harga' : 'Atur harga') + '</button>';
+  if (type === 'setor' && setorBisaBatal(rec)) h += '<button class="btn" data-a="setorBatalHitung" data-id="' + esc(rec.id) + '">' + ic('x') + 'Batalkan hitungan</button>';
   var d = ' data-t="' + type + '" data-id="' + esc(rec.id) + '"';
   var bisaHapus = (type === 'kirim' && admin) || (type === 'upah' && admin) || (type === 'setor' && !sourcePaid(rec) && !(S.state.qc || []).some(function (q) { return q.setorId === rec.id; }) && (admin || (rec.maklonId === me().id && rec.status === 'diajukan')));
   if (bisaHapus) h += '<button class="btn ghost sm" style="color:var(--bad)" data-a="slipDel"' + d + '>' + ic('trash', 's') + (type === 'upah' ? 'Batalkan slip' : (belum ? 'Batalkan laporan' : 'Hapus slip')) + '</button>';
+  h = (h ? '<div class="row wrap" data-slip-aksi>' + h + '</div>' : '') + '<div class="slip-pratinjau">' + slipLembar([model]) + '</div>';
   var foot = '<button class="btn" data-a="slipCopy"' + d + '>' + ic('copy') + 'Salin teks</button><button class="btn" data-a="slipPrint"' + d + '>Cetak</button>' +
     (!belum && Api.mode() !== 'demo' ? '<button class="btn pri" data-a="slipPdf"' + d + '>' + ic('down') + 'Unduh PDF</button>' : '');
   return sheetHtml(model.title, h, foot);
@@ -8425,6 +8450,20 @@ A.slipDel = function (el) {
   var sheet = { kirim: 'SlipKirim', setor: 'SlipSetor', upah: 'SlipUpah' }[type];
   confirmBox({ title: type === 'upah' ? 'Batalkan slip upah?' : 'Hapus slip ini?', text: type === 'upah' ? 'Item di dalamnya kembali berstatus belum dibayar.' : 'Angka progres PO ikut berubah. Tindakan ini tidak bisa dibatalkan.', ok: type === 'upah' ? 'Batalkan slip' : 'Hapus', danger: true }, function (btn) {
     return act(btn, req('deleteRecord', { sheet: sheet, id: id })).then(function () { dropSheet(sheets.length - 2); toast(type === 'upah' ? 'Slip dibatalkan.' : 'Slip dihapus.'); });
+  });
+};
+/* 1.5.44: hitungan setoran yang salah dikembalikan ke Hitung fisik (owner/admin), selama belum di-QC dan belum dibayar */
+function setorBisaBatal(r) {
+  if (!r || r.status !== 'diterima' || !isAdmin() || r.asal || r.dibuatOleh !== r.maklonId) return false;
+  if (Object.keys(coreParseJSON(r.imporSumber, {}) || {}).length) return false;
+  return !sourcePaid(r) && !(S.state.qc || []).some(function (q) { return q.setorId === r.id; });
+}
+A.setorBatalHitung = function (el) {
+  var rec = findSlip('setor', el.getAttribute('data-id'));
+  if (!rec || !rec.revision) return toast('Catatan ini belum termuat di perangkat. Muat ulang data lalu coba lagi.', true);
+  if (!setorBisaBatal(rec)) return toast('Hitungan ini tidak bisa dibatalkan: sudah di-QC atau sudah masuk pembayaran.', true);
+  confirmBox({ title: 'Batalkan hitungan ini?', text: 'Setoran ' + namaUser(rec.maklonId) + ' ' + nf(rec.total) + ' pcs' + (rec.noSlip ? ' (' + rec.noSlip + ')' : '') + ' di ' + poNama(rec.poId) + ' kembali ke Hitung fisik seperti sebelum dihitung. Laporan penjahit tidak dihapus; nanti bisa dihitung ulang.', ok: 'Batalkan hitungan', danger: true }, function (btn) {
+    return act(btn, req('batalHitungSetor', { id: rec.id, expectedRevision: rec.revision })).then(function () { toast('Hitungan dibatalkan. Laporannya kembali ke Hitung fisik.'); });
   });
 };
 A.del = function (el) {
@@ -9055,12 +9094,12 @@ function poSheet(id) {
   var ev = [];
   st.potong.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-potong', t: 'Potong ' + nf(r.total) + ' pcs', d: [namaUser(r.userId), bahanTeks(r), admin ? (r.tarif ? rp(r.tarif) + '/pcs' : 'harga belum diatur') : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, harga: admin && sourceCanEditRate(r, 'Potong') ? ['Potong', r.id, r.tarif] : null, del: (admin || r.userId === me().id) && !r.rencanaId && !sourcePaid(r) ? ['Potong', r.id] : null }); });
   st.kirim.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-maklon', t: 'Kirim ' + nf(r.total) + ' pcs ke ' + namaUser(r.maklonId), d: [r.noSlip, r.target ? 'target ' + tgl(r.target) : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['kirim', r.id] }); });
-  st.setor.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-cek', t: 'Setor ' + nf(r.total) + ' pcs dari ' + namaUser(r.maklonId), d: [r.noSlip, (STATUS_SETOR[r.status] || [r.status])[0], r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['setor', r.id], belumSlip: r.status !== 'diterima' }); });
+  st.setor.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-cek', t: 'Setor ' + nf(r.total) + ' pcs dari ' + namaUser(r.maklonId), d: [r.noSlip, (STATUS_SETOR[r.status] || [r.status])[0], r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['setor', r.id], belumSlip: r.status !== 'diterima', batal: setorBisaBatal(r) ? r.id : null }); });
   st.qc.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-qc', t: 'QC lolos ' + nf(r.total) + ' pcs', d: [r.userId ? namaUser(r.userId) : '', r.maklonId ? 'jahitan ' + namaUser(r.maklonId) : '', r.offline ? 'offline ' + r.offline : '', r.perbaikan > 0 ? 'perbaikan ' + r.perbaikan : (r.perbaikan < 0 ? 'hasil perbaikan' : ''), r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, del: (admin || r.userId === me().id) ? ['QC', r.id] : null }); });
   st.gudang.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-jual', t: 'Input BigSeller ' + nf(r.total) + ' pcs', d: [r.userId ? namaUser(r.userId) : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, del: admin ? ['Gudang', r.id] : null }); });
   ev.sort(function (a, b) { return String(a.tg) + String(a.at) < String(b.tg) + String(b.at) ? 1 : -1; });
-  h += '<div class="col gap-s"><div class="label">Riwayat</div>' + (admin && ev.length ? '<p class="xs muted">Salah input? Hapus catatan yang salah lewat ikon tempat sampah (penugasan dan setoran: buka Slip-nya), lalu isi ulang. Mulai dari catatan paling akhir; yang sudah dibayar tidak bisa dihapus.</p>' : '') + '<div class="card flush"><div class="list">' + (ev.length ? ev.map(function (e) {
-    var tail = e.slip ? '<button class="btn sm" data-a="slip" data-t="' + e.slip[0] + '" data-id="' + esc(e.slip[1]) + '">' + (e.belumSlip ? 'Lihat' : 'Slip') + '</button>'
+  h += '<div class="col gap-s"><div class="label">Riwayat</div>' + (admin && ev.length ? '<p class="xs muted">Salah input? Hapus catatan yang salah lewat ikon tempat sampah (penugasan dan setoran: buka Slip-nya), lalu isi ulang. Setoran yang salah dihitung: Batalkan hitungan, laporannya kembali ke Hitung fisik. Mulai dari catatan paling akhir; yang sudah dibayar tidak bisa dihapus.</p>' : '') + '<div class="card flush"><div class="list">' + (ev.length ? ev.map(function (e) {
+    var tail = e.slip ? (e.batal ? '<button class="btn sm" data-a="setorBatalHitung" data-id="' + esc(e.batal) + '">Batalkan hitungan</button>' : '') + '<button class="btn sm" data-a="slip" data-t="' + e.slip[0] + '" data-id="' + esc(e.slip[1]) + '">' + (e.belumSlip ? 'Lihat' : 'Slip') + '</button>'
       : ((e.harga ? '<button class="btn sm" data-a="hargaOpen" data-s="' + e.harga[0] + '" data-id="' + esc(e.harga[1]) + '" data-v="' + coreNum(e.harga[2]) + '">Harga</button>' : '') +
         (e.del ? '<button class="icon-btn" aria-label="Hapus" data-a="del" data-s="' + e.del[0] + '" data-id="' + esc(e.del[1]) + '">' + ic('trash', 's') + '</button>' : ''));
     return '<div class="item ' + e.c + '"><i style="width:8px;height:8px;border-radius:50%;background:var(--c);flex:none"></i><span class="grow col gap-s"><span><span class="t">' + esc(e.t) + '</span> <span class="xs muted">' + tgl(e.tg) + '</span></span>' + (e.d ? '<span class="d">' + esc(e.d) + '</span>' : '') + '<span class="chips">' + sizeChips(e.uk) + '</span></span>' + tail + '</div>';
