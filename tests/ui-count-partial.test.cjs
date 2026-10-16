@@ -53,7 +53,7 @@ test('more than the old report, a missing date or a future date is stopped on th
 });
 
 test('the reject boxes are folded away, the form shows where the sewer stands on this PO, and a running line says what is left',()=>{
-  const f=fixture();f.run("openTerima('pending1')");const out=f.c.rendered;
+  const qc=fixture();qc.run("openTerima('pending1')");assert.doesNotMatch(qc.c.rendered,/Jahitan Mang Atep di PO ini|data-terima-posisi/,'1543f: only the owner sees the sewer position');const f=fixture({admin:true});f.run("openTerima('pending1')");const out=f.c.rendered;
   assert.match(out,/<details class="rj-lipat"><summary>Ada barang reject \(rusak\)\? Ketuk untuk mengisi<\/summary><div>Reject<\/div>/,'closed until someone really has rejects');
   assert.match(out,/data-form="terima" data-lapor="\{&quot;M&quot;:332\}"/);assert.match(out,/Jumlah yang Anda hitung per ukuran \(pcs bagus\)/);
   assert.match(out,/Jahitan Mang Atep di PO ini/);

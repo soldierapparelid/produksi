@@ -470,7 +470,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261014-harga-potong-1543e';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261016-hitung-ringkas-1543f';</script>
 <script>
 (function () {
 'use strict';
@@ -12567,7 +12567,7 @@ VIEWS['q-cek'] = function () {
   var st = S.state;
   var tunggu = st.setor.filter(function (s) { return s.status === 'diajukan'; }).sort(function (a, b) { return String(a.dibuat) < String(b.dibuat) ? -1 : 1; });
   var baru = st.setor.filter(function (s) { return s.status === 'diterima' && s.diprosesOleh === me().id; }).sort(function (a, b) { return String(a.diprosesPada) < String(b.diprosesPada) ? 1 : -1; }).slice(0, 8);
-  return '<div class="head"><div class="grow"><h1>Hitung fisik</h1><div class="sub">Setiap setoran maklon muncul di sini. Hitung barangnya, lalu terima. Slip terbit setelah dihitung. Setoran yang sudah dihitung langsung masuk Antrean QC.</div></div><button class="btn" data-a="setorLangsung">' + ic('plus') + 'Catat langsung</button></div>' +
+  return '<div class="head"><div class="grow"><h1>Hitung fisik</h1><div class="sub">Hitung barang yang disetor penjahit, isi jumlah bagusnya, lalu Terima. Setelah itu barangnya masuk Antrean QC.</div></div><button class="btn" data-a="setorLangsung">' + ic('plus') + 'Catat langsung</button></div>' +
     (tunggu.length ? '<div class="grid g-cards">' + tunggu.map(function (s) {
       var po = D.po[s.poId] || { nama: 'PO terhapus' };
       return '<div class="po"><div class="row top">' + thumb(po) + '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">Laporan setor · ' + esc(lalu(s.dibuat)) + '</div>' +
@@ -12575,7 +12575,7 @@ VIEWS['q-cek'] = function () {
         '<div class="chips">' + sizeChips(s.ukuran) + (s.reject ? ' <span class="chip bad">Reject ' + nf(s.reject) + '</span>' : '') + '</div>' + (s.catatan ? '<div class="small muted">' + esc(s.catatan) + '</div>' : '') +
         '<button class="btn pri" data-a="terimaOpen" data-id="' + esc(s.id) + '">' + ic('check') + 'Hitung &amp; terima</button></div>';
     }).join('') + '</div>' : '<div class="card">' + emptyBox('Tidak ada setoran yang menunggu dihitung.') + '</div>') +
-    hitungFisikBelumLengkap() +
+    (isAdmin() ? hitungFisikBelumLengkap() : '') +   /* 1543f: progres jahitan hanya untuk owner/admin */
     (baru.length ? '<div class="card flush"><div class="sec-h"><h3>Baru Anda terima</h3></div><div class="list">' + baru.map(function (r) { return slipRow('setor', r); }).join('') + '</div></div>' : '');
 };
 /* PO aktif yang jahitannya belum kembali semua: berapa yang sudah dihitung dan berapa yang masih di penjahit. */
@@ -13114,14 +13114,14 @@ function openTerima(id) {
     sp.main.concat(sp.extra, Object.keys(lapor)).forEach(function (s) { if (!seen[s]) { seen[s] = true; all.push(s); } });
     var main = all.filter(function (s) { return coreNum(lapor[s]) > 0; }), extra = all.filter(function (s) { return main.indexOf(s) < 0; });
     return sheetHtml('Hitung & terima', '<div class="col" data-form="terima"' + (setorLaporanLama(rec) ? ' data-lapor="' + esc(JSON.stringify(lapor)) + '"' : '') + '>' + hid('id', rec.id) + hid('revision',rec.revision) + poHead(po) +
-      '<dl class="kv"><dt>Penjahit</dt><dd class="b">' + esc(namaUser(rec.maklonId)) + '</dd><dt>Laporan</dt><dd>' + esc(rec.noSlip || 'Belum terbit slip') + ' · ' + tgl(rec.tanggal) + '</dd></dl>' + terimaRingkas(po, rec.maklonId, lapor) +
+      /* 1543f: ringkas untuk tukang QC; angka posisi jahitan hanya untuk owner/admin, di lipatan bawah */
+      '<div class="small">Dari <b>' + esc(namaUser(rec.maklonId)) + '</b> · laporan ' + tgl(rec.tanggal) + '</div>' +
       '<div class="col gap-s"><div class="label">Jumlah yang Anda hitung per ukuran (pcs bagus)</div><div data-terima-main>' + terimaInputUkuran(main, rec, lapor) + '</div>' +
       (extra.length ? '<details class="rj-lipat" data-terima-extra><summary>Ukuran lain bila hitungan berbeda</summary>' + terimaInputUkuran(extra, rec, lapor) + '</details>' : '') +
       '<p class="xs muted">' + (setorLaporanLama(rec) ? 'Angka sudah diisi sesuai laporan penjahit. Kalau baru sebagian yang disetor, isi yang sudah Anda hitung saja: sisanya tetap menunggu di daftar ini. Yang belum disetor jangan dimasukkan ke Reject.' : 'Angka sudah diisi sesuai laporan maklon. Ubah kalau hitungan Anda berbeda.') + '</p></div>' + sumLine('Total diterima') + '<div class="note" data-terima-ringkas hidden></div>' +
       '<details class="rj-lipat"' + (coreSumSizes(rj) ? ' open' : '') + '><summary>Ada barang reject (rusak)? Ketuk untuk mengisi</summary>' + rejectGrid(po, rj) +
       '<p class="xs muted">Reject hanya untuk barang rusak dan termasuk dalam jumlah laporan. Kalau tidak ada yang rusak, biarkan kosong.</p></details>' + '<div class="f-row">' + fTanggal('Tanggal hitung', 'tanggal') + (isAdmin() ? fNum('Harga / pcs', 'upah', rec.upah || hargaKiriman(rec.poId, rec.maklonId) || tarifBawaan(po, 'tarifJahit') || '', 'step="100"') : '') + '</div>' +
-      '<p class="xs muted">Setelah diterima, slip setor terbit dengan nomor dan harga' + (isAdmin() ? ' di atas' : ' yang diatur owner') + '.</p>' +
-      terimaPosisi(po, rec.maklonId, rec) + '<details class="rj-lipat"><summary>Catatan laporan / hitungan (opsional)</summary>' + fCatatan(rec.catatan) + '</details></div>', '<button class="btn danger" data-a="terimaTolak">Tolak</button><button class="btn pri" data-a="terimaSave">Terima &amp; terbitkan slip</button>');
+      (isAdmin() ? terimaPosisi(po, rec.maklonId, rec, terimaRingkas(po, rec.maklonId, lapor)) : '') + '<details class="rj-lipat"><summary>Catatan laporan / hitungan (opsional)</summary>' + fCatatan(rec.catatan) + '</details></div>', '<button class="btn danger" data-a="terimaTolak">Tolak</button><button class="btn pri" data-a="terimaSave">Terima &amp; terbitkan slip</button>');
   });
 }
 function terimaInputUkuran(sizes, rec, lapor) {
@@ -13145,7 +13145,7 @@ function terimaRingkas(po, maklonId, lapor) {
 }
 /* Posisi jahitan satu penjahit pada satu PO, per ukuran: ditugaskan, sudah dihitung (bagus + reject), menunggu dihitung
    (sudah dilaporkan, belum dihitung), dan masih dijahit (belum dilaporkan sama sekali). Angkanya dari alur produksi server. */
-function terimaPosisi(po, maklonId, rec) {
+function terimaPosisi(po, maklonId, rec, ringkas) {
   var uk = workflowFor(po).ukuran || {}, rows = [], tot = [0, 0, 0, 0];
   poSizes(po).forEach(function (s) {
     var m = ((uk[s] || {}).maklon || {})[maklonId]; if (!m || !(coreNum(m.kirim) > 0)) return;
@@ -13159,7 +13159,7 @@ function terimaPosisi(po, maklonId, rec) {
     return '<div class="card col gap-s" style="margin:0" data-terima-posisi="' + esc(r[0]) + '"><div class="row wrap"><b class="grow">Ukuran ' + esc(r[0]) + '</b><span class="chip' + (done ? ' ok' : r[3] ? ' warn' : '') + '">' + (done ? 'Hitungan selesai' : r[3] ? 'Menunggu hitung' : 'Belum dilaporkan') + '</span></div>' +
       '<div class="small muted">Sudah dilaporkan selesai ' + nf(r[2] + r[3]) + ' dari ' + nf(r[1]) + ' pcs.</div><dl class="kv"><dt>Sudah dihitung (bagus + reject)</dt><dd class="num">' + nf(r[2]) + ' pcs</dd><dt>Menunggu dihitung</dt><dd class="num">' + nf(r[3]) + ' pcs</dd><dt>Belum dilaporkan</dt><dd class="num">' + nf(r[4]) + ' pcs</dd><dt>Sisa penugasan belum dihitung</dt><dd class="b num">' + nf(remaining) + ' pcs</dd></dl></div>';
   }
-  return '<details class="rj-lipat" data-terima-progress><summary>Rincian progres jahit</summary><div class="col gap-s"><div class="label">Jahitan ' + esc(namaUser(maklonId)) + ' di PO ini</div>' + primary.map(card).join('') +
+  return '<details class="rj-lipat" data-terima-progress><summary>Rincian progres jahit</summary><div class="col gap-s"><div class="label">Jahitan ' + esc(namaUser(maklonId)) + ' di PO ini</div>' + (ringkas || '') + primary.map(card).join('') +
     (other.length ? '<details class="rj-lipat" data-terima-posisi-lain><summary>Posisi ukuran lain (' + other.length + ')</summary><div class="col gap-s">' + other.map(card).join('') + '</div></details>' : '') +
     '<p class="xs muted">Total ditugaskan ' + nf(tot[0]) + ' pcs · sudah dihitung ' + nf(tot[1]) + ' pcs · menunggu dihitung ' + nf(tot[2]) + ' pcs · belum dilaporkan ' + nf(tot[3]) + ' pcs. Sudah dihitung belum berarti sudah lolos QC.</p></div></details>';
 }
