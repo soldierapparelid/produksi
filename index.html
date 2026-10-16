@@ -473,7 +473,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261016-batal-hitung-1544';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261016-koreksi-owner-1544b';</script>
 <script>
 (function () {
 'use strict';
@@ -8468,7 +8468,8 @@ A.setorBatalHitung = function (el) {
 };
 A.del = function (el) {
   var sheet = el.getAttribute('data-s'), id = el.getAttribute('data-id');
-  confirmBox({ title: 'Hapus catatan ini?', text: 'Angka progres PO ikut berubah.', ok: 'Hapus', danger: true }, function (btn) {
+  var akibat = { SlipSetor: 'Laporan setor penjahit dan hitungannya ikut terhapus. Kalau hanya hitungannya yang salah, pakai Batalkan hitungan.', SlipKirim: 'Penugasan jahit ini terhapus. Angka progres PO ikut berubah.' }[sheet];
+  confirmBox({ title: 'Hapus catatan ini?', text: akibat || 'Angka progres PO ikut berubah.', ok: 'Hapus', danger: true }, function (btn) {
     return act(btn, req('deleteRecord', { sheet: sheet, id: id })).then(function () { toast('Dihapus.'); });
   });
 };
@@ -8766,7 +8767,7 @@ function berandaCatatan() {
   st.setor.forEach(function (r) {
     var tunggu = r.status === 'diajukan';
     ev.push({ g: 'jahit', at: r.dibuat, t: namaUser(r.maklonId) + ' setor ' + nf(r.total) + ' pcs' + (tunggu ? ' (menunggu dicek)' : ''), po: r.poId, c: 'c-cek', x: r.status === 'ditolak' ? 'ditolak' : '',
-      tail: tunggu ? '<button class="btn sm perlu" data-a="terimaOpen" data-id="' + esc(r.id) + '">Hitung</button>' : '<button class="btn sm" data-a="slip" data-t="setor" data-id="' + esc(r.id) + '">Slip</button>' });
+      tail: tunggu ? '<button class="btn sm perlu" data-a="terimaOpen" data-id="' + esc(r.id) + '">Hitung</button>' : (typeof setorBisaBatal === 'function' && setorBisaBatal(r) ? '<button class="btn sm" data-a="setorBatalHitung" data-id="' + esc(r.id) + '">Batalkan hitungan</button>' : '') + '<button class="btn sm" data-a="slip" data-t="setor" data-id="' + esc(r.id) + '">Slip</button>' });
   });
   st.qc.forEach(function (r) {
     var lainQC = [r.reject ? nf(r.reject) + ' reject' : '', r.perbaikan > 0 ? nf(r.perbaikan) + ' masuk perbaikan' : '', r.offline ? nf(r.offline) + ' offline' : ''].filter(Boolean).join(', ');
@@ -9092,16 +9093,18 @@ function poSheet(id) {
 
   /* riwayat */
   var ev = [];
-  st.potong.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-potong', t: 'Potong ' + nf(r.total) + ' pcs', d: [namaUser(r.userId), bahanTeks(r), admin ? (r.tarif ? rp(r.tarif) + '/pcs' : 'harga belum diatur') : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, harga: admin && sourceCanEditRate(r, 'Potong') ? ['Potong', r.id, r.tarif] : null, del: (admin || r.userId === me().id) && !r.rencanaId && !sourcePaid(r) ? ['Potong', r.id] : null }); });
-  st.kirim.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-maklon', t: 'Kirim ' + nf(r.total) + ' pcs ke ' + namaUser(r.maklonId), d: [r.noSlip, r.target ? 'target ' + tgl(r.target) : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['kirim', r.id] }); });
-  st.setor.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-cek', t: 'Setor ' + nf(r.total) + ' pcs dari ' + namaUser(r.maklonId), d: [r.noSlip, (STATUS_SETOR[r.status] || [r.status])[0], r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['setor', r.id], belumSlip: r.status !== 'diterima', batal: setorBisaBatal(r) ? r.id : null }); });
+  st.potong.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-potong', t: 'Potong ' + nf(r.total) + ' pcs', d: [namaUser(r.userId), bahanTeks(r), admin ? (r.tarif ? rp(r.tarif) + '/pcs' : 'harga belum diatur') : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, harga: admin && sourceCanEditRate(r, 'Potong') ? ['Potong', r.id, r.tarif] : null, del: (admin || r.userId === me().id) && !r.rencanaId && !sourcePaid(r) ? ['Potong', r.id] : null, kunci: sourcePaid(r) ? sourcePaymentChip(r) : (admin && r.rencanaId ? '<span class="chip" title="Bahan dari persiapan owner sudah tercatat terpakai; hasil potong ini tidak bisa dihapus">Dari persiapan</span>' : '') }); });
+  st.kirim.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-maklon', t: 'Kirim ' + nf(r.total) + ' pcs ke ' + namaUser(r.maklonId), d: [r.noSlip, r.target ? 'target ' + tgl(r.target) : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['kirim', r.id], del: admin ? ['SlipKirim', r.id] : null }); });
+  st.setor.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-cek', t: 'Setor ' + nf(r.total) + ' pcs dari ' + namaUser(r.maklonId), d: [r.noSlip, (STATUS_SETOR[r.status] || [r.status])[0], r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, slip: ['setor', r.id], belumSlip: r.status !== 'diterima', batal: setorBisaBatal(r) ? r.id : null,
+    del: admin && !sourcePaid(r) && !(st.qc || []).some(function (q) { return q.setorId === r.id; }) ? ['SlipSetor', r.id] : null, kunci: sourcePaid(r) ? sourcePaymentChip(r) : '' }); });
   st.qc.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-qc', t: 'QC lolos ' + nf(r.total) + ' pcs', d: [r.userId ? namaUser(r.userId) : '', r.maklonId ? 'jahitan ' + namaUser(r.maklonId) : '', r.offline ? 'offline ' + r.offline : '', r.perbaikan > 0 ? 'perbaikan ' + r.perbaikan : (r.perbaikan < 0 ? 'hasil perbaikan' : ''), r.reject ? 'reject ' + r.reject : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, del: (admin || r.userId === me().id) ? ['QC', r.id] : null }); });
   st.gudang.forEach(function (r) { if (r.poId === id) ev.push({ at: r.dibuat, tg: r.tanggal, c: 'c-jual', t: 'Input BigSeller ' + nf(r.total) + ' pcs', d: [r.userId ? namaUser(r.userId) : '', r.catatan].filter(Boolean).join(' · '), uk: r.ukuran, del: admin ? ['Gudang', r.id] : null }); });
   ev.sort(function (a, b) { return String(a.tg) + String(a.at) < String(b.tg) + String(b.at) ? 1 : -1; });
-  h += '<div class="col gap-s"><div class="label">Riwayat</div>' + (admin && ev.length ? '<p class="xs muted">Salah input? Hapus catatan yang salah lewat ikon tempat sampah (penugasan dan setoran: buka Slip-nya), lalu isi ulang. Setoran yang salah dihitung: Batalkan hitungan, laporannya kembali ke Hitung fisik. Mulai dari catatan paling akhir; yang sudah dibayar tidak bisa dihapus.</p>' : '') + '<div class="card flush"><div class="list">' + (ev.length ? ev.map(function (e) {
+  h += '<div class="col gap-s"><div class="label">Riwayat</div>' + (admin && ev.length ? '<p class="xs muted">Salah input di divisi mana pun? Hapus catatannya lewat ikon tempat sampah di barisnya, lalu isi ulang lewat tombol di atas (Catat potong, Penugasan jahit, Catat setoran, Input QC, Input BigSeller). Setoran yang salah dihitung: Batalkan hitungan, laporannya kembali ke Hitung fisik. Mulai dari catatan paling akhir. Yang sudah dibayar: batalkan slip upahnya dulu di menu Upah.</p>' : '') + '<div class="card flush"><div class="list">' + (ev.length ? ev.map(function (e) {
     var tail = e.slip ? (e.batal ? '<button class="btn sm" data-a="setorBatalHitung" data-id="' + esc(e.batal) + '">Batalkan hitungan</button>' : '') + '<button class="btn sm" data-a="slip" data-t="' + e.slip[0] + '" data-id="' + esc(e.slip[1]) + '">' + (e.belumSlip ? 'Lihat' : 'Slip') + '</button>'
-      : ((e.harga ? '<button class="btn sm" data-a="hargaOpen" data-s="' + e.harga[0] + '" data-id="' + esc(e.harga[1]) + '" data-v="' + coreNum(e.harga[2]) + '">Harga</button>' : '') +
-        (e.del ? '<button class="icon-btn" aria-label="Hapus" data-a="del" data-s="' + e.del[0] + '" data-id="' + esc(e.del[1]) + '">' + ic('trash', 's') + '</button>' : ''));
+      : (e.harga ? '<button class="btn sm" data-a="hargaOpen" data-s="' + e.harga[0] + '" data-id="' + esc(e.harga[1]) + '" data-v="' + coreNum(e.harga[2]) + '">Harga</button>' : '');
+    /* 1544b: tanda kunci dan tombol hapus juga untuk baris penugasan dan setoran */
+    tail += (e.kunci || '') + ((e.del ? '<button class="icon-btn" aria-label="Hapus" data-a="del" data-s="' + e.del[0] + '" data-id="' + esc(e.del[1]) + '">' + ic('trash', 's') + '</button>' : ''));
     return '<div class="item ' + e.c + '"><i style="width:8px;height:8px;border-radius:50%;background:var(--c);flex:none"></i><span class="grow col gap-s"><span><span class="t">' + esc(e.t) + '</span> <span class="xs muted">' + tgl(e.tg) + '</span></span>' + (e.d ? '<span class="d">' + esc(e.d) + '</span>' : '') + '<span class="chips">' + sizeChips(e.uk) + '</span></span>' + tail + '</div>';
   }).join('') : emptyBox('Belum ada catatan untuk PO ini.')) + '</div></div></div>';
 
