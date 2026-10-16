@@ -28,6 +28,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 
 - "Atur harga" pada catatan potong (dari Perlu tindakan > Harga kosong atau Catatan terbaru) gagal dengan "Formulir belum memiliki versi data": `findSlip` tidak mengenal `'potong'` dan mencari di daftar slip upah, sehingga versi catatannya kosong. Sekarang catatan potong ditemukan; formulir harga tidak dibuka bila catatannya belum termuat.
 
+### Rakitan 1543f - Hitung fisik ringkas untuk tukang QC (tampilan saja, server tidak berubah)
+
+- Formulir "Hitung & terima" hanya berisi barang, penjahit, isian jumlah bagus per ukuran, reject (dilipat) dan tanggal. Kotak angka "Laporan ini / Sudah dihitung / Belum dilaporkan" dan "Rincian progres jahit" hanya untuk owner/admin, di dalam satu lipatan. Daftar Hitung fisik: "Jahitan belum lengkap" hanya untuk owner/admin.
+
 ## Rilis 1.5.42 - rol per ukuran, hubungan SKU tersimpan di server
 
 - **Rol per ukuran.** Di "Siapkan bahan potong", tiap rol yang dicentang punya pilihan **Ukuran** (ukuran PO yang masih harus dipotong, atau "semua"). Ringkasannya menyebut jumlahnya ("6 rol · 142 kg · M 2 rol · L 1 rol · XL 3 rol"). Server menyimpannya pada `alokasiBahan` (`{stokId, qty, ukuran}`, `coreRollSelection`) dan mengirimnya di `rincianRol`. Di kartu dan formulir tukang potong kiloan rol dikelompokkan per ukuran ("Ukuran M · 2 rol"). Pembagian ini petunjuk untuk tukang: pemakaian stok tidak berubah, seluruh bahan persiapan tetap tercatat terpakai pada potongan pertama.
