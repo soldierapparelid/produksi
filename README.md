@@ -11,6 +11,10 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 
 - Riwayat di rincian PO: owner/admin melihat tombol koreksi di setiap baris, termasuk penugasan jahit dan setoran (sebelumnya hanya dari dalam Slip). Baris yang terkunci diberi tanda "Dibayar" atau "Dari persiapan". Konfirmasi hapus menyebut akibatnya. Beranda > Catatan terbaru: "Batalkan hitungan" pada setoran yang bisa dibatalkan. Aturan hapus tetap dijaga server.
 
+### Rakitan 1544c - pilih produk pembelian lewat gambar (tampilan saja, server tidak berubah)
+
+- "Order produk baru": setiap model menampilkan kartu foto produk milik supplier yang dipilih (nama, model, warna); ketuk kartu untuk memilih. Nilainya tetap disimpan di pilihan produk yang sama, jadi harga bawaan dan penyimpanan tidak berubah. Produk tanpa foto tampil dengan inisial.
+
 ## Rilis 1.5.43 - invoice nota penjualan, struk thermal, edit/arsip/hapus nota, Hapus PO pembelian
 
 - Nota penjualan: invoice A4 baru untuk pelanggan (logo, nomor, tanggal, pelanggan, tabel barang, subtotal/diskon/ongkir/total, sudah dibayar, sisa, riwayat pembayaran, tanda tangan). "Cetak invoice" memakai pratinjau cetak di perangkat; "Unduh PDF" dibuat server dari susunan yang sama (`coreNotaInvoiceHtml`), logo dikirim perangkat sebagai PNG kecil.
