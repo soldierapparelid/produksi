@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.43';
+var APP_VERSION = '1.5.44';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -2523,6 +2523,29 @@ function createCore(store, env) {
     return findRow('SlipSetor', rec.id);
   };
 
+  /* 1.5.44: owner/admin membatalkan hitung fisik yang salah. Laporan penjahit kembali menunggu di Hitung fisik
+     (status 'diajukan'); jumlah laporan, nomor slip dan harga tetap, tidak ada baris yang dihapus.
+     Hanya untuk laporan penjahit sendiri yang belum di-QC dan belum terikat pembayaran. */
+  actions.batalHitungSetor = function (p) {
+    var me = auth(p); mustAdmin(me);
+    if (store.fresh) ['SlipSetor', 'QC'].forEach(function (sheet) { store.fresh(sheet); });
+    var rec = findRow('SlipSetor', String(p.id || '')); if (!rec) fail('Slip setor tidak ditemukan.');
+    var proof = mutationProof('batalHitungSetor', p, { id: rec.id }, me);
+    if (checkRevision('SlipSetor', rec, p.expectedRevision, proof)) return findRow('SlipSetor', rec.id);
+    if (rec.status !== 'diterima') fail('Setoran ini belum dihitung, jadi tidak ada hitungan yang dibatalkan.');
+    if (rec.asal || Object.keys(coreMap(rec.imporSumber)).length) fail('Hitungan dari data lama tidak dapat dibatalkan.');
+    if (rec.dibuatOleh !== rec.maklonId) fail('Setoran ini dicatat langsung oleh QC/owner, bukan laporan penjahit. Hapus slipnya lalu catat ulang.');
+    if (rec.upahId || sourcePaid(rec.id) || sourceInLegacySettlement(rec.id)) fail('Hitungan ini sudah masuk pembayaran upah, tidak bisa dibatalkan.');
+    if (correctedSource('SlipSetor', rec.id)) fail('Hitungan ini punya riwayat koreksi fisik dan harus tetap utuh.');
+    if (store.read('QC').some(function (q) { return q.setorId === rec.id; })) fail('Hitungan ini sudah di-QC. Hapus catatan QC-nya dahulu.');
+    openPO(rec.poId);
+    var tanda = 'Hitungan ' + (rec.noSlip || '') + ' dibatalkan ' + (me.nama || 'owner') + ' ' + today();
+    var lama = String(rec.catatan || '');
+    var catatan = lama ? teks(lama, Math.max(0, 300 - tanda.length - 3)) + ' Â· ' + tanda : tanda;
+    store.update('SlipSetor', rec.id, Object.assign({ status: 'diajukan', diprosesOleh: '', diprosesPada: '', catatan: teks(catatan, 300) }, proof));
+    return findRow('SlipSetor', rec.id);
+  };
+
   /* harga per pcs hanya bisa diatur owner/admin, dan hanya selama belum dibayar */
   actions.ubahHarga = function (p) {
     var me = auth(p); mustAdmin(me);
@@ -3229,7 +3252,7 @@ function createCore(store, env) {
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveStokJualLink: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
-    tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1,
+    tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1, batalHitungSetor: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
