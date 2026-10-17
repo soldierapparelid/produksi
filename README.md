@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.49 - Pelunasan dan riwayat nota penjualan
+
+- Nota penjualan menyediakan **Lunasi sisa** dan tetap menerima DP bertahap. Formulir menampilkan jumlah yang dilunasi sebelum disimpan.
+- Tanda **LUNAS** tampil jelas pada rincian nota, invoice cetak/PDF, dan struk thermal. Status memakai jumlah pembayaran yang sah; data yang perlu diperiksa tidak ditandai lunas.
+- Nota lunas otomatis masuk **Riwayat nota**. Koreksi pembayaran atau perubahan total yang menyisakan tagihan membuat nota kembali aktif; seluruh catatan pembayaran tetap tersimpan.
+- Pasang **Core.gs** dan **Index.html** bersama. Pemasangan tidak menambahkan pembayaran pada nota usaha.
+
 ## Rilis 1.5.48 - Pelunasan dan riwayat invoice pembelian
 
 - Invoice menampilkan **LUNAS** dengan jelas dan menyediakan **Lunasi sisa** untuk mengisi jumlah pelunasan. Tambah DP tetap mencatat jumlah pembayaran yang diisi pengguna; pembayaran tidak tersimpan sebelum menekan Simpan.
