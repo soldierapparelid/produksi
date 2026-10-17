@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.46';
+var APP_VERSION = '1.5.47';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -41,7 +41,7 @@ var SCHEMA = {
   KoreksiRiwayat:['id','poId','sheet','rowId','sourceHash','sourceSnapshot','before','after','previousCorrectionId','reason','createdAt','createdBy'],
   Gambar:    ['id','data','diubah'],
   /* stok bahan: satu baris per pembelian (jenis 'beli') atau koreksi stok (jenis 'koreksi', qty boleh minus) */
-  StokBahan: ['id','jenis','tanggal','bahan','qty','satuan','rol','harga','total','supplier','invoice','sumber','alasan','catatan','dibuatOleh','dibuat','asal','invoiceId','stockMode','rollLabel','sourceStockId','saldoBefore','saldoAfter','previousCorrectionId','sourceRevision','requestHash','requestActor','mutationHash','mutationActor'],
+  StokBahan: ['id','jenis','tanggal','bahan','qty','satuan','rol','harga','total','supplier','invoice','sumber','alasan','catatan','dibuatOleh','dibuat','asal','invoiceId','stockMode','rollLabel','sourceStockId','saldoBefore','saldoAfter','previousCorrectionId','sourceRevision','requestHash','requestActor','mutationHash','mutationActor','priceScope'],
   /* karyawan harian (bukan akun login) dan catatan gaji per orang per hari */
   Karyawan:  ['id','nama','jabatan','gajiHarian','lembur','lemburSabtu','aktif','dibuat','asal'],
   GajiHarian:['id','periode','karyawanId','tanggal','status','gaji','lemburJam','lemburTarif','lemburTotal','sabtuJam','sabtuTarif','sabtuTotal','jumlah','lunas','dibuat','asal'],
@@ -227,6 +227,7 @@ function corePeriode(id) {
 /* ---------- stok bahan (dihitung, tidak disimpan) ----------
    saldo = semua pembelian - pemakaian potong (sejak tanggal mulai) + koreksi. Sama dengan aplikasi lama. */
 function coreNormBahan(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function coreStockPriceUnit(s) { return {kg:'kg',kilogram:'kg',yard:'yard',yards:'yard',yd:'yard',meter:'meter',metre:'meter',m:'meter'}[coreNormBahan(s)] || ''; }
 function coreBahanPotong(r) {
   var list = coreParseJSON(r.bahanList, null);
   if (list instanceof Array && list.length) return list.filter(function (b) { return b && (b.nama || coreNum(b.qty) > 0); }).map(function (b) { return { nama: String(b.nama || ''), qty: coreNum(b.qty) }; });
@@ -244,15 +245,21 @@ function coreStatusStok(saldo, st) {
    rewritten. A detailed old roll takes its share from the aggregate pool; it is
    never counted as another purchase. HPP can price exact allocations by id. */
 function coreStockPrices(stock) {
-  var byId = {}, materialMap = {}, groups = {}, history = {};
+  var byId = {}, materialMap = {}, groups = {}, history = {}, materialHistory = {};
   /* State rows carry the original opaque revision before request evidence is
      redacted. Reuse it so browser and server derive the same price proof. */
   function revision(row) { return row.revision || coreDomainRevision('StokBahan',row); }
   function number(value) { if (value === null || value === undefined || typeof value === 'boolean' || String(value).trim() === '') return null; var n=Number(value); return isFinite(n) && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null; }
   (stock || []).forEach(function (r) {
+    var materialKey=coreNormBahan(r.bahan), materialUnit=coreStockPriceUnit(r.satuan || 'kg'), materialGroup=JSON.stringify([materialKey,materialUnit]);
+    if (r.jenis === 'harga' && r.priceScope === 'bahan' && materialKey && materialUnit) {
+      (materialHistory[materialGroup] || (materialHistory[materialGroup]=[])).push(r);
+      if (!groups[materialGroup]) groups[materialGroup]={key:materialKey,satuan:materialUnit,rows:[]};
+      return;
+    }
     if (r.jenis === 'harga' && r.sourceStockId) (history[r.sourceStockId] || (history[r.sourceStockId] = [])).push(r);
     if (!(r.jenis === 'beli' || r.jenis === 'rinci' || r.jenis === 'koreksi' && !r.sourceStockId && coreNum(r.qty) > 0) || !(number(r.qty) > 0)) return;
-    var key = coreNormBahan(r.bahan), unit = String(r.satuan || 'kg'); if (!key || SATUAN_BAHAN.indexOf(unit) < 0) return;
+    var key = materialKey, unit = materialUnit; if (!key || !unit) return;
     var entry = { id:r.id,jenis:r.jenis,bahan:r.bahan,satuan:unit,qty:coreNum(r.qty),invoice:r.invoice || '',invoiceId:r.invoiceId || '',rollLabel:r.rollLabel || '',stockMode:r.stockMode || '',harga:0,total:0,priceSource:'belum',correctionId:'',history:[],source:r };
     byId[r.id] = entry;
     var groupKey = JSON.stringify([key,unit]);
@@ -290,7 +297,21 @@ function coreStockPrices(stock) {
       delete r.source;
     });
     var qty = poolQty+rollQty, total = Math.max(0,poolTotal+rollTotal), price = qty > 0 ? total/qty : 0;
-    var missing=poolMissing+rollMissing, unitResult = {hpp:price,harga:price,qty:qty,total:total,missingQty:missing < 0.000001 ? 0 : missing};
+    var missing=poolMissing+rollMissing, materialCorrections=(materialHistory[key] || []).slice(), materialLatest=materialCorrections.length ? materialCorrections[materialCorrections.length-1] : null;
+    var materialRevision=coreHash(coreDomainCanonical(['material-price',g.key,g.satuan,g.rows.map(function(r){return [r.id,r.priceRevision];}),materialCorrections.map(revision)]));
+    var complete=qty > 0 && missing < 0.000001 && price > 0;
+    var uniform=complete && g.rows.every(function(r){return r.priceComplete && Math.abs(r.harga-price)<0.000001;});
+    var unitResult = {hpp:price,harga:price,qty:qty,total:total,missingQty:missing < 0.000001 ? 0 : missing,priceComplete:complete,uniformPrice:uniform,commonPrice:uniform && g.rows.length ? g.rows[0].harga : null,priceRevision:materialRevision,history:materialCorrections,correctionId:materialLatest ? materialLatest.id : '',priceScope:materialLatest ? 'bahan' : '',materialOverride:!!materialLatest};
+    if (materialLatest) {
+      var fixed=number(materialLatest.harga), valid=fixed > 0 && fixed <= 1e12 && fixed===Math.round(fixed) && Number.isSafeInteger(Math.round(qty*fixed));
+      unitResult.harga=unitResult.hpp=valid ? fixed : 0; unitResult.total=valid ? qty*fixed : 0; unitResult.missingQty=valid ? 0 : qty;
+      unitResult.priceComplete=valid; unitResult.uniformPrice=valid; unitResult.commonPrice=valid ? fixed : null;
+      g.rows.forEach(function(r){
+        r.sourceCorrectionId=r.correctionId; r.correctionId=materialLatest.id; r.materialOverride=true; r.priceScope='bahan'; r.materialHistory=materialCorrections;
+        r.harga=valid ? fixed : 0; r.total=r.qty*r.harga; r.priceComplete=valid && Number.isSafeInteger(Math.round(r.total)); r.priceSource='harga-bahan';
+        r.priceRevision=coreHash(coreDomainCanonical(['stock-material-price',r.priceRevision,materialRevision]));
+      });
+    }
     if (!materialMap[g.key]) materialMap[g.key] = {units:{}};
     materialMap[g.key].units[g.satuan] = unitResult;
   });
@@ -330,10 +351,10 @@ function coreStok(potong, stok, st) {
   for (var key in map) {
     var m = map[key]; var bulat = function (n) { return Math.round(n * 1000) / 1000; };
     var saldo = bulat(m.beli - m.pakai + m.koreksi); var hpp = m.beli > 0 ? m.nilai / m.beli : 0;
-    var prices = priceMap.materialMap[m.kunci], unitPrices = prices && prices.units[m.satuan || 'kg'];
+    var prices = priceMap.materialMap[m.kunci], unitPrices = prices && prices.units[coreStockPriceUnit(m.satuan || 'kg')];
     if (corrected[m.kunci] && unitPrices) hpp = unitPrices.hpp;
     out.push({ kunci: m.kunci, nama: m.nama, satuan: SATUAN_BAHAN.indexOf(m.satuan) >= 0 ? m.satuan : 'kg', beli: bulat(m.beli), pakai: bulat(m.pakai), koreksi: bulat(m.koreksi),
-      saldo: saldo, rol: m.rol, nBeli: m.nBeli, hpp: Math.round(hpp), nilai: Math.round(saldo * hpp), status: coreStatusStok(saldo, st), sembunyi: !!sembunyi[m.kunci] });
+      saldo: saldo, rol: m.rol, nBeli: m.nBeli, hpp: Math.round(hpp), nilai: Math.round(saldo * hpp), priceScope:unitPrices && unitPrices.priceScope || '', status: coreStatusStok(saldo, st), sembunyi: !!sembunyi[m.kunci] });
   }
   out.sort(function (a, b) { return a.nama.toLowerCase() < b.nama.toLowerCase() ? -1 : 1; });
   return out;
@@ -2009,9 +2030,10 @@ function createCore(store, env) {
     var me = auth(p); mustAdmin(me);
     ['StokBahan','RencanaPotong','Potong'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
     var r = p.stok || {};
-    if (r.sourceStockId) fail('Koreksi rol harus melalui hitung fisik rol, bukan edit catatan stok.');
+    if (r.jenis === 'harga' || r.priceScope || r.sourceStockId) fail('Koreksi harga atau rol harus melalui formulir koreksi, bukan edit catatan stok.');
     if (r.id && findRow('StokBahan', String(r.id)) && !r.baru) {
       var lama = findRow('StokBahan', String(r.id));
+      if (lama.jenis === 'harga') fail('Riwayat koreksi harga tidak dapat diubah. Catat koreksi harga baru.');
       var proof = mutationProof('saveStok',p,r,me), replay = checkRevision('StokBahan',lama,p.expectedRevision,proof);
       if (lama.jenis === 'rinci') fail('Rincian rol tidak dapat diubah. Hapus rincian yang belum dipakai, lalu rinci ulang.');
       if (lama.sourceStockId) fail('Bukti koreksi rol tidak dapat diubah. Catat hitung fisik baru untuk rol tersebut.');
@@ -2205,12 +2227,36 @@ function createCore(store, env) {
     }
     var rows=store.read('StokBahan'), prices=coreStockPrices(rows), source=prices.byId[stokId];
     if (!source) fail('Sumber bahan tidak ditemukan. Muat data terbaru.');
+    if (source.materialOverride) fail('Bahan ini sudah memakai satu harga untuk semua rol. Muat ulang aplikasi lalu gunakan Harga bahan.');
     if (source.priceRevision !== revision) fail('Harga atau sumber bahan sudah berubah sejak formulir dibuka. Muat ulang dan periksa harga terbaru.');
     if (!Number.isSafeInteger(Math.round(source.qty*price))) fail('Nilai bahan terlalu besar. Periksa harga yang dimasukkan.');
     var rec={id:id,jenis:'harga',tanggal:today(),bahan:source.bahan,qty:0,satuan:source.satuan,rol:0,harga:price,total:0,supplier:'',invoice:source.invoice,sumber:'',alasan:'koreksi_harga',catatan:note,dibuatOleh:me.id,dibuat:nowIso(),asal:'',sourceStockId:stokId,previousCorrectionId:source.correctionId,sourceRevision:revision,requestHash:requestHash,requestActor:me.id};
     if (store.validateRows) store.validateRows('StokBahan',[rec]);
     store.append('StokBahan',rec);
     return rec;
+  };
+  /* A material-wide price is a durable owner policy, separate from every receipt.
+     New receipts inherit it in valuation; their original invoice stays intact. */
+  actions.koreksiHargaJenisBahan = function (p) {
+    ['Pegawai','StokBahan'].forEach(function(name){if(store.fresh)store.fresh(name);});
+    var me=auth(p); if(me.divisi !== 'owner')fail('Hanya owner yang boleh mengoreksi harga bahan.');
+    var id=idOk(p.id), name=String(p.bahan || '').trim().replace(/\s+/g,' '), key=coreNormBahan(name), unit=coreStockPriceUnit(p.satuan), price=coreBahanInvoiceNumber(p.harga), proof=String(p.expectedPriceRevision || ''), note=String(p.catatan || '').trim() || 'Harga bahan disamakan';
+    if(!id || !key || name.length>80 || !unit)fail('Identitas jenis bahan atau satuan tidak sah. Buka kembali formulir.');
+    if(p.harga === '' || p.harga === undefined || p.harga === null || typeof p.harga === 'boolean' || !isFinite(price) || price<=0 || price>1e12 || price!==Math.round(price))fail('Isi harga per satuan dalam rupiah, bilangan bulat lebih dari nol.');
+    if(!proof)fail('Versi harga tidak tersedia. Muat ulang lalu buka kembali formulir.');
+    if(note.length>300)fail('Alasan koreksi harga maksimal 300 karakter.');
+    var hash=coreHash(coreDomainCanonical(['koreksiHargaJenisBahan',key,unit,price,proof,note])), old=findRow('StokBahan',id);
+    if(old){
+      if(old.jenis !== 'harga' || old.priceScope !== 'bahan' || coreNormBahan(old.bahan)!==key || coreStockPriceUnit(old.satuan)!==unit || old.dibuatOleh!==me.id || old.requestActor!==me.id || old.requestHash!==hash)fail('Identitas koreksi ini sudah dipakai dengan data berbeda.');
+      return old;
+    }
+    var rows=store.read('StokBahan'), prices=coreStockPrices(rows), material=prices.materialMap[key], source=material && material.units[unit];
+    if(!source)fail('Jenis bahan dan satuan tidak ditemukan. Muat data terbaru.');
+    if(source.priceRevision!==proof)fail('Harga atau sumber bahan sudah berubah sejak formulir dibuka. Muat ulang dan periksa harga terbaru.');
+    if(!Number.isSafeInteger(Math.round(source.qty*price)))fail('Nilai bahan terlalu besar. Periksa harga yang dimasukkan.');
+    var rec={id:id,jenis:'harga',priceScope:'bahan',tanggal:today(),bahan:name,qty:0,satuan:unit,rol:0,harga:price,total:0,supplier:'',invoice:'',sumber:'',alasan:'harga_jenis_bahan',catatan:note,dibuatOleh:me.id,dibuat:nowIso(),asal:'',sourceStockId:'',previousCorrectionId:source.correctionId,sourceRevision:proof,requestHash:hash,requestActor:me.id};
+    if(store.validateRows)store.validateRows('StokBahan',[rec]);
+    store.append('StokBahan',rec);return rec;
   };
   /* "Cocokkan fisik": owner mengisi jumlah hasil hitung gudang, selisihnya dicatat sebagai koreksi */
   actions.cocokkanStok = function (p) {
@@ -3005,6 +3051,7 @@ function createCore(store, env) {
       if (!admin) fail('Hanya admin.');
       ['StokBahan','RencanaPotong','Potong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
       rec = findRow('StokBahan',id); if (!rec) return {ok:true,sudah:true};
+      if (rec.jenis === 'harga') fail('Riwayat koreksi harga tidak dapat dihapus. Catat koreksi harga baru.');
       ensureRollSourceUnused(id);
       if (rec.sourceStockId) fail('Bukti koreksi rol tidak dapat dihapus. Catat hitung fisik baru untuk rol tersebut.');
       if (rec.jenis === 'koreksi') ensureAggregateCorrection({bahan:rec.bahan,qty:-coreNum(rec.qty)},null);
@@ -3135,7 +3182,7 @@ function createCore(store, env) {
       var afterStock = {}; next.StokBahan.forEach(function (r) { afterStock[r.id] = r; });
       var pricedSources = {}; store.read('StokBahan').forEach(function (r) { if (r.jenis === 'harga') pricedSources[r.sourceStockId]=true; });
       store.read('StokBahan').forEach(function (r) {
-        if (r.stockMode !== 'roll' && !r.sourceStockId && !pricedSources[r.id]) return;
+        if (r.jenis !== 'harga' && r.stockMode !== 'roll' && !r.sourceStockId && !pricedSources[r.id]) return;
         var after = afterStock[r.id];
         if (!after || SCHEMA.StokBahan.some(function (key) { return String(r[key] == null ? '' : r[key]) !== String(after[key] == null ? '' : after[key]); })) fail('Tidak jadi dipindahkan: bukti sumber rol tercatat harus dipertahankan tanpa perubahan.');
       });
@@ -3350,7 +3397,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveStokJualLink: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1, batalHitungSetor: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
@@ -3361,7 +3408,7 @@ function createCore(store, env) {
     var fn = actions[action];
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
-    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
+    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
     if ((contractAction[action] || COMMERCE_WRITE[action]) && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {
@@ -5588,11 +5635,14 @@ function coreCommerceHpp(input) {
   }
   function summary(component){var out={};Object.keys(component || {}).forEach(function(k){if(k!=='includedEntries')out[k]=component[k];});return out;}
   var stockRows=rows(tables.StokBahan),effectivePrices=typeof coreStockPrices==='function'?coreStockPrices(stockRows):null;
-  /* Price corrections project into a copy of the original receipt only after
-     its stable ID, material and unit match. Immutable import proofs stay intact. */
+  /* A material-wide policy applies to every matching material/unit, including
+     receipts only present in the old snapshot. Per-roll corrections still need
+     their exact receipt ID. Both paths leave immutable import proofs intact. */
   var legacyStock=Object.assign({},legacy.stock || {});
   function legacyPurchaseUnit(p){var key=String(p.jenisBahan||'').trim().toLowerCase().replace(/[\/.#$\[\]]/g,'-'),info=legacyStock.rolInfo&&legacyStock.rolInfo[key];return p.unit?unit(p.unit):info&&info.unit?unit(info.unit):'kg';}
   legacyStock.pembelian=rows(legacyStock.pembelian).map(function(p){
+    var material=effectivePrices&&effectivePrices.materialMap[C.norm(p.jenisBahan)],fixed=material&&material.units[legacyPurchaseUnit(p)],q=n(p.kg);
+    if(fixed&&fixed.materialOverride&&fixed.priceComplete&&q!==null&&q>0)return Object.assign({},p,{hargaPerKg:fixed.harga,total:q*fixed.harga,priceCorrectionId:fixed.correctionId,priceScope:'bahan'});
     var same=stockRows.filter(function(s){return String(s.id)===String(p.id)&&s.jenis==='beli';}),s=same[0],price=effectivePrices&&effectivePrices.byId[p.id];
     if(same.length!==1||!price||!price.correctionId||!price.priceComplete||C.norm(s.bahan)!==C.norm(p.jenisBahan)||unit(s.satuan)!==legacyPurchaseUnit(p))return p;
     var q=n(p.kg);if(q===null||q<=0)return p;
@@ -5667,9 +5717,9 @@ function coreCommerceHpp(input) {
         var receipt=stockById[a.stokId],amount=n(a.qty),key=receipt&&C.norm(receipt.bahan),d=key&&declared[key];
         if(allocSeen[a.stokId]||!receipt||!d||amount===null||amount<=0||unit(receipt.satuan)!==d.unit){warn('Tautan rol '+String(a.stokId || '')+' belum dapat dicocokkan dengan pembelian.');return;}allocSeen[a.stokId]=true;allocated[key]=(allocated[key] || 0)+amount;
         var rate=price(receipt);if(rate===null)warn('Harga rol '+String(receipt.rollLabel || receipt.id)+' belum lengkap.');else fabricCost+=amount*rate;
-        var effective=effectivePrices&&effectivePrices.byId[receipt.id];details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:amount,avgHarga:rate,totalCost:rate===null?null:amount*rate,priceSource:effective&&effective.correctionId?'koreksi-harga-rol':'rol-pembelian',sourceId:receipt.id,priceCorrectionId:effective&&effective.correctionId || ''});
+        var effective=effectivePrices&&effectivePrices.byId[receipt.id];details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:amount,avgHarga:rate,totalCost:rate===null?null:amount*rate,priceSource:effective&&effective.materialOverride?'harga-jenis-bahan':effective&&effective.correctionId?'koreksi-harga-rol':'rol-pembelian',sourceId:receipt.id,priceCorrectionId:effective&&effective.correctionId || ''});
       });
-      Object.keys(declared).forEach(function(key){var d=declared[key],left=d.qty-(allocated[key] || 0);if(left< -0.000001){warn('Jumlah rol melebihi bahan pada hasil potong '+r.id+'.');return;}if(left<=0.000001)return;var rate=average(d.nama,d.unit);if(rate===null)warn('Harga rata-rata pembelian '+d.nama+' ('+d.unit+') belum lengkap.');else fabricCost+=left*rate;details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:left,avgHarga:rate,totalCost:rate===null?null:left*rate,priceSource:'rata-rata-pembelian'});});
+      Object.keys(declared).forEach(function(key){var d=declared[key],left=d.qty-(allocated[key] || 0);if(left< -0.000001){warn('Jumlah rol melebihi bahan pada hasil potong '+r.id+'.');return;}if(left<=0.000001)return;var rate=average(d.nama,d.unit),material=effectivePrices&&effectivePrices.materialMap[key],fixed=material&&material.units[d.unit];if(rate===null)warn('Harga pembelian '+d.nama+' ('+d.unit+') belum lengkap.');else fabricCost+=left*rate;details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:left,avgHarga:rate,totalCost:rate===null?null:left*rate,priceSource:fixed&&fixed.materialOverride?'harga-jenis-bahan':'rata-rata-pembelian',priceCorrectionId:fixed&&fixed.materialOverride?fixed.correctionId:''});});
     });
     return {xl:!!acuanXL.length,includedCuts:cuts,fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:acuanXL.length?'Catatan bahan Produksi, potongan ukuran XL':'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
   }
