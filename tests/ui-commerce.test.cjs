@@ -316,6 +316,7 @@ test('grouped purchase documents require unique orders with the same frozen supp
 
 test('group print and PDF preserve individual order models and the revisions selected for printing',async()=>{
   const h=harness();h.form({},'pembelian');h.run("currentForm._commerceGroupRows=[{id:'a',revision:'rev-a',invoiceId:'same',supplierSnapshot:{id:'s'},items:[{id:'a-M',jumlah:2}]},{id:'b',revision:'rev-b',invoiceId:'same',supplierSnapshot:{id:'s'},items:[{id:'b-L',jumlah:3}]}];currentForm._commerceGroupIds=['b','a'];");
+  h.seed('pembelian',{orders:h.json('currentForm._commerceGroupRows')});
   await h.run('A.commerceGroupPrint(null)');await h.run('A.commerceGroupPdf(null)');
   assert.deepEqual(h.json('prints[0].map(r=>({id:r.reference,items:r.rows}))'),[{id:'b',items:[{id:'b-L',jumlah:3}]},{id:'a',items:[{id:'a-M',jumlah:2}]}]);
   assert.deepEqual(h.json('pdfs[0]'),{action:'makeCommercePdf',payload:{module:'pembelian',ids:['b','a'],expectedRevisions:{b:'rev-b',a:'rev-a'}}});
@@ -325,6 +326,7 @@ test('group print and PDF preserve individual order models and the revisions sel
 test('the invoice picture includes settled members and opens only the chosen invoice models',()=>{
   const h=harness();h.form({},'pembelian');
   h.run("currentForm._commerceGroupRows=[{id:'a',revision:'ra',invoiceId:'one-invoice',status:'dp',balance:5,supplierSnapshot:{id:'s'}},{id:'b',revision:'rb',status:'selesai',balance:0,supplierSnapshot:{id:'s'}},{id:'c',revision:'rc',status:'batal',balance:9,supplierSnapshot:{id:'s'}},{id:'d',revision:'rd',status:'pending',balance:7,supplierSnapshot:{id:'s'}},{id:'e',revision:'re',status:'pending',balance:7,supplierSnapshot:{id:'lain'}},{id:'f',revision:'rf',status:'lunas',balance:0,supplierSnapshot:{id:'s'}},{id:'g',revision:'rg',status:'review',balance:4,needsReview:true,supplierSnapshot:{id:'s'}},{id:'h',revision:'rh',status:'dp',balance:4,paymentReview:true,supplierSnapshot:{id:'s'}}];currentForm._commerceGroupRows.forEach(function(r){r.invoiceId='same';});");
+  h.seed('pembelian',{orders:h.json('currentForm._commerceGroupRows')});
   assert.deepEqual(h.json("commerceGroupAwal(currentForm,commerceInvoiceKey(currentForm._commerceGroupRows[0]))"),['a','b','d','f','g','h'],'all non-cancelled invoice members can appear on the image, including settled and reviewed history');
   h.run("var shown=[];commerceShareShow=function(ids,fresh){shown.push([ids,fresh]);};currentForm._commerceGroupIds=['d','a'];A.commerceGroupShare(null);");
   assert.deepEqual(h.json('shown'),[[['d','a'],false]]);assert.equal(h.requests.length,0,'making the picture records nothing');
@@ -332,7 +334,7 @@ test('the invoice picture includes settled members and opens only the chosen inv
   h.seed('pembelian',{suppliers:[],products:[],orders:shopOrders()});h.run("commerceInvoiceShow(['o1','o2'])");
   assert.match(h.run('lastSheet'),/data-a="commerceShareOpen" data-ids="o1,o2">Gambar untuk supplier<\/button>/);
   h.run("A.commerceShareOpen({getAttribute:function(k){return k==='data-ids'?'o1,o2':null;}})");assert.deepEqual(h.json('shown').at(-1),[['o1','o2'],false]);assert.equal(h.requests.length,0,'the supplier footer opens the picture without a write');
-  assert.match(html,/var rows=\(commerceData\('pembelian'\)\.orders\|\|\[\]\)\.filter\(function\(r\)\{return !commerceBatal\(r\);\}\)\.sort\(/,'orders that were removed are not offered in the group picker');assert.match(html,/class="tools" style="align-items:flex-end">' \+ fSelect\('Status order'/);
+  assert.match(html,/var rows=\(commerceData\('pembelian'\)\.orders\|\|\[\]\)\.filter\(function\(r\)\{return !r\.historyHidden&&!commerceBatal\(r\);\}\)\.sort\(/,'cancelled and hidden-history orders are not offered in the group picker');assert.match(html,/class="tools" style="align-items:flex-end">' \+ fSelect\('Status order'/);
   assert.match(html,/\['Total pembayaran',\s*uang\(m\.dibayar\),\s*HIJAU\]/);assert.doesNotMatch(html,/Cetak gabungan/);
 });
 test('a combined down payment is recorded for the ticked orders and the supplier picture follows with the new figures',async()=>{
