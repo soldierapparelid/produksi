@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.47 - Satu harga untuk satu jenis bahan
+
+- **Koreksi harga** langsung membuka satu isian harga per jenis bahan dan satuan. Tidak perlu memilih atau mengedit rol satu per satu. Semua rol bahan yang sama, termasuk stok lama dan rol yang ditambahkan kemudian, mengikuti harga acuan ini untuk nilai stok dan HPP.
+- Harga invoice asli dan koreksi sebelumnya tetap tersimpan sebagai riwayat. Harga per kg, meter, dan yard tidak dicampur. Pembelian berikutnya memakai harga bahan sebagai isian awal yang dapat dicocokkan dengan bon.
+- Formulir memeriksa perubahan dari perangkat lain sebelum menyimpan. Pengiriman ulang isian yang sama tidak menggandakan koreksi, dan formulir rol dari versi lama tidak dapat menimpa harga jenis bahan.
+- Acuan HPP tetap rata-rata hasil XL dan berlaku untuk seluruh ukuran model. Pasang **Core.gs** dan **Index.html** bersama.
+
 ## Rilis 1.5.46 - Koreksi harga bahan dan acuan HPP ukuran XL
 
 - Owner dapat mengisi atau mengoreksi harga bahan dari kartu stok maupun **Cocokkan fisik → Koreksi harga**. Pilih pembelian atau rol, masukkan harga per kg/yard dan alasan. Harga sebelumnya tetap tercatat; jumlah stok, hasil potong, dan pembayaran tidak berubah.

@@ -363,11 +363,14 @@ function coreCommerceHpp(input) {
   }
   function summary(component){var out={};Object.keys(component || {}).forEach(function(k){if(k!=='includedEntries')out[k]=component[k];});return out;}
   var stockRows=rows(tables.StokBahan),effectivePrices=typeof coreStockPrices==='function'?coreStockPrices(stockRows):null;
-  /* Price corrections project into a copy of the original receipt only after
-     its stable ID, material and unit match. Immutable import proofs stay intact. */
+  /* A material-wide policy applies to every matching material/unit, including
+     receipts only present in the old snapshot. Per-roll corrections still need
+     their exact receipt ID. Both paths leave immutable import proofs intact. */
   var legacyStock=Object.assign({},legacy.stock || {});
   function legacyPurchaseUnit(p){var key=String(p.jenisBahan||'').trim().toLowerCase().replace(/[\/.#$\[\]]/g,'-'),info=legacyStock.rolInfo&&legacyStock.rolInfo[key];return p.unit?unit(p.unit):info&&info.unit?unit(info.unit):'kg';}
   legacyStock.pembelian=rows(legacyStock.pembelian).map(function(p){
+    var material=effectivePrices&&effectivePrices.materialMap[C.norm(p.jenisBahan)],fixed=material&&material.units[legacyPurchaseUnit(p)],q=n(p.kg);
+    if(fixed&&fixed.materialOverride&&fixed.priceComplete&&q!==null&&q>0)return Object.assign({},p,{hargaPerKg:fixed.harga,total:q*fixed.harga,priceCorrectionId:fixed.correctionId,priceScope:'bahan'});
     var same=stockRows.filter(function(s){return String(s.id)===String(p.id)&&s.jenis==='beli';}),s=same[0],price=effectivePrices&&effectivePrices.byId[p.id];
     if(same.length!==1||!price||!price.correctionId||!price.priceComplete||C.norm(s.bahan)!==C.norm(p.jenisBahan)||unit(s.satuan)!==legacyPurchaseUnit(p))return p;
     var q=n(p.kg);if(q===null||q<=0)return p;
@@ -442,9 +445,9 @@ function coreCommerceHpp(input) {
         var receipt=stockById[a.stokId],amount=n(a.qty),key=receipt&&C.norm(receipt.bahan),d=key&&declared[key];
         if(allocSeen[a.stokId]||!receipt||!d||amount===null||amount<=0||unit(receipt.satuan)!==d.unit){warn('Tautan rol '+String(a.stokId || '')+' belum dapat dicocokkan dengan pembelian.');return;}allocSeen[a.stokId]=true;allocated[key]=(allocated[key] || 0)+amount;
         var rate=price(receipt);if(rate===null)warn('Harga rol '+String(receipt.rollLabel || receipt.id)+' belum lengkap.');else fabricCost+=amount*rate;
-        var effective=effectivePrices&&effectivePrices.byId[receipt.id];details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:amount,avgHarga:rate,totalCost:rate===null?null:amount*rate,priceSource:effective&&effective.correctionId?'koreksi-harga-rol':'rol-pembelian',sourceId:receipt.id,priceCorrectionId:effective&&effective.correctionId || ''});
+        var effective=effectivePrices&&effectivePrices.byId[receipt.id];details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:amount,avgHarga:rate,totalCost:rate===null?null:amount*rate,priceSource:effective&&effective.materialOverride?'harga-jenis-bahan':effective&&effective.correctionId?'koreksi-harga-rol':'rol-pembelian',sourceId:receipt.id,priceCorrectionId:effective&&effective.correctionId || ''});
       });
-      Object.keys(declared).forEach(function(key){var d=declared[key],left=d.qty-(allocated[key] || 0);if(left< -0.000001){warn('Jumlah rol melebihi bahan pada hasil potong '+r.id+'.');return;}if(left<=0.000001)return;var rate=average(d.nama,d.unit);if(rate===null)warn('Harga rata-rata pembelian '+d.nama+' ('+d.unit+') belum lengkap.');else fabricCost+=left*rate;details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:left,avgHarga:rate,totalCost:rate===null?null:left*rate,priceSource:'rata-rata-pembelian'});});
+      Object.keys(declared).forEach(function(key){var d=declared[key],left=d.qty-(allocated[key] || 0);if(left< -0.000001){warn('Jumlah rol melebihi bahan pada hasil potong '+r.id+'.');return;}if(left<=0.000001)return;var rate=average(d.nama,d.unit),material=effectivePrices&&effectivePrices.materialMap[key],fixed=material&&material.units[d.unit];if(rate===null)warn('Harga pembelian '+d.nama+' ('+d.unit+') belum lengkap.');else fabricCost+=left*rate;details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:left,avgHarga:rate,totalCost:rate===null?null:left*rate,priceSource:fixed&&fixed.materialOverride?'harga-jenis-bahan':'rata-rata-pembelian',priceCorrectionId:fixed&&fixed.materialOverride?fixed.correctionId:''});});
     });
     return {xl:!!acuanXL.length,includedCuts:cuts,fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:acuanXL.length?'Catatan bahan Produksi, potongan ukuran XL':'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
   }
