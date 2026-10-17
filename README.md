@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.48 - Pelunasan dan riwayat invoice pembelian
+
+- Invoice menampilkan **LUNAS** dengan jelas dan menyediakan **Lunasi sisa** untuk mengisi jumlah pelunasan. Tambah DP tetap mencatat jumlah pembayaran yang diisi pengguna; pembayaran tidak tersimpan sebelum menekan Simpan.
+- Gambar supplier memuat status pembayaran dan riwayat tanggal, varian, serta jumlah barang yang diterima. Penerimaan yang dikoreksi tidak dihitung ulang; tanggal lama yang tidak tercatat tidak ditebak.
+- Invoice yang lunas dan semua barangnya diterima lengkap otomatis tampil di **Riwayat PO**. Seluruh model tetap satu invoice. Koreksi pembayaran/penerimaan atau penambahan model membuat invoice kembali aktif bila masih ada kekurangan, tanpa menghapus riwayat atau menandainya batal.
+- Pasang **Core.gs** dan **Index.html** bersama. Pemasangan tidak mencatat pembayaran atau penerimaan baru.
+
 ## Rilis 1.5.47 - Satu harga untuk satu jenis bahan
 
 - **Koreksi harga** langsung membuka satu isian harga per jenis bahan dan satuan. Tidak perlu memilih atau mengedit rol satu per satu. Semua rol bahan yang sama, termasuk stok lama dan rol yang ditambahkan kemudian, mengikuti harga acuan ini untuk nilai stok dan HPP.
