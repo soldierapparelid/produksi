@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261017-pelunasan-riwayat-invoice-1548';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261017-nota-lunas-riwayat-1549';</script>
 <script>
 (function () {
 'use strict';
@@ -501,7 +501,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.48';
+var APP_VERSION = '1.5.49';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6413,38 +6413,52 @@ function coreNotaEsc(v) { return String(v === undefined || v === null ? '' : v).
 function coreNotaTgl(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(m[3]) + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][Number(m[2]) - 1] + ' ' + m[1] : String(s || '-'); }
 function coreNotaLogo(v) { return typeof v === 'string' && v.length <= 60000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+\/=]+$/.test(v) ? v : ''; }
 function coreNotaMetode(m) { return { cash: 'Tunai', transfer: 'Transfer', qris: 'QRIS', lainnya: 'Lainnya' }[m] || String(m || ''); }
+function coreNotaTanggalSah(value) {
+  var s = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  var d = new Date(s + 'T00:00:00Z');
+  return isFinite(d.getTime()) && d.toISOString().slice(0,10) === s ? s : '';
+}
 function coreNotaRingkas(record, settings) {
-  settings = settings || {};
-  var batal = !!record.cancelled || /^(batal|cancelled)$/.test(String(record.status || '')), periksa = !!record.paymentReview, sisa = coreNum(record.balance), bayar = coreNum(record.totalPaid);
+  record = record || {}; settings = settings || {};
+  var batal = !!record.cancelled || /^(batal|cancelled)$/.test(String(record.status || ''));
+  var nilaiSah = [record.total,record.totalPaid,record.balance].every(function(n){return Number.isSafeInteger(n) && n >= 0;});
+  var bayaran = (record.payments || []).filter(function(p){return !p.voided;});
+  var periksa = !!record.paymentReview || !!record.needsReview || record.status === 'review' || !nilaiSah || record.balance !== record.total-record.totalPaid || bayaran.some(function(p){return !!p.sourceReview || !Number.isSafeInteger(p.jumlah) || p.jumlah < 0;});
+  var sisa = coreNum(record.balance), bayar = coreNum(record.totalPaid), lunas = !batal && !periksa && record.balance === 0 && record.totalPaid === record.total, tanggalLunas = '';
+  if (lunas && bayar > 0 && bayaran.length && bayaran.reduce(function(n,p){return n+p.jumlah;},0) === bayar) {
+    var dated = bayaran.filter(function(p){return p.jumlah > 0;});
+    if (dated.length && dated.every(function(p){return !!coreNotaTanggalSah(p.tanggal);})) tanggalLunas = dated.map(function(p){return p.tanggal;}).sort().pop();
+  }
   var items = (record.items || []).map(function (i) {
     var qty = coreNum(i.qty), price = coreNum(i.price), disc = coreNum(i.discPercent);
     return { name: i.name || '', color: i.color || '', size: i.size || '', qty: qty, price: price, disc: disc, subtotal: i.subtotal === undefined || i.subtotal === null ? Math.round(qty * price * (100 - disc) / 100) : coreNum(i.subtotal) };
   });
-  return { batal: batal, periksa: periksa, total: coreNum(record.total), bayar: bayar, sisa: sisa, items: items, adaDiskon: items.some(function (i) { return i.disc > 0; }),
-    status: batal ? 'DIBATALKAN' : periksa ? 'PERLU DIPERIKSA' : sisa <= 0 ? 'LUNAS' : bayar > 0 ? 'DP / BELUM LUNAS' : 'BELUM DIBAYAR', warna: batal || periksa ? '#8a8f98' : sisa <= 0 ? '#2e7d32' : '#b26a00',
-    bayaran: (record.payments || []).filter(function (p) { return !p.voided; }), nomor: String(record.noNota || record.number || record.id || ''), pelanggan: record.customer || {},
+  return { batal: batal, periksa: periksa, lunas: lunas, tanggalLunas: tanggalLunas, total: coreNum(record.total), bayar: bayar, sisa: sisa, items: items, adaDiskon: items.some(function (i) { return i.disc > 0; }),
+    status: batal ? 'DIBATALKAN' : periksa ? 'PERLU DIPERIKSA' : lunas ? 'LUNAS' : bayar > 0 ? 'DP / BELUM LUNAS' : 'BELUM DIBAYAR', warna: batal || periksa ? '#8a8f98' : lunas ? '#2e7d32' : '#b26a00',
+    bayaran: bayaran, nomor: String(record.noNota || record.number || record.id || ''), pelanggan: record.customer || {},
     subtotal: record.subtotal === undefined || record.subtotal === null ? items.reduce(function (n, i) { return n + i.subtotal; }, 0) : coreNum(record.subtotal),
     usaha: String(settings.kopSlip || settings.namaUsaha || '').trim(), sub: [settings.kopSub, settings.alamat].map(function (x) { return String(x || '').trim(); }).filter(Boolean) };
 }
 function coreNotaInvoiceHtml(record, settings, opt) {
   opt = opt || {}; var e = coreNotaEsc, rp = coreRupiah, r = coreNotaRingkas(record, settings), logo = coreNotaLogo(opt.logo), c = r.pelanggan;
   var css = '@page{size:A4 portrait;margin:14mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#1b1f24}' +
-    'table{border-collapse:collapse;width:100%}td,th{vertical-align:top;padding:0}' +
+    'table{border-collapse:collapse;width:100%}td,th{vertical-align:top;padding:0}td,th,div{overflow-wrap:anywhere;word-wrap:break-word}thead{display:table-header-group}' +
     '.kop td{padding-bottom:10px;border-bottom:3px solid #1b1f24}.kop .logo{width:64px}.kop .logo img{width:54px;height:54px;display:block}' +
     '.usaha{font-size:17pt;font-weight:bold;letter-spacing:1px}.kecil{font-size:8.5pt;color:#5b6470}.judul{font-size:22pt;font-weight:bold;letter-spacing:3px}' +
     '.kanan{text-align:right}.tengah{text-align:center}.info td{padding-top:14px}.label{font-size:8pt;letter-spacing:1.5px;text-transform:uppercase;color:#5b6470}' +
-    '.nama{font-size:13pt;font-weight:bold}.cap{display:inline-block;padding:4px 12px;border:2px solid #1b1f24;font-size:10pt;font-weight:bold;letter-spacing:1.5px}' +
-    '.barang{margin-top:16px}.barang th{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
+    '.nama{font-size:13pt;font-weight:bold}.cap{display:inline-block;padding:7px 14px;border:3px solid #1b1f24;font-size:16pt;font-weight:bold;letter-spacing:1.5px}.pelunasan{margin-top:5px;font-size:9pt}.info td{width:50%}' +
+    '.barang{margin-top:16px;table-layout:fixed}.barang th{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
     '.barang td{padding:7px 8px;border-bottom:1px solid #d9dee4}.barang th.kanan,.barang td.kanan{text-align:right}.barang th.tengah,.barang td.tengah{text-align:center}.barang tr{page-break-inside:avoid}' +
-    '.bawah{margin-top:12px;page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold;font-size:12.5pt;padding:8px}' +
+    '.bawah{margin-top:12px;table-layout:fixed}.jumlah{page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold;font-size:12.5pt;padding:8px}' +
     '.jumlah .sisa td{font-weight:bold;font-size:12pt;border-top:1px solid #d9dee4}.kotak{border:1px solid #d9dee4;padding:8px 10px;font-size:9.5pt;margin-bottom:10px}' +
-    '.bayar td{padding:3px 8px 3px 0;font-size:9.5pt}.ttd{margin-top:34px;page-break-inside:avoid}.ttd td{width:50%;text-align:center;font-size:9.5pt}.ttd .ruang{height:58px}' +
+    '.riwayat{margin-top:18px}.bayar{table-layout:fixed}.bayar td,.bayar th{padding:5px 8px 5px 0;font-size:9.5pt;border-bottom:1px solid #d9dee4}.bayar th{text-align:left}.bayar th.kanan{text-align:right}.bayar tr{page-break-inside:avoid}.ttd{margin-top:34px;page-break-inside:avoid}.ttd td{width:50%;text-align:center;font-size:9.5pt}.ttd .ruang{height:58px}' +
     '.kaki{margin-top:22px;padding-top:8px;border-top:1px solid #d9dee4;font-size:8.5pt;color:#5b6470;text-align:center}' +
     '@media screen{body{background:#e6eaef;padding:12px}.invoice{background:#fff;max-width:210mm;margin:0 auto;padding:14mm;box-shadow:0 2px 14px rgba(0,0,0,.18)}}';
   var kop = '<table class="kop"><tr>' + (logo ? '<td class="logo"><img src="' + logo + '" alt=""></td>' : '') + '<td><div class="usaha">' + e(r.usaha) + '</div>' + r.sub.map(function (x) { return '<div class="kecil">' + e(x) + '</div>'; }).join('') +
     '</td><td class="kanan"><div class="judul">INVOICE</div><div class="kecil">No. <b>' + e(r.nomor) + '</b></div><div class="kecil">Tanggal ' + e(coreNotaTgl(record.date)) + '</div></td></tr></table>';
   var info = '<table class="info"><tr><td><div class="label">Kepada</div><div class="nama">' + e(c.name || '-') + '</div>' + [c.phone, c.address].filter(Boolean).map(function (x) { return '<div class="kecil">' + e(x) + '</div>'; }).join('') +
-    '</td><td class="kanan"><div class="label">Status</div><span class="cap" style="color:' + r.warna + ';border-color:' + r.warna + '">' + r.status + '</span></td></tr></table>';
+    '</td><td class="kanan"><div class="label">Status pembayaran</div><span class="cap" style="color:' + r.warna + ';border-color:' + r.warna + '">' + r.status + '</span>' + (r.lunas ? '<div class="pelunasan">' + (r.tanggalLunas ? 'Pelunasan ' + e(coreNotaTgl(r.tanggalLunas)) : r.total === 0 ? 'Total tagihan Rp 0' : 'Tanggal pelunasan belum tercatat') + '</div>' : '') + '</td></tr></table>';
   var barang = '<table class="barang"><thead><tr><th class="tengah" style="width:7%">No</th><th>Barang</th><th class="tengah" style="width:12%">Ukuran</th><th class="tengah" style="width:9%">Qty</th><th class="kanan" style="width:17%">Harga</th>' +
     (r.adaDiskon ? '<th class="tengah" style="width:9%">Disk.</th>' : '') + '<th class="kanan" style="width:19%">Jumlah</th></tr></thead><tbody>' +
     r.items.map(function (i, n) {
@@ -6457,10 +6471,12 @@ function coreNotaInvoiceHtml(record, settings, opt) {
     '<tr class="total"><td>TOTAL</td><td class="kanan">' + rp(r.total) + '</td></tr>' +
     '<tr><td>Sudah dibayar</td><td class="kanan">' + (r.periksa ? 'Perlu diperiksa' : rp(r.bayar)) + '</td></tr>' +
     '<tr class="sisa"><td>SISA TAGIHAN</td><td class="kanan">' + (r.periksa ? 'Perlu diperiksa' : rp(r.sisa)) + '</td></tr></table>';
-  var kiri = (record.notes ? '<div class="label">Catatan</div><div class="kotak">' + e(record.notes).replace(/\n/g, '<br>') + '</div>' : '') +
-    (r.bayaran.length ? '<div class="label">Pembayaran</div><table class="bayar">' + r.bayaran.map(function (p) { return '<tr><td>' + e(coreNotaTgl(p.tanggal)) + '</td><td>' + e(coreNotaMetode(p.metode)) + '</td><td class="kanan">' + rp(p.jumlah) + '</td></tr>'; }).join('') + '</table>' : '');
+  var kiri = record.notes ? '<div class="label">Catatan</div><div class="kotak">' + e(record.notes).replace(/\n/g, '<br>') + '</div>' : '';
+  var riwayat = r.bayaran.length ? '<div class="riwayat"><div class="label">Riwayat pembayaran</div><table class="bayar"><thead><tr><th style="width:25%">Tanggal</th><th style="width:47%">Metode / catatan</th><th class="kanan" style="width:28%">Pembayaran</th></tr></thead><tbody>' + r.bayaran.map(function(p) {
+    return '<tr><td>' + e(coreNotaTanggalSah(p.tanggal) ? coreNotaTgl(p.tanggal) : 'Tanggal belum tercatat') + '</td><td>' + e(coreNotaMetode(p.metode)) + (p.catatan ? '<div class="kecil">' + e(p.catatan).replace(/\n/g,'<br>') + '</div>' : '') + '</td><td class="kanan">' + rp(p.jumlah) + '</td></tr>';
+  }).join('') + '</tbody></table></div>' : '';
   return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ' + e(r.nomor) + '</title><style>' + css + '</style></head><body><div class="invoice">' + kop + info + barang +
-    '<table class="bawah"><tr><td style="width:52%;padding-right:18px">' + kiri + '</td><td style="width:48%">' + jumlah + '</td></tr></table>' +
+    '<table class="bawah"><tr><td style="width:52%;padding-right:18px">' + kiri + '</td><td style="width:48%">' + jumlah + '</td></tr></table>' + riwayat +
     '<table class="ttd"><tr><td>Hormat kami,<div class="ruang"></div><b>' + e(r.usaha) + '</b></td><td>Penerima,<div class="ruang"></div><b>' + e(c.name || '') + '</b></td></tr></table>' +
     '<div class="kaki">' + (r.batal ? 'Nota ini sudah dibatalkan dan tidak berlaku sebagai tagihan.' : 'Terima kasih atas kepercayaan Anda.') + '</div></div></body></html>';
 }
@@ -6468,8 +6484,8 @@ function coreNotaInvoiceHtml(record, settings, opt) {
 function coreNotaStrukHtml(record, settings, opt) {
   opt = opt || {}; var e = coreNotaEsc, uang = coreRibuan, r = coreNotaRingkas(record, settings), lebar = Number(opt.lebar) === 80 ? 80 : 58, isi = lebar === 80 ? 72 : 48, logo = coreNotaLogo(opt.logo), c = r.pelanggan;
   var css = '@page{margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:"Courier New",Consolas,monospace;font-size:' + (lebar === 80 ? '10.5pt' : '9pt') + ';line-height:1.25;color:#000}' +
-    '.struk{width:' + isi + 'mm;margin:0 auto;padding:2mm 0 4mm}table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:0}.k{text-align:right;white-space:nowrap;padding-left:2mm}.kw{text-align:right;padding-left:2mm;word-break:break-word}' +
-    '.t{text-align:center}.b{font-weight:bold}.usaha{font-weight:bold;font-size:1.25em}.besar td{font-weight:bold;font-size:1.15em}.garis{border-top:1px dashed #000;height:0;margin:1.2mm 0}.logo{display:block;width:14mm;height:14mm;margin:0 auto 1mm}' +
+    '.struk{width:' + isi + 'mm;margin:0 auto;padding:2mm 0 4mm;overflow-wrap:anywhere;word-wrap:break-word}table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:0}.k{text-align:right;white-space:nowrap;padding-left:2mm}.kw{text-align:right;padding-left:2mm;word-break:break-word}' +
+    '.t{text-align:center}.b{font-weight:bold}.usaha{font-weight:bold;font-size:1.25em}.besar td{font-weight:bold;font-size:1.15em}.status{border:2px solid #000;padding:2mm 1mm;font-size:1.3em;margin:2mm 0;page-break-inside:avoid}.bayaran{margin-top:2mm}.garis{border-top:1px dashed #000;height:0;margin:1.2mm 0}.logo{display:block;width:14mm;height:14mm;margin:0 auto 1mm}' +
     '@media screen{body{background:#e6eaef;padding:12px 0}.struk{background:#fff;width:' + (isi + 8) + 'mm;padding:4mm;box-shadow:0 2px 14px rgba(0,0,0,.18)}}';
   function baris(kiri, kanan, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + kiri + '</td><td class="k">' + kanan + '</td></tr>'; }
   var tunai = r.bayaran.filter(function (p) { return p.tenderedAmount !== undefined && p.tenderedAmount !== null; }).slice(-1)[0];
@@ -6482,7 +6498,9 @@ function coreNotaStrukHtml(record, settings, opt) {
     (coreNum(record.discountAmount) ? baris('Diskon' + (coreNum(record.discountPercent) ? ' ' + coreNum(record.discountPercent) + '%' : ''), '-' + uang(record.discountAmount)) : '') +
     (coreNum(record.shipping) ? baris('Ongkir', uang(record.shipping)) : '') + baris('TOTAL', uang(r.total), 'besar') +
     (r.periksa ? '' : (tunai ? baris('Tunai', uang(tunai.tenderedAmount)) + baris('Kembali', uang(tunai.change)) : '') + baris('Dibayar', uang(r.bayar)) + (r.sisa > 0 ? baris('SISA', uang(r.sisa), 'besar') : '')) + '</table>' + garis +
-    '<div class="t b">** ' + r.status + ' **</div><div class="t">' + (r.batal ? 'Nota ini tidak berlaku' : 'Terima kasih') + '</div></div></body></html>';
+    (r.bayaran.length ? '<div class="b">RIWAYAT PEMBAYARAN</div>' + r.bayaran.map(function(p) { return '<div class="bayaran">' + e(coreNotaTanggalSah(p.tanggal) ? coreNotaTgl(p.tanggal) : 'Tanggal belum tercatat') + '<table>' + baris(e(coreNotaMetode(p.metode)),uang(p.jumlah)) + '</table>' + (p.catatan ? '<div>' + e(p.catatan).replace(/\n/g,'<br>') + '</div>' : '') + '</div>'; }).join('') + garis : '') +
+    (record.notes ? '<div>Catatan: ' + e(record.notes).replace(/\n/g,'<br>') + '</div>' + garis : '') +
+    '<div class="t b status">** ' + r.status + ' **</div>' + (r.lunas ? '<div class="t">' + (r.tanggalLunas ? 'Pelunasan ' + e(coreNotaTgl(r.tanggalLunas)) : r.total === 0 ? 'Total tagihan 0' : 'Tanggal pelunasan belum tercatat') + '</div>' : '') + '<div class="t">' + (r.batal ? 'Nota ini tidak berlaku' : 'Terima kasih') + '</div></div></body></html>';
 }
 /* One amount paid to a supplier for several orders, as the earlier application
    did it: divided by each order's remaining balance. Whole rupiah only, the
@@ -7028,7 +7046,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.48';
+var UI_VERSION = '1.5.49';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -10490,7 +10508,7 @@ function commerceGroupAmountPaint(f) {
   var target=$('[data-commerce-group-payment-preview]',f);if(!target)return;
   var v=formVals(f),sisa=(f._commerceGroupOrders||[]).reduce(function(n,o){return n+o.balance;},0),raw=v.jumlah;
   if(raw===undefined||raw===null||String(raw).trim()===''){target.textContent='Isi DP atau cicilan, atau '+rp(sisa)+' untuk melunasi order pilihan.';return;}
-  var n=Number(raw);if(!Number.isSafeInteger(n)||n<=0){target.textContent='Isi jumlah bayar rupiah bulat lebih dari nol.';return;}if(n>sisa){target.textContent='Pembayaran melebihi sisa tagihan '+rp(sisa)+'.';return;}
+  var n=Number(raw);if(!Number.isSafeInteger(n)||n<=0){target.textContent='Isi jumlah bayar rupiah bulat lebih dari nol.';return;}if(n>sisa){target.textContent=f.getAttribute('data-module')==='nota'&&v.metode==='cash'?'Pelunasan '+rp(sisa)+' · Uang diterima '+rp(n)+' · Kembalian '+rp(n-sisa)+'. Belum disimpan.':'Pembayaran melebihi sisa tagihan '+rp(sisa)+'.';return;}
   target.textContent=(n===sisa?'Pelunasan':'Pembayaran sebagian')+' '+rp(n)+' · Sisa setelah pembayaran '+rp(sisa-n)+'. Belum disimpan.';
 }
 
@@ -11295,14 +11313,14 @@ A.commerceOrderDetail=function(el){var id=el.getAttribute('data-id');openSheet(f
 /* A.commerceNotaDetail (rincian nota) ada di bagian "nota penjualan: rincian, cetak, arsip" */
 A.commercePaymentOpen=function(el){
   var module=el.getAttribute('data-m'),row=commerceRecord(module,el.getAttribute('data-id'));if(!row)return;
-  if(row.paymentReview||commerceBatal(row)||!commercePurchaseMoney(row.balance))return toast('Pembayaran belum dapat ditambah. Periksa status dan riwayatnya.',true);
+  if(row.cancelled||row.paymentReview||commerceBatal(row)||!commercePurchaseMoney(row.balance)||(module==='nota'&&coreNotaRingkas(row,S.state.settings).periksa))return toast('Pembayaran belum dapat ditambah. Periksa status dan riwayatnya.',true);
   if(Number(row.balance)<=0)return toast('Pembayaran sudah lunas. Lihat riwayat untuk mengoreksi pembayaran.',true);
   var lunasi=el.getAttribute('data-pelunasan')==='1',sisa=Number(row.balance);
-  var f=commerceForm(lunasi?'Pelunasan':module==='pembelian'?'Tambah DP / pembayaran':'Catat pembayaran',module,hid('id',newId())+hid('parentId',row.id)+hid('revision',row.revision)+
+  var f=commerceForm(lunasi?'Pelunasan':'Tambah DP / pembayaran',module,hid('id',newId())+hid('parentId',row.id)+hid('revision',row.revision)+
     '<dl class="kv"><dt>Total</dt><dd class="b">'+rp(module==='nota'?row.total:row.totalHarga)+'</dd><dt>Sudah dibayar</dt><dd class="b">'+rp(row.totalPaid)+'</dd><dt>Sisa</dt><dd class="b">'+rp(sisa)+'</dd></dl><div class="note">Catat uang yang benar-benar diterima atau dibayarkan sekarang.</div>'+
-    fTanggal('Tanggal','tanggal')+fNum('Jumlah pembayaran (Rp)','jumlah',lunasi?sisa:'','step="1"'+(module==='pembelian'?' max="'+sisa+'"':''),'Isi jumlah yang dibayar sekarang.')+
-    (module==='pembelian'?'<button class="btn sm" data-a="commercePayRemaining">Isi sisa '+rp(sisa)+'</button>':'')+'<div class="note" data-commerce-group-payment-preview aria-live="polite"></div>'+fSelect('Metode','metode',[['transfer','Transfer'],['cash','Tunai'],['qris','QRIS'],['lainnya','Lainnya']],'transfer')+fCatatan(''),'commercePaymentSave','Simpan pembayaran');
-  if(module==='pembelian'){f._commerceGroupOrders=[{id:row.id,balance:sisa}];commerceGroupAmountPaint(f);}
+    fTanggal('Tanggal','tanggal')+fNum(module==='nota'?'Uang diterima sekarang (Rp)':'Jumlah pembayaran (Rp)','jumlah',lunasi?sisa:'','step="1"'+(module==='pembelian'?' max="'+sisa+'"':''),'Isi jumlah yang dibayar sekarang.')+
+    '<button class="btn sm" data-a="commercePayRemaining">Isi sisa '+rp(sisa)+'</button><div class="note" data-commerce-group-payment-preview aria-live="polite"></div>'+fSelect('Metode','metode',[['transfer','Transfer'],['cash','Tunai'],['qris','QRIS'],['lainnya','Lainnya']],'transfer')+fCatatan(''),'commercePaymentSave','Simpan pembayaran');
+  f._commerceGroupOrders=[{id:row.id,balance:sisa}];commerceGroupAmountPaint(f);
 };
 A.commercePayRemaining=function(){
   var f=topForm();if(!f||f._commerceLocked||f._commerceSending)return;
@@ -11425,19 +11443,24 @@ function commerceGroupFormRows(f){if(!isAdmin()||f._commerceScope!==commerceScop
 A.commerceGroupPrint=function(el){try{var rows=commerceGroupFormRows(topForm());return act(el,slipCetak(rows.map(function(r){return coreCommerceSlipModel('pembelian',r,S.state.settings);}))).catch(quiet);}catch(e){toast(e.message,true);}};
 A.commerceGroupPdf=function(el){if(Api.mode()==='demo')return A.commerceGroupPrint(el);try{var rows=commerceGroupFormRows(topForm()),proof={};rows.forEach(function(r){proof[r.id]=r.revision;});return slipUnduh('makeCommercePdf',{module:'pembelian',ids:rows.map(function(r){return r.id;}),expectedRevisions:proof});}catch(e){toast(e.message,true);}};
 
-function commerceNotaSaring(r,status){
-  var batal=commerceBatal(r);
+function commerceNotaSaring(r,status,history){
+  var ringkas=coreNotaRingkas(r,S.state.settings),batal=ringkas.batal;
   if(status==='arsip')return !!r.archived&&!batal;
   if(status==='batal')return batal;
+  if(history)return (!status&&(batal||r.archived))||(!batal&&ringkas.lunas&&(!status||status==='lunas'));
   if(batal||r.archived)return false;
-  return !status||r.status===status;
+  if(ringkas.lunas)return false;
+  return !status||(status==='review'?ringkas.periksa:status==='dp'?!ringkas.periksa&&ringkas.bayar>0:status==='belum'?!ringkas.periksa&&ringkas.bayar===0:false);
 }
 VIEWS.nota=function(){return commerceLoadView('nota','Nota penjualan','Nota pelanggan, pembayaran awal, dan pelunasan.',function(data){
   var rows=(data.notes||[]).slice().sort(function(a,b){return String(b.date).localeCompare(String(a.date))||String(b.noNota||'').localeCompare(String(a.noNota||''));});
-  var nArsip=rows.filter(function(r){return commerceNotaSaring(r,'arsip');}).length,nBatal=rows.filter(function(r){return commerceNotaSaring(r,'batal');}).length;
-  return '<div class="tools">'+searchBox('q','Cari nomor nota atau pelanggan')+'<button class="btn pri" data-a="commerceNotaOpen">'+ic('plus')+'Nota baru</button></div>'+
-    fSelect('Status nota','commerceStatus',[['','Nota aktif'],['belum','Belum dibayar'],['dp','DP / cicilan'],['lunas','Lunas'],['review','Perlu diperiksa'],['arsip','Arsip'+(nArsip?' ('+nArsip+')':'')],['batal','Dihapus / dibatalkan'+(nBatal?' ('+nBatal+')':'')]],S.f['commerceStatus-nota']||'','data-c="commerceStatus" data-m="nota"')+
-    commerceList('nota',rows,function(r){return '<button class="item" data-a="commerceNotaDetail" data-id="'+esc(r.id)+'"><span class="grow"><b>'+esc(r.noNota||r.number||r.id)+'</b><br><span>'+esc((r.customer||{}).name)+'</span><br><span class="small muted">'+tgl(r.date)+'</span> '+commerceNotaChip(r)+'</span><span class="right"><b>'+rp(r.total)+'</b><br><span class="small muted">Sisa '+rp(r.balance)+'</span></span>'+ic('chev')+'</button>';},function(r){return[r.id,r.noNota,r.number,(r.customer||{}).name];},commerceNotaSaring)+commerceEmptyActions('nota');});};
+  var sub=S.sub.commerceNota==='history'?'history':'active',history=sub==='history',key=history?'notaHistory':'nota',nArsip=rows.filter(function(r){return commerceNotaSaring(r,'arsip');}).length,nBatal=rows.filter(function(r){return commerceNotaSaring(r,'batal');}).length;
+  var choices=history?[['','Semua riwayat'],['lunas','Lunas'],['arsip','Arsip manual'+(nArsip?' ('+nArsip+')':'')],['batal','Dihapus / dibatalkan'+(nBatal?' ('+nBatal+')':'')]]:[['','Semua nota aktif'],['belum','Belum dibayar'],['dp','DP / cicilan'],['review','Perlu diperiksa']];
+  if(!choices.some(function(choice){return choice[0]===(S.f['commerceStatus-'+key]||'');}))S.f['commerceStatus-'+key]='';
+  return '<div class="tools">'+seg('commerceNota',[['active','Nota aktif'],['history','Riwayat nota']],sub)+'</div><div class="tools">'+searchBox('q','Cari nomor nota atau pelanggan')+(history?'':'<button class="btn pri" data-a="commerceNotaOpen">'+ic('plus')+'Nota baru</button>')+'</div>'+
+    (history?'<p class="small muted">Nota lunas masuk riwayat otomatis. Jika pembayaran dikoreksi dan masih ada sisa, nota kembali aktif. Arsip manual dan nota yang dihapus tetap tersimpan di sini.</p>':'')+
+    fSelect('Status nota','commerceStatus',choices,S.f['commerceStatus-'+key]||'','data-c="commerceStatus" data-m="'+key+'"')+
+    commerceList(key,rows,function(r){var ringkas=coreNotaRingkas(r,S.state.settings);return '<button class="item" data-a="commerceNotaDetail" data-id="'+esc(r.id)+'"><span class="grow"><b>'+esc(r.noNota||r.number||r.id)+'</b><br><span>'+esc((r.customer||{}).name)+'</span><br><span class="small muted">'+tgl(r.date)+'</span> '+commerceNotaChip(r)+(ringkas.lunas&&ringkas.tanggalLunas?'<br><span class="small muted">Lunas '+tgl(ringkas.tanggalLunas)+'</span>':'')+'</span><span class="right"><b>'+rp(r.total)+'</b><br><span class="small muted">Dibayar '+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.bayar))+'</span><br><span class="small muted">Sisa '+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.sisa))+'</span></span>'+ic('chev')+'</button>';},function(r){return[r.id,r.noNota,r.number,(r.customer||{}).name];},function(r,status){return commerceNotaSaring(r,status,history);})+commerceEmptyActions('nota');});};
 function commerceNotaLine(row){return '<div class="card col gap-s" data-commerce-line data-id="'+esc(row.id||newId())+'">'+fText('Nama barang','lineName',row.name,'maxlength="150"')+'<div class="grid g-2">'+fText('Warna','color',row.color,'maxlength="100"')+fText('Ukuran','size',row.size,'maxlength="40"')+'</div><div class="f-row three">'+fNum('Jumlah pcs','qty',row.qty==null?1:row.qty,'step="1"')+fNum('Harga satuan (Rp)','price',row.price==null?'':row.price,'step="1"')+fNum('Diskon item (%)','discPercent',row.discPercent||0,'max="100" step="0.01"')+'</div><button class="btn ghost sm" data-a="commerceRemoveLine">Hapus item</button></div>';}
 function commerceNotaValues(f){return $$('[data-commerce-line]',f).map(function(el){var v=formVals(el),qty=commerceNumber(v.qty,'Jumlah pcs',true,1e9),price=commerceNumber(v.price,'Harga satuan',true),disc=commerceNumber(v.discPercent,'Diskon item',false,100);if(!v.lineName.trim()||!qty||!price)throw new Error('Setiap item perlu nama, jumlah, dan harga lebih dari nol.');return{id:el.getAttribute('data-id'),name:v.lineName.trim(),size:v.size.trim(),color:v.color.trim(),qty:qty,price:price,discPercent:disc};});}
 function commerceNotaTotals(items,discount,shipping){var subtotal=items.reduce(function(n,it){return n+Math.round(it.qty*it.price*(1-it.discPercent/100));},0),deduction=Math.round(subtotal*discount/100);return{subtotal:subtotal,discountAmount:deduction,total:subtotal-deduction+shipping};}
@@ -11450,20 +11473,21 @@ A.commerceNotaOpen=function(el){var row=commerceRecord('nota',el.getAttribute('d
 A.commerceAddNotaLine=function(){var f=topForm(),box=$('[data-commerce-lines]',f);if($$('[data-commerce-line]',box).length>=100)return toast('Maksimal 100 item.',true);box.insertAdjacentHTML('beforeend',commerceNotaLine({}));R.commerce(f);};
 A.commerceNotaSave=function(el){var f=topForm(),v=formVals(f);if(f._commerceLocked)return;try{var items=commerceNotaValues(f),discount=commerceNumber(v.discountPercent,'Diskon tambahan',false,100),shipping=commerceNumber(v.shipping,'Ongkir',true),totals=commerceNotaTotals(items,discount,shipping);if(!items.length||!v.customerName.trim())throw new Error('Isi pelanggan dan minimal satu barang.');if(commerceRevision(v)&&f._commerceOriginal&&totals.total<Number(f._commerceOriginal.totalPaid||0))throw new Error('Total baru '+rp(totals.total)+' lebih kecil dari yang sudah dibayar '+rp(f._commerceOriginal.totalPaid)+'. Koreksi pembayarannya dulu.');var row=Object.assign({},f._commerceOriginal||{},{id:v.id,date:v.date,customer:{name:v.customerName.trim(),phone:v.phone.trim(),address:v.address.trim(),type:v.customerType},items:items,discountPercent:discount,shipping:shipping,notes:v.notes.trim()});if(!commerceRevision(v)){var dp=commerceNumber(v.dp,'Uang diterima',true);if(dp){if(v.metode!=='cash'&&dp>totals.total)throw new Error('Pembayaran melebihi total nota.');row.initialPayment={tanggal:v.date,jumlah:Math.min(dp,totals.total),metode:v.metode,catatan:'Pembayaran awal'};if(v.metode==='cash')row.initialPayment.tenderedAmount=dp;};}return commerceMutation('nota','saveCommerceNota',{record:row,expectedRevision:commerceRevision(v)},f,el);}catch(e){toast(e.message,true);}};
 /* ---------- nota penjualan: rincian, cetak, arsip (1.5.43) ---------- */
-function commerceNotaChip(r){return (commerceBatal(r)?'<span class="chip">'+(r.cancelledBy?'Dihapus':'Dibatalkan')+'</span>':commerceStatus(r))+(r.archived?' <span class="chip info">Arsip</span>':'');}
+function commerceNotaChip(r){var ringkas=coreNotaRingkas(r,S.state.settings);return (ringkas.batal?'<span class="chip">'+(r.cancelledBy?'Dihapus':'Dibatalkan')+'</span>':'<span class="chip '+(ringkas.lunas?'ok':ringkas.periksa?'bad':'warn')+'">'+esc(ringkas.status)+'</span>')+(r.archived?' <span class="chip info">Arsip manual</span>':'');}
 /* Rincian nota: isi nota, lalu tombol yang sering dipakai. Cetak invoice, struk thermal dan PDF selalu ada di kaki lembar. */
 function commerceNotaRincian(id){
   var row=commerceRecord('nota',id);if(!row)return sheetHtml('Nota',emptyBox('Nota ini belum tersedia. Muat ulang daftar.'));
-  var attrs=commerceRecordAttr('nota',id),c=row.customer||{},batal=commerceBatal(row),owner=me().divisi==='owner',bayar=Number(row.totalPaid)||0,bisaEdit=!batal&&!row.legacy&&!row.paymentReview;
+  var attrs=commerceRecordAttr('nota',id),c=row.customer||{},ringkas=coreNotaRingkas(row,S.state.settings),batal=ringkas.batal,owner=me().divisi==='owner',bayar=Number(row.totalPaid)||0,bisaEdit=!batal&&!row.legacy&&!ringkas.periksa;
   var baris=(row.items||[]).map(function(it){var d=Number(it.discPercent)||0,varian=[it.color,it.size].filter(Boolean).join(' · ');return '<div class="item"><span class="grow"><b>'+esc(it.name)+'</b>'+(varian?' <span class="small muted">'+esc(varian)+'</span>':'')+'<br><span class="small muted">'+nf(it.qty)+' pcs × '+rp(it.price)+(d?' · diskon '+nfQty(d)+'%':'')+'</span></span><b>'+rp(it.subtotal)+'</b></div>';}).join('');
   var hitung='<dl class="kv">'+(Number(row.discountAmount)||Number(row.shipping)?'<dt>Subtotal</dt><dd>'+rp(row.subtotal)+'</dd>':'')+(Number(row.discountAmount)?'<dt>Diskon '+nfQty(row.discountPercent)+'%</dt><dd>-'+rp(row.discountAmount)+'</dd>':'')+(Number(row.shipping)?'<dt>Ongkir</dt><dd>'+rp(row.shipping)+'</dd>':'')+
-    '<dt>Total</dt><dd class="b">'+rp(row.total)+'</dd><dt>Sudah dibayar</dt><dd class="b">'+(row.paymentReview?'Perlu diperiksa':rp(row.totalPaid))+'</dd><dt>Sisa</dt><dd class="b">'+(row.paymentReview?'Perlu diperiksa':rp(row.balance))+'</dd></dl>';
-  var utama=batal?'':'<div class="row wrap">'+(Number(row.balance)>0&&!row.paymentReview?'<button class="btn pri" data-a="commercePaymentOpen"'+attrs+'>'+ic('plus','s')+'Catat pembayaran</button>':'')+
+    '<dt>Total</dt><dd class="b">'+rp(row.total)+'</dd><dt>Sudah dibayar</dt><dd class="b">'+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.bayar))+'</dd><dt>Sisa</dt><dd class="b">'+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.sisa))+'</dd></dl>';
+  var utama=batal?'':'<div class="row wrap">'+(ringkas.sisa>0&&!ringkas.periksa?'<button class="btn pri" data-a="commercePaymentOpen"'+attrs+'>'+ic('plus','s')+'Tambah DP / pembayaran</button><button class="btn" data-a="commercePaymentOpen"'+attrs+' data-pelunasan="1">Lunasi sisa '+rp(ringkas.sisa)+'</button>':'')+
     (bisaEdit?'<button class="btn" data-a="commerceNotaOpen" data-id="'+esc(id)+'">'+ic('edit','s')+'Edit nota</button>':'<span class="small muted">'+(row.legacy?'Nota dari data lama disimpan tetap.':'Periksa nominal pembayaran sebelum mengedit.')+'</span>')+'</div>';
   var kelola='<div class="row wrap">'+(batal?(owner&&row.cancelledBy?'<button class="btn sm" data-a="commerceRestore"'+attrs+'>Kembalikan nota</button>':''):
     '<button class="btn sm" data-a="commerceNotaArsip"'+attrs+' data-v="'+(row.archived?'0':'1')+'">'+ic('box','s')+(row.archived?'Keluarkan dari arsip':'Arsipkan')+'</button>'+
     (owner&&!(row.legacy&&bayar)?'<button class="btn sm ghost" style="color:var(--bad)" data-a="commerceCancelOpen"'+attrs+'>'+ic('trash','s')+'Hapus nota</button>':''))+'</div>';
   var h='<div class="col">'+commerceWarning(row)+'<div class="row wrap">'+commerceNotaChip(row)+'<span class="grow"></span><span class="muted small">'+tgl(row.date)+'</span></div>'+
+    (ringkas.lunas?'<div class="note ok"><b>LUNAS'+(ringkas.tanggalLunas?' · '+tgl(ringkas.tanggalLunas):'')+'</b><p>Nota tersimpan di Riwayat nota. Semua pembayaran tetap dapat dilihat di bawah.</p></div>':'')+
     (batal?'<div class="note">Nota ini sudah dihapus dan tidak dihitung.'+(row.cancelReason?' Alasan: '+esc(row.cancelReason):'')+'</div>':'')+
     '<div class="card col"><div><h3>'+esc(c.name)+'</h3><p class="small muted">'+esc([c.phone,c.address].filter(Boolean).join(' · '))+'</p></div><div class="list">'+baris+'</div>'+hitung+'</div>'+
     (row.notes?'<div class="note">'+esc(row.notes)+'</div>':'')+utama+commercePaymentsHtml('nota',row)+kelola+'</div>';
@@ -11504,7 +11528,7 @@ A.commerceNotaArsip=function(el){
   return act(el,req('arsipCommerceNota',{id:row.id,expectedRevision:row.revision,arsip:arsip,withState:true})).then(function(res){
     commerceInvalidate('nota');var masuk=false;
     if(res&&res.commerce){try{var entry=commerceEntry('nota');commerceApply('nota',entry,res.commerce);entry.tried=true;masuk=true;}catch(e){}}
-    toast(arsip?'Nota masuk arsip. Lihat lewat saringan Arsip.':'Nota kembali ke daftar aktif.');if(arsip)closeSheet();
+    toast(arsip?'Nota masuk Riwayat nota · Arsip manual.':'Arsip manual dilepas. Nota lunas tetap di Riwayat nota; yang belum lunas kembali aktif.');if(arsip)closeSheet();
     if(!masuk)return commerceFetch('nota',true);if(S.tab===commerceTab('nota'))refresh();
   }).catch(quiet);
 };

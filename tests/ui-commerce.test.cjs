@@ -16,6 +16,8 @@ function harness(){
   `,context);
   const unitStart=html.indexOf('function satuanPendek('),unitEnd=html.indexOf('/* bahan yang dipakai',unitStart);assert.ok(unitStart>=0&&unitEnd>unitStart,'actual unit helper exists');vm.runInContext(html.slice(unitStart,unitEnd),context);
   const helperStart=html.indexOf('function fTanggal('),helperEnd=html.indexOf('/* ---------- hitungan PO',helperStart);vm.runInContext(html.slice(helperStart,helperEnd),context);vm.runInContext(block,context);
+  const coreSource=fs.readFileSync(path.resolve(__dirname,'../src/core.js'),'utf8'),notaSource=fs.readFileSync(path.resolve(__dirname,'../src/commerce.js'),'utf8');
+  vm.runInContext(coreSource.match(/function coreNum\(v\) \{[^\r\n]+/)[0]+notaSource.slice(notaSource.indexOf('function coreNotaTanggalSah('),notaSource.indexOf('function coreNotaInvoiceHtml(')),context);
   const run=code=>vm.runInContext(code,context);const json=code=>JSON.parse(run('JSON.stringify('+code+')'));
   function seed(module,data){run(`var e=commerceEntry(${JSON.stringify(module)});e.data=${JSON.stringify(data)};e.version=10;e.tried=true;`);}
   function form(values,module,rows=[]){run(`currentForm.values=${JSON.stringify(values)};currentForm.module=${JSON.stringify(module)};currentForm._commerceScope=commerceScope();currentForm.rows=${JSON.stringify(rows)}.map(function(r){return {values:r.values,getAttribute:function(){return r.id;}};});`);}
@@ -281,7 +283,7 @@ test('read-only commerce actions use read timeout behavior, not uncertain write 
 });
 
 test('status filtering rereads the current selection and query without another server read',()=>{
-  const h=harness();h.seed('nota',{notes:[{id:'open',status:'belum',customer:{name:'First'},items:[],total:10},{id:'paid',status:'lunas',customer:{name:'Second'},items:[],total:20}]});h.run('VIEWS.nota()');assert.match(h.run('S.listFn()'),/open/);h.run("S.f['commerceStatus-nota']='lunas'");let result=h.run('S.listFn()');assert.ok(!result.includes('data-id="open"'));assert.match(result,/data-id="paid"/);h.run("S.f.q='First'");assert.match(h.run('S.listFn()'),/Tidak ada catatan/);assert.equal(h.requests.length,0);
+  const h=harness();h.seed('nota',{notes:[{id:'open',status:'belum',customer:{name:'First'},items:[],total:10,totalPaid:0,balance:10},{id:'partial',status:'dp',customer:{name:'Second'},items:[],total:20,totalPaid:5,balance:15}]});h.run('VIEWS.nota()');assert.match(h.run('S.listFn()'),/open/);h.run("S.f['commerceStatus-nota']='dp'");let result=h.run('S.listFn()');assert.ok(!result.includes('data-id="open"'));assert.match(result,/data-id="partial"/);h.run("S.f.q='First'");assert.match(h.run('S.listFn()'),/Tidak ada catatan/);assert.equal(h.requests.length,0);
 });
 
 test('both import files survive overlapping reads and no preview runs against half-read inputs',()=>{
@@ -539,13 +541,15 @@ const notaRows=()=>[
   {id:'n4',noNota:'SA-4',revision:'r4',status:'lunas',legacy:true,date:'2026-10-01',customer:{name:'Lama'},items:[],total:10,totalPaid:10,balance:0,payments:[{id:'q',jumlah:10}],events:[{id:'q'}]}];
 const notaEl=(id,extra={})=>`{disabled:false,classList:{add:function(){},remove:function(){}},getAttribute:function(k){var x=${JSON.stringify({'data-m':'nota','data-id':id,...extra})};return x[k]===undefined?null:x[k];}}`;
 
-test('1.5.43: the nota list opens with active notas; archived and deleted ones have their own filters',()=>{
+test('nota active and history tabs derive paid notes while retaining manual archive and deleted filters',()=>{
   const h=harness();h.seed('nota',{notes:notaRows()});const view=h.run('VIEWS.nota()');
-  assert.match(view,/Nota aktif/);assert.match(view,/Arsip \(1\)/);assert.match(view,/Dihapus \/ dibatalkan \(1\)/);
-  let list=h.run('S.listFn()');assert.match(list,/data-id="n1"/);assert.match(list,/data-id="n4"/);assert.ok(!list.includes('data-id="n2"')&&!list.includes('data-id="n3"'));
-  h.run("S.f['commerceStatus-nota']='arsip'");list=h.run('S.listFn()');assert.match(list,/data-id="n2"/);assert.match(list,/<span class="chip info">Arsip<\/span>/);assert.ok(!list.includes('data-id="n1"'));
-  h.run("S.f['commerceStatus-nota']='batal'");list=h.run('S.listFn()');assert.match(list,/data-id="n3"/);assert.match(list,/<span class="chip">Dihapus<\/span>/);assert.ok(!list.includes('data-id="n2"'));
-  h.run("S.f['commerceStatus-nota']='lunas'");list=h.run('S.listFn()');assert.match(list,/data-id="n4"/);assert.ok(!list.includes('data-id="n2"'),'an archived paid nota stays in the archive');
+  assert.match(view,/Semua nota aktif/);
+  let list=h.run('S.listFn()');assert.match(list,/data-id="n1"/);assert.ok(!list.includes('data-id="n2"')&&!list.includes('data-id="n3"')&&!list.includes('data-id="n4"'),'paid and archived notes are absent from active notes');
+  h.run("S.sub.commerceNota='history'");const history=h.run('VIEWS.nota()');assert.match(history,/Arsip manual \(1\)/);assert.match(history,/Dihapus \/ dibatalkan \(1\)/);
+  list=h.run('S.listFn()');assert.match(list,/data-id="n2"/);assert.match(list,/data-id="n3"/);assert.match(list,/data-id="n4"/);assert.ok(!list.includes('data-id="n1"'));
+  h.run("S.f['commerceStatus-notaHistory']='arsip'");list=h.run('S.listFn()');assert.match(list,/data-id="n2"/);assert.match(list,/<span class="chip info">Arsip manual<\/span>/);assert.ok(!list.includes('data-id="n1"')&&!list.includes('data-id="n4"'));
+  h.run("S.f['commerceStatus-notaHistory']='batal'");list=h.run('S.listFn()');assert.match(list,/data-id="n3"/);assert.match(list,/<span class="chip">Dihapus<\/span>/);assert.ok(!list.includes('data-id="n2"'));
+  h.run("S.f['commerceStatus-notaHistory']='lunas'");list=h.run('S.listFn()');assert.match(list,/data-id="n4"/);assert.match(list,/data-id="n2"/,'paid manual archive remains a paid history record');assert.ok(!list.includes('data-id="n1"')&&!list.includes('data-id="n3"'));
   assert.equal(h.requests.length,0);
 });
 
@@ -553,10 +557,10 @@ test('1.5.43: the nota sheet offers edit, invoice, receipt, PDF, archive and del
   const h=harness();h.seed('nota',{notes:notaRows()});let s=h.run("commerceNotaRincian('n1')");
   assert.match(s,/<h2>Nota SA-1<\/h2>/);assert.match(s,/<b>Oblong<\/b> <span class="small muted">Hitam · L<\/span><br><span class="small muted">10 pcs × Rp5000<\/span><\/span><b>Rp50000<\/b>/);
   assert.match(s,/<dt>Total<\/dt><dd class="b">Rp50000<\/dd><dt>Sudah dibayar<\/dt><dd class="b">Rp20000<\/dd><dt>Sisa<\/dt><dd class="b">Rp30000<\/dd>/);assert.ok(!s.includes('Subtotal'),'no discount or shipping: no extra lines');
-  assert.match(s,/data-a="commercePaymentOpen" data-m="nota" data-id="n1">Catat pembayaran/);assert.match(s,/data-a="commerceNotaOpen" data-id="n1">Edit nota/,'a nota with a payment can still be edited');
+  assert.match(s,/data-a="commercePaymentOpen" data-m="nota" data-id="n1">Tambah DP \/ pembayaran/);assert.match(s,/data-a="commerceNotaOpen" data-id="n1">Edit nota/,'a nota with a payment can still be edited');
   assert.match(s,/data-a="commerceNotaArsip" data-m="nota" data-id="n1" data-v="1">Arsipkan/);assert.match(s,/data-a="commerceCancelOpen" data-m="nota" data-id="n1">Hapus nota/);
   assert.match(s,/data-a="commerceNotaCetak" data-m="nota" data-id="n1">Cetak invoice<\/button><button class="btn" data-a="commerceNotaStruk" data-m="nota" data-id="n1">Struk thermal<\/button><button class="btn pri" data-a="commerceNotaPdf" data-m="nota" data-id="n1">Unduh PDF/);
-  s=h.run("commerceNotaRincian('n2')");assert.match(s,/data-v="0">Keluarkan dari arsip/);assert.match(s,/<span class="chip info">Arsip<\/span>/);
+  s=h.run("commerceNotaRincian('n2')");assert.match(s,/data-v="0">Keluarkan dari arsip/);assert.match(s,/<span class="chip info">Arsip manual<\/span>/);
   s=h.run("commerceNotaRincian('n3')");assert.match(s,/sudah dihapus dan tidak dihitung\. Alasan: Salah input/);assert.match(s,/data-a="commerceRestore" data-m="nota" data-id="n3">Kembalikan nota/);assert.ok(!s.includes('Edit nota')&&!s.includes('Arsipkan')&&!s.includes('Hapus nota')&&!s.includes('Catat pembayaran'));assert.match(s,/commerceNotaCetak/,'a deleted nota can still be printed');
   s=h.run("commerceNotaRincian('n4')");assert.match(s,/Nota dari data lama disimpan tetap\./);assert.ok(!s.includes('Edit nota')&&!s.includes('Hapus nota'),'an old paid nota is neither edited nor deleted here');assert.match(s,/>Arsipkan</);
   h.run('A.commerceNotaDetail('+notaEl('n1')+')');assert.match(h.run('lastSheet'),/<h2>Nota SA-1<\/h2>/);
@@ -584,7 +588,7 @@ test('1.5.43: archive is one tap; deleting a paid nota also corrects its payment
   const h=harness();h.seed('nota',{notes:notaRows()});h.run("var tutup=0;function closeSheet(){tutup++;}");
   const tunggu=h.run('A.commerceNotaArsip('+notaEl('n1',{'data-v':'1'})+')');assert.equal(h.requests[0].action,'arsipCommerceNota');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload)),{id:'n1',expectedRevision:'r1',arsip:true,withState:true});
   const baru=notaRows();baru[0].archived=true;baru[0].revision='r1b';h.requests[0].resolve({record:baru[0],commerce:reply('nota',{notes:baru},11)});await tunggu;await turn();
-  assert.equal(h.run("commerceRecord('nota','n1').archived"),true,'the list in the answer is used at once');assert.equal(h.run('tutup'),1);assert.match(h.json('messages').at(-1).text,/masuk arsip/);
+  assert.equal(h.run("commerceRecord('nota','n1').archived"),true,'the list in the answer is used at once');assert.equal(h.run('tutup'),1);assert.match(h.json('messages').at(-1).text,/masuk Riwayat nota · Arsip manual/);
   const lepas=h.run('A.commerceNotaArsip('+notaEl('n1',{'data-v':'0'})+')');assert.deepEqual(JSON.parse(JSON.stringify(h.requests[1].payload)),{id:'n1',expectedRevision:'r1b',arsip:false,withState:true});
   h.requests[1].resolve({record:notaRows()[0],commerce:reply('nota',{notes:notaRows()},12)});await lepas;await turn();assert.equal(h.run("commerceRecord('nota','n1').archived"),undefined);assert.equal(h.run('tutup'),1,'taking a nota out of the archive keeps its sheet open');
   /* delete: the reason is already filled in; a paid nota asks the server to correct the payments too */
