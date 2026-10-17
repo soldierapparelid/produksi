@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.50 - Hapus dari riwayat PO dan nota
+
+- Owner dapat memakai **Hapus dari riwayat** untuk mengeluarkan PO atau nota yang tidak diperlukan dari daftar riwayat. Catatan masuk **Sampah** dan dapat dipulihkan dari sana.
+- Menghapus dari riwayat mempertahankan jumlah, pembayaran, penerimaan, dan status sebelumnya. Invoice pembelian dapat dipindahkan sekaligus; pesanan aktif tidak ikut terhapus.
+- Perubahan dari perangkat lain diperiksa sebelum simpan. Pengiriman ulang tidak menggandakan catatan; catatan dalam Sampah harus dipulihkan sebelum diedit.
+- Pasang **Core.gs** dan **Index.html** bersama. Pembaruan aplikasi tidak menghapus catatan usaha secara otomatis.
+
 ## Rilis 1.5.49 - Pelunasan dan riwayat nota penjualan
 
 - Nota penjualan menyediakan **Lunasi sisa** dan tetap menerima DP bertahap. Formulir menampilkan jumlah yang dilunasi sebelum disimpan.
