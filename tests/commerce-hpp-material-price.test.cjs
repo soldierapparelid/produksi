@@ -7,6 +7,24 @@ function run(input){c.input=JSON.stringify(input);return JSON.parse(vm.runInCont
 function fixture(){return {config:{modelConfigs:{[id]:{jahitMode:'manual',hargaJahit:2000,biayaLain:1000,targetMargin:20,costSchema:2,costsReviewed:true}},marketplace:{},pajak:0},tables:{PO:[{id:'po1',nama:'Shirt',series:'Fixture',ukuranAktif:['M','L','XL']}],Potong:[{id:'cut1',poId:'po1',total:100,ukuran:{XL:100},tarif:500,bahanList:[{nama:'Cotton',satuan:'kg',qty:25}],alokasiBahan:[{stokId:'roll1',qty:25}]}],StokBahan:[{id:'roll1',jenis:'beli',bahan:'Cotton',satuan:'kg',qty:25,harga:0,total:0,stockMode:'roll',rol:1,rollLabel:'Rol lama 1'}]}};}
 function correction(input,stokId='roll1',harga=88000){input.tables.StokBahan.push({id:'correction-'+input.tables.StokBahan.length,jenis:'harga',sourceStockId:stokId,qty:0,harga,bahan:'Cotton',satuan:'kg'});}
 
+test('shared material policy updates all XL cost references once while preserving old, current and future receipt prices',()=>{
+ const input=fixture();correction(input,'roll1',60000);
+ input.tables.StokBahan.push({id:'policy1',jenis:'harga',priceScope:'bahan',bahan:'COTTON',satuan:'kg',qty:0,harga:88000});
+ input.tables.StokBahan.push({id:'future2',jenis:'beli',bahan:'Cotton',satuan:'kg',qty:25,harga:69000,total:1725000,stockMode:'roll',rol:1});
+ input.tables.Potong.push({id:'cut2',poId:'po1',total:50,ukuran:{XL:50},tarif:500,bahanList:[{nama:'Cotton',satuan:'kg',qty:25}],alokasiBahan:[{stokId:'future2',qty:25}]});
+ let before=JSON.stringify(input),m=run(input).models[0];assert.equal(m.kain.totalCost,4400000);assert.equal(m.kain.totalPcs,150);assert.equal(m.kain.perPcs,4400000/150);assert.equal(m.basis.ukuran,'XL');assert.equal(m.complete,true);assert.equal(m.kain.details[0].priceSource,'harga-jenis-bahan');assert.equal(m.kain.details[1].priceSource,'harga-jenis-bahan');assert.equal(JSON.stringify(input),before);
+ input.tables.Potong.forEach(r=>r.alokasiBahan=[]);m=run(input).models[0];assert.equal(m.kain.totalCost,4400000);assert.equal(m.kain.details[0].priceSource,'harga-jenis-bahan');
+});
+
+test('shared material price reaches snapshot-only legacy receipts by material and unit, never a different unit or fabric',()=>{
+ const input=fixture();input.tables.Potong=[];
+ input.tables.StokBahan.push({id:'policy1',jenis:'harga',priceScope:'bahan',bahan:'Cotton',satuan:'kg',qty:0,harga:88000});
+ input.legacy={production:[{id:'old-xl',series:'Fixture',namaBarang:'Shirt',size:'XL',potong:[{id:'oldcut',tanggal:'2026-08-01',jumlah:100,tarif:500,bahanList:[{jenis:'Cotton',kg:25,unit:'kg'}],rols:[{purchaseId:'snapshot-only',jenis:'Cotton',kg:25,unit:'kg'}]}]}],stock:{pembelian:[{id:'snapshot-only',jenisBahan:'Cotton',kg:25,unit:'kg',hargaPerKg:0,total:0,rol:1}]},cuttingPlans:[]};
+ const before=JSON.stringify(input);let m=run(input).models[0];assert.equal(m.kain.totalCost,2200000);assert.equal(m.kain.perPcs,22000);assert.equal(m.complete,true);assert.equal(m.kain.observasi.rolls[0].harga,88000);assert.equal(JSON.stringify(input),before);
+ input.tables.StokBahan[1].satuan='yard';assert.equal(run(input).models[0].hppTotal,null);
+ input.tables.StokBahan[1].satuan='kg';input.tables.StokBahan[1].bahan='Different';assert.equal(run(input).models[0].hppTotal,null);
+});
+
 test('correct old 25kg roll at 88000: 100XL output sets model fabric HPP22000 for M/L/XL without changing any source',()=>{
  const input=fixture();let m=run(input).models[0];assert.equal(m.hppTotal,null);
  correction(input);const before=JSON.stringify(input);m=run(input).models[0];

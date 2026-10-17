@@ -21,7 +21,7 @@ function ui() {
       getAttribute:function(k){return k==='name'?this.name:(this.attributes[k]||null);},closest:function(selector){if(selector==='[data-invoice-row]')return row;return form;}};}
     var sheet={},form={rows:[],meta:{},closest:function(selector){return selector==='.sheet'?sheet:null;},getAttribute:function(k){return k==='data-form'?'invoiceBahan':null;}};
     form.headers=['invoiceId','invoice','tanggal','supplier','sumber','catatan'].map(function(k){return field(k,({invoiceId:'invoice-ui-1',invoice:' BON-01 ',tanggal:'2026-10-08',supplier:'Supplier contoh',sumber:'Toko',catatan:'Catatan contoh'})[k]);});
-    function row(values){var r={fields:[],meta:{},remove:function(){form.rows=form.rows.filter(function(x){return x!==r;});}};
+    function row(values){var r={fields:[],meta:{},attrs:{},getAttribute:function(k){return this.attrs[k]||null;},setAttribute:function(k,v){this.attrs[k]=String(v);},remove:function(){form.rows=form.rows.filter(function(x){return x!==r;});}};
       var defaults={bahan:'',qty:'',satuan:'kg',rol:'1',harga:''};Object.keys(defaults).forEach(function(k){r.fields.push(field(k,values&&values[k]!==undefined?values[k]:defaults[k],'',r));});
       ['[data-invoice-number]','[data-invoice-line-total]','[data-bahan-status]','[data-invoice-line-qty]'].forEach(function(k){r.meta[k]={textContent:''};});
       r.rolls=[];r.meta['[data-invoice-rolls]']={insertAdjacentHTML:function(){addRoll(r,'');}};r.button=field('','','invoiceRemove',r);return r;}
@@ -49,6 +49,7 @@ function ui() {
     ['function fTanggal(', '/* ---------- hitungan PO'],
     ['function stokSemua()', 'var STATUS_STOK'],
     ['function jumlahPerSatuan(', 'function pilihRentang('],
+    ['function hargaBahanSources(nama)', 'A.hargaBahanSources='],
     ['function daftarIsi(', 'A.invoiceOpen =']
   ]) vm.runInContext(part(a, b), c);
   const run = code => vm.runInContext(code, c);
@@ -77,7 +78,7 @@ test('invoice form lists existing materials and suppliers and keeps its generate
   assert.match(view, /value="Supplier contoh"/);
   assert.match(view, /value="meter" selected/);
   assert.match(view, /step="0\.001"/); assert.match(view, /data-a="invoiceAdd"/);
-  assert.equal((view.match(/data-invoice-row>/g) || []).length, 1);
+  assert.equal((view.match(/data-invoice-row(?:\s[^>]*)?>/g) || []).length, 1);
   assert.equal(u.run('sheetRender()'), view);
   assert.equal(u.run('ids'), 1);
 });
@@ -217,4 +218,13 @@ test('eight roll receipts remain one invoice and aggregate canonical material na
 });
 test('non-kilogram materials retain aggregate quantities instead of sending unsupported identified-roll data',()=>{
  const u=ui();u.run("addRoll(form.rows[1],99);R.invoiceBahan(form)");const item=u.json('invoiceBahanValues(form).items[1]');assert.equal(item.satuan,'meter');assert.equal(item.qty,'3');assert.equal(item.rolls,undefined);assert.match(u.run("invoiceBahanRowsHtml({bahan:'Linen'})"),/tanpa membuat identitas rol kilogram/);
+});
+
+test('new invoice prefills one material price and keeps a deliberately edited purchase price',()=>{
+ const u=ui();u.run("S.state.stok.push({id:'roll01',jenis:'beli',bahan:'Katun Combed',qty:20,satuan:'kg',harga:60000,total:1200000,stockMode:'roll'},{id:'fixed01',jenis:'harga',priceScope:'bahan',bahan:'Katun Combed',satuan:'kg',harga:88000,qty:0});");
+ assert.match(u.run("invoiceBahanRowsHtml({bahan:'Katun Combed'})"),/name="harga"[^>]*value="88000"/);
+ u.run("form.rows[0].fields[4].value='';C.invoiceBahan(form.rows[0].fields[0]);");assert.equal(u.run('form.rows[0].fields[4].value'),88000);
+ u.run("form.rows[0].fields[4].value='90000';C.invoiceBahan(form.rows[0].fields[0]);");assert.equal(u.run('form.rows[0].fields[4].value'),'90000');
+ assert.match(u.run("invoiceBahanRowsHtml({bahan:'Katun Combed',harga:90000})"),/name="harga"[^>]*value="90000"/);
+ assert.match(u.run("invoiceBahanRowsHtml({bahan:'Linen'})"),/name="harga"[^>]*value=""/);
 });
