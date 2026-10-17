@@ -17,9 +17,9 @@ function approx(actual,expected){assert.ok(Math.abs(actual-expected)<1e-7,actual
 
 test('legacy model HPP retains per-roll cost, weighted cutting and reviewed config without mutations',()=>{
  const input=legacyFixture(),before=JSON.stringify(input),out=run('coreCommerceHpp',input),m=out.models[0];
- assert.equal(out.models.length,1);assert.equal(m.id,id());assert.equal(m.configured,true);assert.equal(m.kain.totalPcs,30);
+ assert.equal(out.models.length,1);assert.equal(m.id,id());assert.equal(m.configured,false);assert.equal(m.kain.totalPcs,30);
  approx(m.kain.perPcs,130000/30);approx(m.potong.perPcs,25000/30);approx(m.hppTotal,130000/30+25000/30+2100);
- assert.deepEqual(m.sizes,['L','M']);assert.equal(m.prices.shop.valid,true);assert.equal(m.prices.shop.recommended,11300);
+ assert.deepEqual(m.sizes,['L','M']);assert.deepEqual(m.prices,{});assert.equal(m.basis.provisional,true);
  assert.equal(JSON.stringify(input),before);assert.ok(!JSON.stringify(out).includes('includedEntries'));assert.ok(!Object.hasOwn(m,'members'));
 });
 
@@ -28,12 +28,12 @@ test('new cuts join model HPP once; mirrored legacy cuts and purchases never dou
  Potong:[{id:'mirrored',poId:'po1',asal:'lama',total:30,ukuran:{M:10,L:20},tarif:500,bahan:'Cotton',kg:5},
  {id:'newCut',poId:'po1',total:10,ukuran:{M:10},tarif:200,bahanList:[{nama:'Cotton',qty:1}],alokasiBahan:[{stokId:'newBuy',qty:1}]}],
  StokBahan:[{id:'newBuy',jenis:'beli',bahan:'Cotton',qty:5,satuan:'kg',harga:10000,total:50000},{id:'legacyMirror',jenis:'beli',asal:'lama',bahan:'Cotton',qty:100,satuan:'kg',harga:999,total:99900}]};
- const m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,true);assert.equal(m.kain.totalPcs,40);assert.equal(m.kain.totalCost,140000);assert.equal(m.potong.totalCost,27000);approx(m.hppTotal,6275);
+ const m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,false);assert.equal(m.kain.totalPcs,40);assert.equal(m.kain.totalCost,140000);assert.equal(m.potong.totalCost,27000);approx(m.hppTotal,6275);
  assert.deepEqual(m.basis.origins,{legacy:30,native:10});assert.deepEqual(m.poIds,['po1']);
 });
 
 test('mixed identified and aggregate material costs remain distinct without splitting cloth by output size',()=>{
- const m=run('coreCommerceHpp',nativeFixture()).models[0];assert.equal(m.complete,true);assert.equal(m.kain.totalPcs,10);assert.equal(m.kain.totalCost,65000);assert.equal(m.hppTotal,8100);
+ const m=run('coreCommerceHpp',nativeFixture()).models[0];assert.equal(m.complete,false);assert.equal(m.kain.totalPcs,10);assert.equal(m.kain.totalCost,65000);assert.equal(m.hppTotal,8100);assert.equal(m.basis.provisional,true);
  assert.deepEqual(m.kain.details.map(d=>[d.qty,d.avgHarga,d.priceSource]),[[2,10000,'rol-pembelian'],[3,15000,'rata-rata-pembelian']]);
  assert.equal(m.jahit.source,'Tarif jahit tercatat · rata-rata penugasan');assert.deepEqual(m.sizes,['L','M']);
 });
@@ -47,7 +47,7 @@ test('an explicit missing roll, mismatched material or inconsistent money never 
 test('legacy missing-material exclusion stays explicit and requires the original reviewed basis policy',()=>{
  const input=legacyFixture();input.legacy.production[0].potong.unshift({id:'oldIncomplete',tanggal:'2026-01-01',jumlah:7,tarif:500});
  let m=run('coreCommerceHpp',input).models[0];assert.equal(m.basis.allPcs,37);assert.equal(m.basis.excludedPcs,7);assert.equal(m.basis.includedPcs,30);assert.equal(m.complete,false);assert.deepEqual(m.prices,{});assert.ok(m.hppTotal>0);
- input.config.modelConfigs[id()].basisPolicy='complete-legacy-v1';m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,true);assert.equal(m.basis.excluded.length,1);
+ input.config.modelConfigs[id()].basisPolicy='complete-legacy-v1';m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,false);assert.equal(m.basis.excluded.length,1);assert.match(m.warnings.join(' '),/acuan XL/);
 });
 
 test('legacy per-size conflicts and cost-schema review remain unresolved until explicit model configuration',()=>{
@@ -62,7 +62,7 @@ test('unavailable old source and an unresolved physical correction are visible e
 });
 
 test('zero manual sewing and other costs are explicit choices; malformed/overflow quantities never form a recommendation',()=>{
- const input=nativeFixture();input.config=config({hargaJahit:0,biayaLain:0,targetMargin:0});let m=run('coreCommerceHpp',input).models[0];assert.equal(m.hppTotal,7000);assert.equal(m.complete,true);
+ const input=nativeFixture();input.config=config({hargaJahit:0,biayaLain:0,targetMargin:0});let m=run('coreCommerceHpp',input).models[0];assert.equal(m.hppTotal,7000);assert.equal(m.complete,false);
  for(const value of [true,-1,1.5,Number.MAX_SAFE_INTEGER+1]){input.tables.Potong[0].total=value;m=run('coreCommerceHpp',input).models[0];assert.equal(m.complete,false);assert.equal(m.hppTotal,null);}
 });
 

@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.46 - Koreksi harga bahan dan acuan HPP ukuran XL
+
+- Owner dapat mengisi atau mengoreksi harga bahan dari kartu stok maupun **Cocokkan fisik → Koreksi harga**. Pilih pembelian atau rol, masukkan harga per kg/yard dan alasan. Harga sebelumnya tetap tercatat; jumlah stok, hasil potong, dan pembayaran tidak berubah.
+- Harga koreksi memperbarui nilai stok serta acuan kain di HPP, termasuk rincian stok lama. Pembelian dan rincian rol yang sama tidak dihitung dua kali. Formulir lama dari perangkat lain ditolak dan pengiriman ulang tidak membuat koreksi ganda.
+- HPP model memakai total biaya kain pada hasil XL yang dapat ditelusuri, dibagi total pcs XL; acuan per pcs ini berlaku juga untuk ukuran lain. Beberapa rol lengan dan badan dijumlahkan sekali. Potongan campuran tanpa pembagian kain per ukuran ditampilkan sebagai perkiraan sementara, bukan acuan XL terverifikasi.
+- Rincian HPP menampilkan kiloan terpakai, hasil per ukuran, rol yang terhubung, serta hasil rata-rata per kg dan per rol penuh bila bukti pemakaiannya lengkap. Contoh: Rp88.000/kg × 25 kg ÷ 100 pcs XL = Rp22.000 biaya kain per pcs.
+- Pasang **Core.gs** dan **Index.html** bersama. Harga usaha tidak diisi otomatis dari angka contoh.
+
 ## Rilis 1.5.45 - Hapus produk pembelian dan gabungkan PO pilihan owner
 
 - Owner dapat memakai **Hapus produk** dari formulir produk pembelian. Produk disembunyikan dari katalog dan pilihan order baru; nama, foto, order, DP, dan riwayat penerimaannya tetap tersimpan. Formulir lama di perangkat lain tidak dapat menghidupkan kembali produk yang sudah dihapus.
