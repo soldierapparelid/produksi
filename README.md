@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.45 - Hapus produk pembelian dan gabungkan PO pilihan owner
+
+- Owner dapat memakai **Hapus produk** dari formulir produk pembelian. Produk disembunyikan dari katalog dan pilihan order baru; nama, foto, order, DP, dan riwayat penerimaannya tetap tersimpan. Formulir lama di perangkat lain tidak dapat menghidupkan kembali produk yang sudah dihapus.
+- **Gabungkan PO** menggabungkan invoice aktif yang dipilih owner dari supplier yang sama. Pratinjau menampilkan jumlah, total, DP, dan sisa; invoice asal tetap tercatat. Invoice baru tidak otomatis masuk ke pesanan lama. Order yang sedang diarsipkan tidak ikut digabung.
+- **Tambah model ke invoice ini** menambahkan model ke invoice tujuan secara eksplisit. Penggabungan memakai satu catatan riwayat, tanpa menulis ulang order, pembayaran, atau penerimaan. Perubahan dari perangkat lain diperiksa sebelum simpan; pengiriman ulang setelah koneksi putus tidak menggandakan catatan.
+- Server dan tampilan harus diperbarui bersama (`Core.gs` dan `Index.html`).
+
 ## Rilis 1.5.44 - Batalkan hitungan (owner/admin)
 
 - Hitung fisik yang salah dapat dibatalkan owner/admin lewat "Batalkan hitungan" (di baris setoran pada rincian PO dan di slip setoran). Aksi server `batalHitungSetor`: status kembali `diajukan` sehingga laporan penjahit muncul lagi di Hitung fisik; jumlah, nomor slip, harga dan tanggal tetap, tidak ada baris yang dihapus, catatan diberi keterangan siapa yang membatalkan. Ditolak bila sudah di-QC, sudah terikat pembayaran, berasal dari data lama, punya koreksi fisik, atau setoran dicatat langsung oleh QC/owner (untuk itu: Hapus slip lalu catat ulang).

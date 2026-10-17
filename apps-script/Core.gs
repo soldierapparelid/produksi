@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.44';
+var APP_VERSION = '1.5.45';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -3261,7 +3261,7 @@ function createCore(store, env) {
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
-  var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, saveCommerceOrder:1, saveCommerceOrderBatch:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, gantiCommerceGroupPayment:1, salinCommerceOrderLama:1, cancelCommerceRecord:1, restoreCommerceRecord:1, arsipCommerceNota:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
+  var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, deleteCommerceProduct:1, mergeCommerceInvoices:1, saveCommerceOrder:1, saveCommerceOrderBatch:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, gantiCommerceGroupPayment:1, salinCommerceOrderLama:1, cancelCommerceRecord:1, restoreCommerceRecord:1, arsipCommerceNota:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
 
   function handle(action, payload) {
@@ -5594,14 +5594,33 @@ function coreCommerceData(row) { return coreMap(row && row.data); }
    Transport/session fields and later edits are deliberately outside this proof. */
 function coreCommerceOrderBatchProof(p) {
   p=p||{};var pay=p.initialPayment;
-  return coreCommerceHash({id:p.id,supplierId:p.supplierId,grupNama:p.grupNama===undefined?'':p.grupNama,tanggalOrder:p.tanggalOrder,catatan:p.catatan===undefined?'':p.catatan,
+  var intent={id:p.id,supplierId:p.supplierId,grupNama:p.grupNama===undefined?'':p.grupNama,tanggalOrder:p.tanggalOrder,catatan:p.catatan===undefined?'':p.catatan,
     orders:(p.orders instanceof Array?p.orders:[]).map(function(o){o=o||{};return {id:o.id,produkId:o.produkId,hargaSatuan:o.hargaSatuan,items:(o.items instanceof Array?o.items:[]).map(function(i){i=i||{};return {id:i.id,nama:i.nama,jumlah:i.jumlah};})};}),
-    initialPayment:pay?{jumlah:pay.jumlah,tanggal:pay.tanggal||p.tanggalOrder,metode:pay.metode||'transfer',catatan:pay.catatan===undefined?'':pay.catatan}:null});
+    initialPayment:pay?{jumlah:pay.jumlah,tanggal:pay.tanggal||p.tanggalOrder,metode:pay.metode||'transfer',catatan:pay.catatan===undefined?'':pay.catatan}:null};
+  if(p.targetInvoiceId){intent.targetInvoiceId=p.targetInvoiceId;intent.expectedGroupRevisions=p.expectedGroupRevisions||{};}
+  return coreCommerceHash(intent);
+}
+/* A merge is one append-only metadata event. Orders and financial/receipt rows
+   are never rewritten as a group, so interruption cannot merge only some. */
+function coreCommerceInvoiceMergeIndex(events) {
+  var out=Object.create(null);
+  (events||[]).forEach(function(e){if(e.module!=='pembelian'||e.kind!=='invoiceMerge')return;var d=coreCommerceData(e);
+    if(d.version!==1||!d.groupId||!(d.orderIds instanceof Array)||d.orderIds.length<2)return;
+    d.orderIds.forEach(function(key){out[key]={id:e.id,data:d,raw:e.data};});
+  });return out;
+}
+function coreCommerceInvoiceKey(value) {
+  value=value||{};var supplier=String((value.supplierSnapshot||{}).id||''),group=String(value.invoiceGroupId||value.invoiceId||'').trim(),name=String(value.grupNama||'').trim();
+  return JSON.stringify(group?['invoice',supplier,group]:supplier&&name?['legacy',supplier,name]:['order',value.id]);
+}
+function coreCommerceInvoiceMergeProof(p,actor) {
+  var ids=(p.orderIds||[]).slice().sort(),revisions={};ids.forEach(function(key){revisions[key]=(p.expectedRevisions||{})[key]||'';});
+  return coreCommerceHash({id:p.id,orderIds:ids,expectedRevisions:revisions,grupNama:String(p.grupNama||'').trim(),actor:actor});
 }
 /* One pass over the tables for drawing many records. Without it every order
    parses every product again (photo included) just to find two names. */
 function coreCommerceLookup(records, events) {
-  var out={products:Object.create(null),suppliers:Object.create(null),events:Object.create(null)};
+  var out={products:Object.create(null),suppliers:Object.create(null),events:Object.create(null),invoiceMerges:coreCommerceInvoiceMergeIndex(events)};
   (records||[]).forEach(function(r){if(r.module!=='pembelian'||r.kind!=='product'&&r.kind!=='supplier')return;var d=coreCommerceData(r),box=r.kind==='product'?out.products:out.suppliers;if(!box[d.id])box[d.id]={id:d.id,nama:d.nama,supplierId:d.supplierId};});
   (events||[]).forEach(function(e){var k=e.module+'|'+e.parentId;(out.events[k]||(out.events[k]=[])).push(e);});
   return out;
@@ -5610,7 +5629,10 @@ function coreCommerceLookup(records, events) {
 function coreCommerceLean(value) { if(value&&value.gambar)value.hasPicture=true;if(value)delete value.gambar;return value; }
 function coreCommerceRecordView(row, events, records, lookup) {
   var value=coreCommerceCopy(coreCommerceData(row)), embedded=value._initialPayment, own=(lookup?lookup.events[row.module+'|'+value.id]||[]:events||[]).filter(function(e){return e.module===row.module&&e.parentId===value.id;});
-  var revision=coreCommerceHash({record:row.revision,events:own.map(function(e){return [e.id,e.data];}).sort(function(a,b){return a[0].localeCompare(b[0]);})});
+  var merge=row.module==='pembelian'&&row.kind==='order'?(lookup?lookup.invoiceMerges:coreCommerceInvoiceMergeIndex(events))[value.id]:null;
+  var revisionProof={record:row.revision,events:own.map(function(e){return [e.id,e.data];}).sort(function(a,b){return a[0].localeCompare(b[0]);})};
+  if(merge){value.invoiceGroupId=merge.data.groupId;value.invoiceGroupName=merge.data.grupNama;value.invoiceMergedAt=merge.data.createdAt;value.invoiceMergedBy=merge.data.createdBy;value.invoiceMergeProof=merge.data.proof;revisionProof.invoiceMerge=[merge.id,merge.raw];}
+  var revision=coreCommerceHash(revisionProof);
   value.orderEditCount=(value._orderChanges||[]).length;
   if(value._notaChanges)value.notaEditCount=value._notaChanges.length;
   ['_createHash','_createActor','_lastMutation','_initialPayment','_orderChanges','_notaChanges'].forEach(function(k){delete value[k];});
@@ -5790,7 +5812,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
         var unchanged=old&&old.items instanceof Array&&old.items.length===out.items.length&&out.items.every(function(i,n){var prior=old.items[n];return prior&&i.id===prior.id&&i.nama===String(prior.nama==null?'':prior.nama).trim()&&i.jumlah===Number(prior.jumlah);});
         if(duplicate&&!unchanged)fail('Nama varian ganda dalam satu model. Gabungkan jumlah pada varian yang sama atau gunakan nama yang berbeda.');
       }
-      if(kind==='order'){out.produkId=id(r.produkId);var product=find('pembelian','product',out.produkId),pd=coreCommerceData(product),supplier=find('pembelian','supplier',pd.supplierId),sd=coreCommerceData(supplier),sameProduct=old&&old.produkId===out.produkId&&old.productSnapshot&&old.productSnapshot.id&&old.supplierSnapshot&&old.supplierSnapshot.id;if(!sameProduct&&(!product||!supplier||pd.aktif===false||sd.aktif===false))fail('Produk atau supplier pembelian tidak ditemukan atau tidak aktif.');out.productSnapshot=sameProduct?old.productSnapshot:{id:pd.id,nama:pd.nama,model:pd.model||'',warna:pd.warna||'',supplierId:pd.supplierId};out.supplierSnapshot=sameProduct?old.supplierSnapshot:{id:sd.id,nama:sd.nama,kontak:sd.kontak||'',alamat:sd.alamat||''};out.grupNama=text(r.grupNama,100);out.hargaSatuan=num(r.hargaSatuan,1e12,false,true);out.tanggalOrder=date(r.tanggalOrder);out.totalHarga=out.items.reduce(function(n,i){return n+i.jumlah*out.hargaSatuan;},0);out.catatan=text(r.catatan,1000);if(!Number.isSafeInteger(out.totalHarga))fail('Total terlalu besar.');}
+      if(kind==='order'){out.produkId=id(r.produkId);var product=find('pembelian','product',out.produkId),pd=coreCommerceData(product),supplier=find('pembelian','supplier',pd.supplierId),sd=coreCommerceData(supplier),sameProduct=old&&old.produkId===out.produkId;if(!sameProduct&&(!product||!supplier||pd.aktif===false||pd.deleted||sd.aktif===false))fail('Produk atau supplier pembelian tidak ditemukan atau tidak aktif.');out.productSnapshot=sameProduct&&old.productSnapshot?old.productSnapshot:{id:pd.id,nama:pd.nama,model:pd.model||'',warna:pd.warna||'',supplierId:pd.supplierId};out.supplierSnapshot=sameProduct&&old.supplierSnapshot?old.supplierSnapshot:{id:sd.id,nama:sd.nama,kontak:sd.kontak||'',alamat:sd.alamat||''};out.grupNama=text(r.grupNama,100);out.hargaSatuan=num(r.hargaSatuan,1e12,false,true);out.tanggalOrder=date(r.tanggalOrder);out.totalHarga=out.items.reduce(function(n,i){return n+i.jumlah*out.hargaSatuan;},0);out.catatan=text(r.catatan,1000);if(!Number.isSafeInteger(out.totalHarga))fail('Total terlalu besar.');}
       else{var c=r.customer||{};out.customer={name:text(c.name,120,true),phone:text(c.phone,60),address:text(c.address,400),type:c.type==='reseller'?'reseller':'walkin'};out.date=date(r.date);out.discountPercent=num(r.discountPercent===undefined?0:r.discountPercent,100,false,false);out.shipping=num(r.shipping===undefined?0:r.shipping,1e12,false,true);out.subtotal=out.items.reduce(function(n,i){return n+i.subtotal;},0);out.discountAmount=Math.round(out.subtotal*out.discountPercent/100);out.total=out.subtotal-out.discountAmount+out.shipping;out.notes=text(r.notes,1000);if(!Number.isSafeInteger(out.total))fail('Total terlalu besar.');}
       out.cancelled=old?!!old.cancelled:false;if(out.cancelled)fail('Catatan yang dibatalkan tidak dapat diubah.');
       if(previous){var current=view(previous);
@@ -5826,7 +5848,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
   function save(module,kind,p){
     var me=writable(p),r=p.record||{},key=id(r.id),old=find(module,kind,key),actor=me.id;
     var rawIntent=coreCommerceCopy(r);delete rawIntent.revision;var intent=coreCommerceHash({kind:kind,input:rawIntent,before:p.expectedRevision||''});
-    if(old){var data=coreCommerceData(old);if(!p.expectedRevision&&data._createHash===intent&&data._createActor===actor)return reply(module,old,p,me);if(data._lastMutation&&data._lastMutation.hash===intent&&data._lastMutation.actor===actor)return reply(module,old,p,me);expected(old,p);}
+    if(old){var data=coreCommerceData(old);if(kind==='product'&&data.deleted)fail('Produk sudah dihapus dari daftar. Buat produk baru jika masih diperlukan.');if(!p.expectedRevision&&data._createHash===intent&&data._createActor===actor)return reply(module,old,p,me);if(data._lastMutation&&data._lastMutation.hash===intent&&data._lastMutation.actor===actor)return reply(module,old,p,me);expected(old,p);}
     else if(p.expectedRevision)fail('Catatan asal tidak ditemukan.');
     if(old&&kind==='order'&&(old.sourceHash||view(old).needsReview)&&me.divisi!=='owner')fail('Hanya owner yang dapat mengedit rincian order dari data lama atau yang perlu diperiksa.');
     var data=normalize(kind,r,old);if(kind==='nota'){if(old)data.noNota=coreCommerceData(old).noNota||key;else{var prefix='SA-'+data.date.replace(/-/g,'').slice(2)+'-',sequence=0;store.read('CommerceImport').forEach(function(row){sequence=Math.max(sequence,coreNum((coreCommerceData(row).summary||{}).notaCounter));});all().filter(function(row){return row.kind==='nota';}).forEach(function(row){var note=coreCommerceData(row),n=String(note.noNota||note.id||''),match=/^SA-\d{6}-(\d+)$/.exec(n);if(match)sequence=Math.max(sequence,Number(match[1]));});if(sequence>=999999)fail('Nomor nota tanggal ini penuh.');data.noNota=prefix+('000'+(sequence+1)).slice(-Math.max(3,String(sequence+1).length));}}
@@ -5839,6 +5861,10 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       if(previousData.invoiceId){
         if(!data.supplierSnapshot||data.supplierSnapshot.id!==(previousData.supplierSnapshot||{}).id)fail('Supplier invoice tetap. Buat invoice lain untuk supplier berbeda.');
         ['invoiceId','invoiceOrderIds','invoiceProof'].forEach(function(k){data[k]=previousData[k];});
+      }
+      if(view(old).invoiceGroupId){
+        if((data.supplierSnapshot||{}).id!==(previousData.supplierSnapshot||{}).id)fail('Supplier invoice gabungan tetap. Buat invoice lain untuk supplier berbeda.');
+        ['invoiceGroupId','invoiceGroupName'].forEach(function(k){if(previousData[k]!==undefined)data[k]=previousData[k];});
       }
     }
     if(old&&kind==='nota'){
@@ -5857,7 +5883,41 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
   }
   actions.saveCommerceSupplier=function(p){return save('pembelian','supplier',p);};
   actions.saveCommerceProduct=function(p){return save('pembelian','product',p);};
+  /* Keep the product identity and picture for existing orders. A removed catalog
+     entry cannot be restored accidentally by a stale form on another device. */
+  actions.deleteCommerceProduct=function(p){
+    var me=writable(p,true),row=find('pembelian','product',id(p.id)),current=view(row),data=coreCommerceCopy(coreCommerceData(row));
+    if(data.deleted){
+      if(data.deletedBy===me.id&&data.deletedFromRevision===p.expectedRevision)return reply('pembelian',row,p,me);
+      fail('Produk sudah dihapus dari daftar. Muat ulang data.');
+    }
+    expected(row,p);var stamp=now();
+    data.deleted=true;data.aktif=false;data.deletedAt=stamp;data.deletedBy=me.id;data.deletedFromRevision=current.revision;
+    var updated=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash([data,stamp,me.id]),diubah:stamp});
+    checkRows('CommerceRecord',[updated]);store.update('CommerceRecord',row.id,updated);return reply('pembelian',updated,p,me);
+  };
   actions.saveCommerceOrder=function(p){return save('pembelian','order',p);};
+  actions.mergeCommerceInvoices=function(p){
+    var me=writable(p,true),key=id(p.id),name=text(p.grupNama,100),selected=p.orderIds,revisions=p.expectedRevisions||{};
+    if(!(selected instanceof Array)||selected.length<2||selected.length>100)fail('Pilih seluruh model dari 2 atau lebih invoice, maksimal 100 model.');
+    var seen=Object.create(null),ids=selected.map(function(k){k=id(k);if(seen[k])fail('Model dipilih lebih dari sekali.');seen[k]=true;return k;}).sort();
+    var proof=coreCommerceInvoiceMergeProof(p,me.id),events=store.read('CommerceEvent'),eventId='merge_'+coreCommerceHash(key).slice(0,40);
+    function answer(){var out={groupId:key,orderIds:ids.slice(),proof:proof};if(p.withState===true)out.commerce=stateOf('pembelian',me);return out;}
+    var prior=events.filter(function(e){return e.id===eventId;})[0];
+    if(prior){var priorData=coreCommerceData(prior);if(prior.module!=='pembelian'||prior.kind!=='invoiceMerge'||priorData.groupId!==key||priorData.proof!==proof||prior.dibuatOleh!==me.id)fail('Identitas penggabungan sudah dipakai untuk isi atau akun berbeda.');return answer();}
+    var records=all(),lookup=coreCommerceLookup(records,events),orders=records.filter(function(r){return r.module==='pembelian'&&r.kind==='order';}),byId=Object.create(null),groups=Object.create(null),supplier='';
+    orders.forEach(function(r){var v=coreCommerceRecordView(r,events,records,lookup);byId[v.id]={row:r,value:v};});
+    ids.forEach(function(k){var entry=byId[k],v=entry&&entry.value;if(!entry)fail('Order tidak ditemukan. Muat ulang daftar.');if(v.cancelled)fail('Order nonaktif atau arsip tidak dapat digabung.');
+      var sid=String((v.supplierSnapshot||{}).id||'');if(!sid||supplier&&sid!==supplier)fail('Hanya invoice dari supplier yang sama dapat digabung.');supplier=sid;
+      if(!revisions[k]||revisions[k]!==v.revision)fail('Invoice berubah sejak dipilih. Muat ulang lalu pilih kembali.');groups[coreCommerceInvoiceKey(v)]=true;
+    });
+    if(Object.keys(groups).length<2)fail('Model yang dipilih sudah berada dalam satu invoice.');
+    orders.forEach(function(r){var v=byId[coreCommerceData(r).id].value;if(!v.cancelled&&groups[coreCommerceInvoiceKey(v)]&&!seen[v.id])fail('Pilih seluruh model pada setiap invoice agar tidak terpisah. Muat ulang daftar.');});
+    if(records.some(function(r){var d=coreCommerceData(r),pay=d._initialPayment;return r.id===key||d.id===key||d.invoiceId===key||d.invoiceGroupId===key||pay&&(pay.id===key||pay.groupId===key);})||events.some(function(e){var d=coreCommerceData(e);return e.id===key||d.groupId===key||d.correctionId===key;}))fail('Identitas gabungan sudah digunakan. Buka kembali formulir.');
+    var stamp=now(),data={version:1,groupId:key,grupNama:name,orderIds:ids,proof:proof,createdBy:me.id,createdAt:stamp,before:ids.map(function(k){var v=byId[k].value;return {id:k,revision:v.revision,invoiceId:v.invoiceId||'',invoiceGroupId:v.invoiceGroupId||'',invoiceGroupName:v.invoiceGroupName||'',grupNama:v.grupNama||''};})};
+    var event={id:eventId,module:'pembelian',parentId:key,kind:'invoiceMerge',data:JSON.stringify(data),dibuat:stamp,dibuatOleh:me.id,sourceHash:''};
+    checkRows('CommerceEvent',[event]);store.append('CommerceEvent',event);return answer();
+  };
   /* A supplier invoice is one physical Record append. Its initial DP is frozen
      in each parent row, so no second table can leave money without the orders. */
   actions.saveCommerceOrderBatch=function(p){
@@ -5875,7 +5935,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     if(amount>total)fail('DP tidak boleh melebihi total invoice.');var shares=amount?coreCommerceSplit(amount,totals):totals.map(function(){return 0;});if(!shares)fail('Pembagian DP invoice tidak sah.');
     var proof=coreCommerceOrderBatchProof(p),records=all(),events=store.read('CommerceEvent'),existing=records.filter(function(r){return r.module==='pembelian'&&r.kind==='order'&&coreCommerceData(r).invoiceId===key;});
     function paymentId(oid){return 'gp_'+coreCommerceHash([key,oid]).slice(0,40);}
-    function answer(rows){var out={invoiceId:key,orderIds:ids.slice(),groupId:amount?key:'',records:rows.map(function(r){return coreCommerceLean(view(r));})};if(p.withState===true)out.commerce=stateOf('pembelian',me);return out;}
+    function answer(rows){var out={invoiceId:key,orderIds:ids.slice(),groupId:amount?key:'',records:rows.map(function(r){return coreCommerceLean(view(r));})};if(p.targetInvoiceId)out.invoiceGroupId=p.targetInvoiceId;if(p.withState===true)out.commerce=stateOf('pembelian',me);return out;}
     if(existing.length){
       if(existing.length!==ids.length)fail('Invoice tersimpan sebagian. Periksa seluruh model dan DP; jangan membuat invoice pengganti.');
       var byId=Object.create(null);existing.forEach(function(r){var d=coreCommerceData(r);if(byId[d.id])fail('Identitas model invoice ganda.');byId[d.id]=r;});
@@ -5885,10 +5945,22 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
         return row;
       });return answer(ordered);
     }
+    var targetInvoice=p.targetInvoiceId?id(p.targetInvoiceId):'',targetName='';
+    if(targetInvoice){
+      if(targetInvoice===key)fail('Identitas penambahan model harus berbeda dari invoice tujuan.');
+      var lookup=coreCommerceLookup(records,events),members=records.filter(function(r){return r.module==='pembelian'&&r.kind==='order';}).map(function(r){return coreCommerceRecordView(r,events,records,lookup);}).filter(function(v){return !v.cancelled&&(v.invoiceGroupId||v.invoiceId)===targetInvoice;});
+      if(!members.length)fail('Invoice tujuan sudah berubah atau tidak tersedia. Buka kembali invoice.');
+      if(members.length+orders.length>100)fail('Satu gabungan paling banyak 100 model.');
+      var expectedMembers=p.expectedGroupRevisions||{},expectedIds=Object.keys(expectedMembers).sort(),memberIds=members.map(function(v){return v.id;}).sort();
+      if(coreCommerceHash(expectedIds)!==coreCommerceHash(memberIds))fail('Isi invoice tujuan berubah. Muat ulang sebelum menambah model.');
+      members.forEach(function(v){if(String((v.supplierSnapshot||{}).id||'')!==supplierId)fail('Invoice tujuan harus mempunyai identitas supplier yang sama.');if(!expectedMembers[v.id]||expectedMembers[v.id]!==v.revision)fail('Invoice tujuan berubah. Muat ulang sebelum menambah model.');});
+      targetName=String(members[0].invoiceGroupId?members[0].invoiceGroupName||'':members[0].grupNama||'');
+    }else if(p.expectedGroupRevisions)fail('Pilih invoice tujuan untuk menambah model.');
     var reserved=Object.create(null);reserved[key]=true;ids.forEach(function(oid){reserved[oid]=true;reserved[paymentId(oid)]=true;});
     if(records.some(function(r){var d=coreCommerceData(r),pay=d._initialPayment;return reserved[r.id]||reserved[d.id]||reserved[d.invoiceId]||pay&&(reserved[pay.id]||reserved[pay.groupId]);})||events.some(function(e){var d=coreCommerceData(e);return reserved[e.id]||reserved[d.groupId]||reserved[d.correctionId];}))fail('Identitas invoice atau model sudah digunakan. Muat ulang dan periksa riwayat.');
     var supplier=find('pembelian','supplier',supplierId);if(!supplier||coreCommerceData(supplier).aktif===false)fail('Supplier pembelian tidak ditemukan atau tidak aktif.');
     var stamp=now(),rows=orders.map(function(o,i){var data=normalize('order',{id:o.id,produkId:o.produkId,hargaSatuan:o.hargaSatuan,items:o.items,grupNama:group,tanggalOrder:orderDate,catatan:note});
+      if(targetInvoice){data.invoiceGroupId=targetInvoice;data.invoiceGroupName=targetName;}
       if(data.supplierSnapshot.id!==supplierId)fail('Semua model invoice harus berasal dari supplier yang sama.');
       data.invoiceId=key;data.invoiceOrderIds=ids.slice();data.invoiceProof=proof;data._createHash=proof;data._createActor=me.id;
       if(shares[i])data._initialPayment={id:paymentId(o.id),kind:'payment',groupId:key,tanggal:payDate,jumlah:shares[i],metode:payMethod,catatan:payNote,createdBy:me.id,createdAt:stamp};
@@ -5958,6 +6030,10 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       var same=prior.every(function(e){var x=coreCommerceData(e);return e.dibuatOleh===me.id&&seen[e.parentId]&&e.id===eventId(e.parentId)&&x.tanggal===d.tanggal&&x.metode===d.metode&&x.catatan===d.catatan;})&&prior.reduce(function(n,e){return n+coreNum(coreCommerceData(e).jumlah);},0)===amount;
       if(!same)fail('Identitas transaksi sudah digunakan untuk isi atau akun berbeda.');return answer();
     }
+    /* New DP belongs to the invoice currently selected. An exact retry above
+       must still recover an older payment even if its orders were regrouped. */
+    var invoiceKey=coreCommerceInvoiceKey(views[0]);
+    if(views.some(function(v){return coreCommerceInvoiceKey(v)!==invoiceKey;}))fail('Pembayaran grup harus untuk satu invoice. Gabungkan PO yang dipilih terlebih dahulu.');
     views.forEach(function(v){if(!p.expectedRevisions||p.expectedRevisions[v.id]!==v.revision)fail('Catatan berubah sejak formulir dibuka. Muat ulang dan periksa lagi.');if(v.cancelled)fail('Catatan sudah dibatalkan.');if(v.paymentReview)fail('Riwayat nominal salah satu order perlu diperiksa. Keluarkan order itu dari pembayaran grup.');});
     var shares=coreCommerceSplit(amount,views.map(function(v){return v.balance;}));if(!shares)fail('Pembayaran grup harus lebih dari nol dan tidak melebihi sisa tagihan grup.');
     var stamp=now(),stored=[];views.forEach(function(v,i){if(shares[i])stored.push({id:eventId(v.id),module:'pembelian',parentId:v.id,kind:'payment',data:JSON.stringify({tanggal:d.tanggal,catatan:d.catatan,jumlah:shares[i],metode:d.metode,groupId:key}),dibuat:stamp,dibuatOleh:me.id,sourceHash:''});});
