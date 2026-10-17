@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.45';
+var APP_VERSION = '1.5.46';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -236,6 +236,67 @@ function coreStatusStok(saldo, st) {
   if (saldo <= kuning) return 'menipis';
   return 'aman';
 }
+/* Price corrections are separate evidence: no purchase, roll weight or usage is
+   rewritten. A detailed old roll takes its share from the aggregate pool; it is
+   never counted as another purchase. HPP can price exact allocations by id. */
+function coreStockPrices(stock) {
+  var byId = {}, materialMap = {}, groups = {}, history = {};
+  /* State rows carry the original opaque revision before request evidence is
+     redacted. Reuse it so browser and server derive the same price proof. */
+  function revision(row) { return row.revision || coreDomainRevision('StokBahan',row); }
+  function number(value) { if (value === null || value === undefined || typeof value === 'boolean' || String(value).trim() === '') return null; var n=Number(value); return isFinite(n) && Math.abs(n) <= Number.MAX_SAFE_INTEGER ? n : null; }
+  (stock || []).forEach(function (r) {
+    if (r.jenis === 'harga' && r.sourceStockId) (history[r.sourceStockId] || (history[r.sourceStockId] = [])).push(r);
+    if (!(r.jenis === 'beli' || r.jenis === 'rinci' || r.jenis === 'koreksi' && !r.sourceStockId && coreNum(r.qty) > 0) || !(number(r.qty) > 0)) return;
+    var key = coreNormBahan(r.bahan), unit = String(r.satuan || 'kg'); if (!key || SATUAN_BAHAN.indexOf(unit) < 0) return;
+    var entry = { id:r.id,jenis:r.jenis,bahan:r.bahan,satuan:unit,qty:coreNum(r.qty),invoice:r.invoice || '',invoiceId:r.invoiceId || '',rollLabel:r.rollLabel || '',stockMode:r.stockMode || '',harga:0,total:0,priceSource:'belum',correctionId:'',history:[],source:r };
+    byId[r.id] = entry;
+    var groupKey = JSON.stringify([key,unit]);
+    if (!groups[groupKey]) groups[groupKey] = {key:key,satuan:unit,rows:[]};
+    groups[groupKey].rows.push(entry);
+  });
+  Object.keys(groups).forEach(function (key) {
+    var g = groups[key], poolQty = 0, poolTotal = 0, poolMissing = 0, rollQty = 0, rollTotal = 0, rollMissing = 0, rinciQty = 0, basis = [];
+    var hasAggregateBuy = g.rows.some(function (r) { return r.jenis === 'beli' && r.stockMode !== 'roll'; });
+    g.rows.forEach(function (r) {
+      r.history = (history[r.id] || []).slice();
+      var latest = r.history.length ? r.history[r.history.length - 1] : null;
+      var rawRate=number(r.source.harga), rawTotal=number(r.source.total), hasTotal=r.source.total !== undefined && r.source.total !== null && r.source.total !== '';
+      var badSource = r.source.harga !== undefined && r.source.harga !== null && r.source.harga !== '' && (rawRate === null || rawRate < 0) || hasTotal && (rawTotal === null || rawTotal < 0);
+      var original = r.jenis === 'beli' ? (rawRate > 0 ? rawRate : rawTotal > 0 ? rawTotal / r.qty : 0) : 0;
+      r.harga = latest ? Math.max(0,coreNum(latest.harga)) : original;
+      r.correctionId = latest ? latest.id : '';
+      r.priceSource = latest ? 'koreksi' : r.harga > 0 ? 'pembelian' : 'belum';
+      r.priceComplete = latest ? number(latest.harga) > 0 && Number.isSafeInteger(Math.round(r.qty*Number(latest.harga))) : !badSource && original > 0 && Number.isSafeInteger(Math.round(r.qty*original)) && !(rawRate > 0 && hasTotal && Math.abs(rawTotal-r.qty*rawRate) > Math.max(1,r.qty*rawRate*0.000001));
+      if (r.jenis === 'rinci') { rinciQty += r.qty; return; }
+      if (r.jenis === 'koreksi' && !latest && hasAggregateBuy) return;
+      if (r.stockMode === 'roll') { rollQty += r.qty; if (r.priceComplete) rollTotal += r.qty*r.harga; else rollMissing += r.qty; }
+      else { poolQty += r.qty; if (r.priceComplete) poolTotal += r.qty*r.harga; else poolMissing += r.qty; basis.push([r.id,revision(r.source),r.correctionId,r.harga]); }
+    });
+    var base = poolQty > 0 ? poolTotal/poolQty : 0;
+    if (rinciQty > poolQty) { poolMissing += rinciQty-poolQty; poolTotal += (rinciQty-poolQty)*base; poolQty = rinciQty; }
+    var inheritedComplete = poolMissing < 0.000001 && base > 0, missingFraction = poolQty > 0 ? poolMissing/poolQty : 0;
+    g.rows.forEach(function (r) {
+      if (r.jenis === 'rinci') {
+        if (r.correctionId) { poolTotal += r.qty*(r.harga-base); poolMissing = Math.max(0,poolMissing-r.qty*missingFraction); }
+        else { r.harga = base; r.priceSource = base > 0 ? 'rata-rata' : 'belum'; r.priceComplete=inheritedComplete; }
+      }
+      r.total = r.qty*r.harga;
+      r.priceRevision = coreHash(coreDomainCanonical(['stock-price',revision(r.source),r.history.map(revision),r.jenis === 'rinci' && !r.correctionId ? basis : []]));
+      delete r.source;
+    });
+    var qty = poolQty+rollQty, total = Math.max(0,poolTotal+rollTotal), price = qty > 0 ? total/qty : 0;
+    var missing=poolMissing+rollMissing, unitResult = {hpp:price,harga:price,qty:qty,total:total,missingQty:missing < 0.000001 ? 0 : missing};
+    if (!materialMap[g.key]) materialMap[g.key] = {units:{}};
+    materialMap[g.key].units[g.satuan] = unitResult;
+  });
+  Object.keys(materialMap).forEach(function (key) {
+    var m = materialMap[key], units = Object.keys(m.units);
+    if (units.length === 1) { var u=m.units[units[0]]; Object.keys(u).forEach(function (k) { m[k]=u[k]; }); m.satuan=units[0]; }
+    else { m.hpp=0; m.harga=0; m.qty=0; m.total=0; m.missingQty=0; m.satuan=''; }
+  });
+  return {byId:byId,materialMap:materialMap};
+}
 function coreStok(potong, stok, st) {
   var map = {}; var mulai = coreTglOk(st && st.stokMulai);
   function get(nama, prioritas) {
@@ -259,10 +320,14 @@ function coreStok(potong, stok, st) {
     coreBahanPotong(r).forEach(function (x) { var b = get(x.nama, 1); if (b) b.pakai += x.qty; });
   });
   var sembunyi = {}; ((st && st.bahanSembunyi) || []).forEach(function (n) { sembunyi[coreNormBahan(n)] = 1; });
-  var out = [];
+  var out = [], corrected = {};
+  (stok || []).forEach(function (r) { if (r.jenis === 'harga') corrected[coreNormBahan(r.bahan)] = true; });
+  var priceMap = Object.keys(corrected).length ? coreStockPrices(stok) : {materialMap:{}};
   for (var key in map) {
     var m = map[key]; var bulat = function (n) { return Math.round(n * 1000) / 1000; };
     var saldo = bulat(m.beli - m.pakai + m.koreksi); var hpp = m.beli > 0 ? m.nilai / m.beli : 0;
+    var prices = priceMap.materialMap[m.kunci], unitPrices = prices && prices.units[m.satuan || 'kg'];
+    if (corrected[m.kunci] && unitPrices) hpp = unitPrices.hpp;
     out.push({ kunci: m.kunci, nama: m.nama, satuan: SATUAN_BAHAN.indexOf(m.satuan) >= 0 ? m.satuan : 'kg', beli: bulat(m.beli), pakai: bulat(m.pakai), koreksi: bulat(m.koreksi),
       saldo: saldo, rol: m.rol, nBeli: m.nBeli, hpp: Math.round(hpp), nilai: Math.round(saldo * hpp), status: coreStatusStok(saldo, st), sembunyi: !!sembunyi[m.kunci] });
   }
@@ -291,7 +356,7 @@ function coreFlattenInvoiceRolls(items) {
   return out;
 }
 function coreRollInventory(cuts, stock, st, plans, excludeId, knownMaterials) {
-  var byId = {}, usedPlans = {}, reservedLegacy = {}, identified = {}, materialMap = {};
+  var byId = {}, usedPlans = {}, reservedLegacy = {}, identified = {}, materialMap = {}, prices = coreStockPrices(stock);
   var materials = knownMaterials || coreCutAvailability(cuts, stock, st, plans, excludeId);
   materials.forEach(function (r) { materialMap[r.kunci] = r; });
   (stock || []).forEach(function (r) {
@@ -301,6 +366,7 @@ function coreRollInventory(cuts, stock, st, plans, excludeId, knownMaterials) {
     var dirinci = r.jenis === 'rinci';
     byId[r.id] = {id:r.id,invoiceId:r.invoiceId || '',invoice:r.invoice || '',bahan:r.bahan,satuan:r.satuan,rollLabel:r.rollLabel || '',qty:coreNum(r.qty),pakai:0,koreksi:0,correctionRevision:'',sourceRevision:coreHash(JSON.stringify([r.id,String(r.bahan || ''),String(r.satuan || ''),String(r.rollLabel || ''),coreNum(r.qty),String(r.invoiceId || ''),String(r.invoice || '')])),saldo:coreNum(r.qty),dicadangkan:0,tersedia:0,status:'tersedia'};
     if (dirinci) byId[r.id].rinci = true;
+    var price = prices.byId[r.id]; if (price) ['harga','total','priceSource','priceRevision','priceComplete','correctionId'].forEach(function (field) { byId[r.id][field]=price[field]; });
   });
   (stock || []).forEach(function (r) { var roll=byId[r.sourceStockId]; if (r.jenis === 'koreksi' && roll) { roll.koreksi += coreNum(r.qty); roll.correctionRevision = r.id; } });
   (cuts || []).forEach(function (r) {
@@ -1142,7 +1208,9 @@ function createCore(store, env) {
       if (!semua) {
         var cutLama = coreYmd(new Date(env.now().getTime() - 120 * 86400000));
         var g0 = gaji.length; gaji = gaji.filter(function (g) { return String(g.tanggal || '') >= cutLama || !g.lunas; });
-        var s0 = stokList.length; stokList = stokList.filter(function (r) { return String(r.tanggal || '') >= cutLama; });
+        /* Old price sources still support current rolls and HPP. Removing them
+           from the response would make the owner's price proof incomplete. */
+        var s0 = stokList.length; stokList = stokList.filter(function (r) { return String(r.tanggal || '') >= cutLama || r.jenis === 'beli' || r.jenis === 'rinci' || r.jenis === 'harga' || r.jenis === 'koreksi' && !r.sourceStockId && coreNum(r.qty) > 0; });
         if (gaji.length < g0 || stokList.length < s0) out.trimmed = true;
       }
       out.stok = revisionRows('StokBahan',stokList); out.karyawan = store.read('Karyawan'); out.gaji = gaji; out.kasbon = revisionRows('Kasbon',store.read('Kasbon'));
@@ -2116,6 +2184,30 @@ function createCore(store, env) {
     store.append('StokBahan',rec);
     return rec;
   };
+  /* Owner may repair an old price even after its cloth has been cut. The source
+     remains immutable and both stock valuation and HPP read this same price. */
+  actions.koreksiHargaBahan = function (p) {
+    ['Pegawai','StokBahan'].forEach(function (name) { if (store.fresh) store.fresh(name); });
+    var me=auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh mengoreksi harga bahan.');
+    var id=idOk(p.id), stokId=idOk(p.stokId), price=coreBahanInvoiceNumber(p.harga), revision=String(p.expectedPriceRevision || ''), note=String(p.catatan || '').trim();
+    if (!id || !stokId || id === stokId) fail('Identitas koreksi harga tidak sah. Buka kembali formulir.');
+    if (p.harga === '' || p.harga === undefined || p.harga === null || typeof p.harga === 'boolean' || !isFinite(price) || price <= 0 || price > 1e12 || price !== Math.round(price)) fail('Isi harga per satuan dalam rupiah, bilangan bulat lebih dari nol.');
+    if (!revision) fail('Versi harga tidak tersedia. Muat ulang lalu buka kembali formulir.');
+    if (!note || note.length > 300) fail('Isi alasan koreksi harga, maksimal 300 karakter.');
+    var requestHash=coreHash(coreDomainCanonical(['koreksiHargaBahan',stokId,price,revision,note])), old=findRow('StokBahan',id);
+    if (old) {
+      if (old.jenis !== 'harga' || old.sourceStockId !== stokId || old.dibuatOleh !== me.id || old.requestActor !== me.id || old.requestHash !== requestHash) fail('Identitas koreksi ini sudah dipakai dengan data berbeda.');
+      return old;
+    }
+    var rows=store.read('StokBahan'), prices=coreStockPrices(rows), source=prices.byId[stokId];
+    if (!source) fail('Sumber bahan tidak ditemukan. Muat data terbaru.');
+    if (source.priceRevision !== revision) fail('Harga atau sumber bahan sudah berubah sejak formulir dibuka. Muat ulang dan periksa harga terbaru.');
+    if (!Number.isSafeInteger(Math.round(source.qty*price))) fail('Nilai bahan terlalu besar. Periksa harga yang dimasukkan.');
+    var rec={id:id,jenis:'harga',tanggal:today(),bahan:source.bahan,qty:0,satuan:source.satuan,rol:0,harga:price,total:0,supplier:'',invoice:source.invoice,sumber:'',alasan:'koreksi_harga',catatan:note,dibuatOleh:me.id,dibuat:nowIso(),asal:'',sourceStockId:stokId,previousCorrectionId:source.correctionId,sourceRevision:revision,requestHash:requestHash,requestActor:me.id};
+    if (store.validateRows) store.validateRows('StokBahan',[rec]);
+    store.append('StokBahan',rec);
+    return rec;
+  };
   /* "Cocokkan fisik": owner mengisi jumlah hasil hitung gudang, selisihnya dicatat sebagai koreksi */
   actions.cocokkanStok = function (p) {
     var me = auth(p); mustAdmin(me);
@@ -2949,7 +3041,7 @@ function createCore(store, env) {
       if (sheet === 'PO' && r.ukuranAktif !== undefined && r.ukuranAktif !== null && r.ukuranAktif !== '') fail('Ukuran aktif PO baru hanya dibuat bersama persiapan bahan, bukan melalui impor lama.');
       if (sheet === 'PO' && coreMap(r.imporSumber).legacyCutting) fail('Bukti ukuran potong asal hanya boleh dibuat melalui migrasi terverifikasi.');
       if (sheet === 'Potong' && (r.rencanaId || coreParseJSON(r.alokasiBahan,[]).length)) fail('Hubungan persiapan potong hanya boleh dibuat saat menyimpan hasil potong.');
-      if (sheet === 'StokBahan' && (r.stockMode || r.sourceStockId)) fail('Identitas atau koreksi rol baru harus berasal dari pencatatan rol, bukan impor.');
+      if (sheet === 'StokBahan' && (r.stockMode || r.sourceStockId || r.jenis === 'harga')) fail('Identitas atau koreksi rol baru harus berasal dari pencatatan rol, bukan impor.');
       var o = {};
       SCHEMA[sheet].forEach(function (c) {
         var v = r[c]; if (v && typeof v === 'object') v = JSON.stringify(v);
@@ -3009,7 +3101,7 @@ function createCore(store, env) {
         if (!r || !idOk(r.id) || idAsli[r.id] || seen[r.id]) return;
         if (sheet === 'PO' && r.ukuranAktif !== undefined && r.ukuranAktif !== null && r.ukuranAktif !== '') fail('Ukuran aktif PO tidak boleh ditambahkan atau diganti melalui impor lama.');
         if (sheet === 'Potong' && (r.rencanaId || coreParseJSON(r.alokasiBahan,[]).length)) fail('Hubungan persiapan potong tidak boleh ditambahkan melalui impor.');
-        if (sheet === 'StokBahan' && (r.stockMode || r.sourceStockId)) fail('Identitas atau koreksi rol tidak boleh ditambahkan atau diganti melalui impor.');
+        if (sheet === 'StokBahan' && (r.stockMode || r.sourceStockId || r.jenis === 'harga')) fail('Identitas atau koreksi rol tidak boleh ditambahkan atau diganti melalui impor.');
         seen[r.id] = 1;
         var o = {};
         SCHEMA[sheet].forEach(function (c) {
@@ -3037,8 +3129,9 @@ function createCore(store, env) {
     if (next.PO) store.read('PO').forEach(function (p) { if (coreMap(p.imporSumber).legacyCutting && !next.PO.some(function (r) { return r.id === p.id; })) fail('PO dengan bukti ukuran potong asal tidak boleh dihapus melalui impor.'); });
     if (next.StokBahan) {
       var afterStock = {}; next.StokBahan.forEach(function (r) { afterStock[r.id] = r; });
+      var pricedSources = {}; store.read('StokBahan').forEach(function (r) { if (r.jenis === 'harga') pricedSources[r.sourceStockId]=true; });
       store.read('StokBahan').forEach(function (r) {
-        if (r.stockMode !== 'roll' && !r.sourceStockId) return;
+        if (r.stockMode !== 'roll' && !r.sourceStockId && !pricedSources[r.id]) return;
         var after = afterStock[r.id];
         if (!after || SCHEMA.StokBahan.some(function (key) { return String(r[key] == null ? '' : r[key]) !== String(after[key] == null ? '' : after[key]); })) fail('Tidak jadi dipindahkan: bukti sumber rol tercatat harus dipertahankan tanpa perubahan.');
       });
@@ -3253,7 +3346,7 @@ function createCore(store, env) {
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveStokJualLink: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1, batalHitungSetor: 1,
-    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
+    saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
@@ -3264,7 +3357,7 @@ function createCore(store, env) {
     var fn = actions[action];
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
-    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
+    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
     if ((contractAction[action] || COMMERCE_WRITE[action]) && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {
