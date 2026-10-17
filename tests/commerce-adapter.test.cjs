@@ -14,7 +14,7 @@ function fixture(){
  function bad(action,p={},regex,token=owner){const r=call(action,p,token);assert.equal(r.ok,false,'must reject');if(regex)assert.match(r.error,regex);return r;}
  function raw(table){h.cold();return h.run(`pkStore_().fresh(${JSON.stringify(table)});pkStore_().read(${JSON.stringify(table)})`);}
  function masters(){good('saveCommerceSupplier',{record:{id:'supplier01',nama:'Supplier Fixture'}});good('saveCommerceProduct',{record:{id:'product01',nama:'Product Fixture',supplierId:'supplier01',kategori:'Atasan'}});}
- function order(extra={}){return {id:'order01',produkId:'product01',items:[{id:'size01',nama:'M',jumlah:3},{id:'size02',nama:'L',jumlah:2}],hargaSatuan:10000,tanggalOrder:'2026-10-08',...extra};}
+ function order(extra={}){return {id:'order01',produkId:'product01',grupNama:'Fixture invoice',items:[{id:'size01',nama:'M',jumlah:3},{id:'size02',nama:'L',jumlah:2}],hargaSatuan:10000,tanggalOrder:'2026-10-08',...extra};}
  function state(module='pembelian'){return good('getCommerceState',{module});}
  return {h,owner,call,good,bad,raw,masters,order,state};
 }
@@ -261,13 +261,13 @@ test('a group payment is divided by remaining balance in whole rupiah, written o
  assert.equal(fixed.commerce.orders.find(o=>o.id==='order02').balance,5000);assert.equal(fixed.commerce.orders.find(o=>o.id==='order01').balance,0);
 });
 
-test('group payments span order dates and products for one frozen supplier but reject different supplier identities',()=>{
+test('group payments span dates and products within one invoice but reject different supplier identities',()=>{
  const f=fixture();f.masters();
  f.good('saveCommerceProduct',{record:{id:'product02',nama:'Second model',supplierId:'supplier01'}});
  f.good('saveCommerceSupplier',{record:{id:'supplier02',nama:'Supplier Fixture'}});
  f.good('saveCommerceProduct',{record:{id:'foreign-product',nama:'Other supplier model',supplierId:'supplier02'}});
- const a=f.good('saveCommerceOrder',{record:f.order({id:'order-aug',tanggalOrder:'2026-08-31',grupNama:'Invoice Agustus'})}).record;
- const b=f.good('saveCommerceOrder',{record:f.order({id:'order-oct',produkId:'product02',tanggalOrder:'2026-10-11',grupNama:'Invoice Oktober'})}).record;
+ const a=f.good('saveCommerceOrder',{record:f.order({id:'order-aug',tanggalOrder:'2026-08-31',grupNama:'Invoice lintas tanggal'})}).record;
+ const b=f.good('saveCommerceOrder',{record:f.order({id:'order-oct',produkId:'product02',tanggalOrder:'2026-10-11',grupNama:'Invoice lintas tanggal'})}).record;
  const foreign=f.good('saveCommerceOrder',{record:f.order({id:'other-supplier-order',produkId:'foreign-product'})}).record;
  const before=JSON.stringify(f.raw('CommerceEvent'));
  f.bad('appendCommerceGroupPayment',{id:'different-suppliers',orderIds:[a.id,foreign.id],expectedRevisions:{[a.id]:a.revision,[foreign.id]:foreign.revision},tanggal:'2026-10-11',jumlah:10000},/supplier yang sama/);

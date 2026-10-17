@@ -47,7 +47,10 @@ test('editing an invoice label/date preserves original invoice identity and does
 
 test('historical payment spanning invoices is corrected by its original group ID without regrouping invoice membership or losing history',()=>{
   const f=fixture(),parents=['invoice-one-A','invoice-two-A'],untouched=['invoice-one-B','invoice-two-B'],untouchedBefore=f.frozen(untouched);
-  f.call('appendCommerceGroupPayment',{id:'historical-cross-invoice-payment',orderIds:parents,expectedRevisions:f.revisions(parents),jumlah:400,tanggal:'2026-10-11',metode:'transfer',catatan:'Explicit past combined payment'});
+  // This payment predates invoice boundaries; seed its immutable stored events,
+  // since a new cross-invoice payment must now be rejected by the server.
+  const oldPaymentRows=parents.map(parentId=>({id:'legacy-pay-'+parentId,module:'pembelian',parentId,kind:'payment',data:JSON.stringify({groupId:'historical-cross-invoice-payment',jumlah:200,tanggal:'2026-10-11',metode:'transfer',catatan:'Explicit past combined payment'}),dibuat:'2026-10-11T00:00:00.000Z',dibuatOleh:'historical-owner',sourceHash:''}));
+  f.h.run('pkStore_().lock(function(){pkStore_().appendMany("CommerceEvent",'+JSON.stringify(oldPaymentRows)+');});void 0;');
   const oldEvents=f.raw('CommerceEvent').filter(e=>JSON.parse(e.data).groupId==='historical-cross-invoice-payment'),oldBytes=JSON.stringify(oldEvents);assert.equal(oldEvents.length,2);
   const payload={id:'correct-historical-payment',groupId:'historical-cross-invoice-payment',expectedRevisions:f.revisions(parents),jumlah:600,tanggal:'2026-10-11',metode:'transfer',catatan:'Correct actual combined amount'};f.call('gantiCommerceGroupPayment',payload);
   const all=f.raw('CommerceEvent');assert.equal(JSON.stringify(all.filter(e=>oldEvents.some(old=>old.id===e.id))),oldBytes);
