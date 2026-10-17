@@ -100,38 +100,52 @@ function coreNotaEsc(v) { return String(v === undefined || v === null ? '' : v).
 function coreNotaTgl(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(m[3]) + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][Number(m[2]) - 1] + ' ' + m[1] : String(s || '-'); }
 function coreNotaLogo(v) { return typeof v === 'string' && v.length <= 60000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+\/=]+$/.test(v) ? v : ''; }
 function coreNotaMetode(m) { return { cash: 'Tunai', transfer: 'Transfer', qris: 'QRIS', lainnya: 'Lainnya' }[m] || String(m || ''); }
+function coreNotaTanggalSah(value) {
+  var s = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  var d = new Date(s + 'T00:00:00Z');
+  return isFinite(d.getTime()) && d.toISOString().slice(0,10) === s ? s : '';
+}
 function coreNotaRingkas(record, settings) {
-  settings = settings || {};
-  var batal = !!record.cancelled || /^(batal|cancelled)$/.test(String(record.status || '')), periksa = !!record.paymentReview, sisa = coreNum(record.balance), bayar = coreNum(record.totalPaid);
+  record = record || {}; settings = settings || {};
+  var batal = !!record.cancelled || /^(batal|cancelled)$/.test(String(record.status || ''));
+  var nilaiSah = [record.total,record.totalPaid,record.balance].every(function(n){return Number.isSafeInteger(n) && n >= 0;});
+  var bayaran = (record.payments || []).filter(function(p){return !p.voided;});
+  var periksa = !!record.paymentReview || !!record.needsReview || record.status === 'review' || !nilaiSah || record.balance !== record.total-record.totalPaid || bayaran.some(function(p){return !!p.sourceReview || !Number.isSafeInteger(p.jumlah) || p.jumlah < 0;});
+  var sisa = coreNum(record.balance), bayar = coreNum(record.totalPaid), lunas = !batal && !periksa && record.balance === 0 && record.totalPaid === record.total, tanggalLunas = '';
+  if (lunas && bayar > 0 && bayaran.length && bayaran.reduce(function(n,p){return n+p.jumlah;},0) === bayar) {
+    var dated = bayaran.filter(function(p){return p.jumlah > 0;});
+    if (dated.length && dated.every(function(p){return !!coreNotaTanggalSah(p.tanggal);})) tanggalLunas = dated.map(function(p){return p.tanggal;}).sort().pop();
+  }
   var items = (record.items || []).map(function (i) {
     var qty = coreNum(i.qty), price = coreNum(i.price), disc = coreNum(i.discPercent);
     return { name: i.name || '', color: i.color || '', size: i.size || '', qty: qty, price: price, disc: disc, subtotal: i.subtotal === undefined || i.subtotal === null ? Math.round(qty * price * (100 - disc) / 100) : coreNum(i.subtotal) };
   });
-  return { batal: batal, periksa: periksa, total: coreNum(record.total), bayar: bayar, sisa: sisa, items: items, adaDiskon: items.some(function (i) { return i.disc > 0; }),
-    status: batal ? 'DIBATALKAN' : periksa ? 'PERLU DIPERIKSA' : sisa <= 0 ? 'LUNAS' : bayar > 0 ? 'DP / BELUM LUNAS' : 'BELUM DIBAYAR', warna: batal || periksa ? '#8a8f98' : sisa <= 0 ? '#2e7d32' : '#b26a00',
-    bayaran: (record.payments || []).filter(function (p) { return !p.voided; }), nomor: String(record.noNota || record.number || record.id || ''), pelanggan: record.customer || {},
+  return { batal: batal, periksa: periksa, lunas: lunas, tanggalLunas: tanggalLunas, total: coreNum(record.total), bayar: bayar, sisa: sisa, items: items, adaDiskon: items.some(function (i) { return i.disc > 0; }),
+    status: batal ? 'DIBATALKAN' : periksa ? 'PERLU DIPERIKSA' : lunas ? 'LUNAS' : bayar > 0 ? 'DP / BELUM LUNAS' : 'BELUM DIBAYAR', warna: batal || periksa ? '#8a8f98' : lunas ? '#2e7d32' : '#b26a00',
+    bayaran: bayaran, nomor: String(record.noNota || record.number || record.id || ''), pelanggan: record.customer || {},
     subtotal: record.subtotal === undefined || record.subtotal === null ? items.reduce(function (n, i) { return n + i.subtotal; }, 0) : coreNum(record.subtotal),
     usaha: String(settings.kopSlip || settings.namaUsaha || '').trim(), sub: [settings.kopSub, settings.alamat].map(function (x) { return String(x || '').trim(); }).filter(Boolean) };
 }
 function coreNotaInvoiceHtml(record, settings, opt) {
   opt = opt || {}; var e = coreNotaEsc, rp = coreRupiah, r = coreNotaRingkas(record, settings), logo = coreNotaLogo(opt.logo), c = r.pelanggan;
   var css = '@page{size:A4 portrait;margin:14mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#1b1f24}' +
-    'table{border-collapse:collapse;width:100%}td,th{vertical-align:top;padding:0}' +
+    'table{border-collapse:collapse;width:100%}td,th{vertical-align:top;padding:0}td,th,div{overflow-wrap:anywhere;word-wrap:break-word}thead{display:table-header-group}' +
     '.kop td{padding-bottom:10px;border-bottom:3px solid #1b1f24}.kop .logo{width:64px}.kop .logo img{width:54px;height:54px;display:block}' +
     '.usaha{font-size:17pt;font-weight:bold;letter-spacing:1px}.kecil{font-size:8.5pt;color:#5b6470}.judul{font-size:22pt;font-weight:bold;letter-spacing:3px}' +
     '.kanan{text-align:right}.tengah{text-align:center}.info td{padding-top:14px}.label{font-size:8pt;letter-spacing:1.5px;text-transform:uppercase;color:#5b6470}' +
-    '.nama{font-size:13pt;font-weight:bold}.cap{display:inline-block;padding:4px 12px;border:2px solid #1b1f24;font-size:10pt;font-weight:bold;letter-spacing:1.5px}' +
-    '.barang{margin-top:16px}.barang th{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
+    '.nama{font-size:13pt;font-weight:bold}.cap{display:inline-block;padding:7px 14px;border:3px solid #1b1f24;font-size:16pt;font-weight:bold;letter-spacing:1.5px}.pelunasan{margin-top:5px;font-size:9pt}.info td{width:50%}' +
+    '.barang{margin-top:16px;table-layout:fixed}.barang th{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
     '.barang td{padding:7px 8px;border-bottom:1px solid #d9dee4}.barang th.kanan,.barang td.kanan{text-align:right}.barang th.tengah,.barang td.tengah{text-align:center}.barang tr{page-break-inside:avoid}' +
-    '.bawah{margin-top:12px;page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold;font-size:12.5pt;padding:8px}' +
+    '.bawah{margin-top:12px;table-layout:fixed}.jumlah{page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold;font-size:12.5pt;padding:8px}' +
     '.jumlah .sisa td{font-weight:bold;font-size:12pt;border-top:1px solid #d9dee4}.kotak{border:1px solid #d9dee4;padding:8px 10px;font-size:9.5pt;margin-bottom:10px}' +
-    '.bayar td{padding:3px 8px 3px 0;font-size:9.5pt}.ttd{margin-top:34px;page-break-inside:avoid}.ttd td{width:50%;text-align:center;font-size:9.5pt}.ttd .ruang{height:58px}' +
+    '.riwayat{margin-top:18px}.bayar{table-layout:fixed}.bayar td,.bayar th{padding:5px 8px 5px 0;font-size:9.5pt;border-bottom:1px solid #d9dee4}.bayar th{text-align:left}.bayar th.kanan{text-align:right}.bayar tr{page-break-inside:avoid}.ttd{margin-top:34px;page-break-inside:avoid}.ttd td{width:50%;text-align:center;font-size:9.5pt}.ttd .ruang{height:58px}' +
     '.kaki{margin-top:22px;padding-top:8px;border-top:1px solid #d9dee4;font-size:8.5pt;color:#5b6470;text-align:center}' +
     '@media screen{body{background:#e6eaef;padding:12px}.invoice{background:#fff;max-width:210mm;margin:0 auto;padding:14mm;box-shadow:0 2px 14px rgba(0,0,0,.18)}}';
   var kop = '<table class="kop"><tr>' + (logo ? '<td class="logo"><img src="' + logo + '" alt=""></td>' : '') + '<td><div class="usaha">' + e(r.usaha) + '</div>' + r.sub.map(function (x) { return '<div class="kecil">' + e(x) + '</div>'; }).join('') +
     '</td><td class="kanan"><div class="judul">INVOICE</div><div class="kecil">No. <b>' + e(r.nomor) + '</b></div><div class="kecil">Tanggal ' + e(coreNotaTgl(record.date)) + '</div></td></tr></table>';
   var info = '<table class="info"><tr><td><div class="label">Kepada</div><div class="nama">' + e(c.name || '-') + '</div>' + [c.phone, c.address].filter(Boolean).map(function (x) { return '<div class="kecil">' + e(x) + '</div>'; }).join('') +
-    '</td><td class="kanan"><div class="label">Status</div><span class="cap" style="color:' + r.warna + ';border-color:' + r.warna + '">' + r.status + '</span></td></tr></table>';
+    '</td><td class="kanan"><div class="label">Status pembayaran</div><span class="cap" style="color:' + r.warna + ';border-color:' + r.warna + '">' + r.status + '</span>' + (r.lunas ? '<div class="pelunasan">' + (r.tanggalLunas ? 'Pelunasan ' + e(coreNotaTgl(r.tanggalLunas)) : r.total === 0 ? 'Total tagihan Rp 0' : 'Tanggal pelunasan belum tercatat') + '</div>' : '') + '</td></tr></table>';
   var barang = '<table class="barang"><thead><tr><th class="tengah" style="width:7%">No</th><th>Barang</th><th class="tengah" style="width:12%">Ukuran</th><th class="tengah" style="width:9%">Qty</th><th class="kanan" style="width:17%">Harga</th>' +
     (r.adaDiskon ? '<th class="tengah" style="width:9%">Disk.</th>' : '') + '<th class="kanan" style="width:19%">Jumlah</th></tr></thead><tbody>' +
     r.items.map(function (i, n) {
@@ -144,10 +158,12 @@ function coreNotaInvoiceHtml(record, settings, opt) {
     '<tr class="total"><td>TOTAL</td><td class="kanan">' + rp(r.total) + '</td></tr>' +
     '<tr><td>Sudah dibayar</td><td class="kanan">' + (r.periksa ? 'Perlu diperiksa' : rp(r.bayar)) + '</td></tr>' +
     '<tr class="sisa"><td>SISA TAGIHAN</td><td class="kanan">' + (r.periksa ? 'Perlu diperiksa' : rp(r.sisa)) + '</td></tr></table>';
-  var kiri = (record.notes ? '<div class="label">Catatan</div><div class="kotak">' + e(record.notes).replace(/\n/g, '<br>') + '</div>' : '') +
-    (r.bayaran.length ? '<div class="label">Pembayaran</div><table class="bayar">' + r.bayaran.map(function (p) { return '<tr><td>' + e(coreNotaTgl(p.tanggal)) + '</td><td>' + e(coreNotaMetode(p.metode)) + '</td><td class="kanan">' + rp(p.jumlah) + '</td></tr>'; }).join('') + '</table>' : '');
+  var kiri = record.notes ? '<div class="label">Catatan</div><div class="kotak">' + e(record.notes).replace(/\n/g, '<br>') + '</div>' : '';
+  var riwayat = r.bayaran.length ? '<div class="riwayat"><div class="label">Riwayat pembayaran</div><table class="bayar"><thead><tr><th style="width:25%">Tanggal</th><th style="width:47%">Metode / catatan</th><th class="kanan" style="width:28%">Pembayaran</th></tr></thead><tbody>' + r.bayaran.map(function(p) {
+    return '<tr><td>' + e(coreNotaTanggalSah(p.tanggal) ? coreNotaTgl(p.tanggal) : 'Tanggal belum tercatat') + '</td><td>' + e(coreNotaMetode(p.metode)) + (p.catatan ? '<div class="kecil">' + e(p.catatan).replace(/\n/g,'<br>') + '</div>' : '') + '</td><td class="kanan">' + rp(p.jumlah) + '</td></tr>';
+  }).join('') + '</tbody></table></div>' : '';
   return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ' + e(r.nomor) + '</title><style>' + css + '</style></head><body><div class="invoice">' + kop + info + barang +
-    '<table class="bawah"><tr><td style="width:52%;padding-right:18px">' + kiri + '</td><td style="width:48%">' + jumlah + '</td></tr></table>' +
+    '<table class="bawah"><tr><td style="width:52%;padding-right:18px">' + kiri + '</td><td style="width:48%">' + jumlah + '</td></tr></table>' + riwayat +
     '<table class="ttd"><tr><td>Hormat kami,<div class="ruang"></div><b>' + e(r.usaha) + '</b></td><td>Penerima,<div class="ruang"></div><b>' + e(c.name || '') + '</b></td></tr></table>' +
     '<div class="kaki">' + (r.batal ? 'Nota ini sudah dibatalkan dan tidak berlaku sebagai tagihan.' : 'Terima kasih atas kepercayaan Anda.') + '</div></div></body></html>';
 }
@@ -155,8 +171,8 @@ function coreNotaInvoiceHtml(record, settings, opt) {
 function coreNotaStrukHtml(record, settings, opt) {
   opt = opt || {}; var e = coreNotaEsc, uang = coreRibuan, r = coreNotaRingkas(record, settings), lebar = Number(opt.lebar) === 80 ? 80 : 58, isi = lebar === 80 ? 72 : 48, logo = coreNotaLogo(opt.logo), c = r.pelanggan;
   var css = '@page{margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:"Courier New",Consolas,monospace;font-size:' + (lebar === 80 ? '10.5pt' : '9pt') + ';line-height:1.25;color:#000}' +
-    '.struk{width:' + isi + 'mm;margin:0 auto;padding:2mm 0 4mm}table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:0}.k{text-align:right;white-space:nowrap;padding-left:2mm}.kw{text-align:right;padding-left:2mm;word-break:break-word}' +
-    '.t{text-align:center}.b{font-weight:bold}.usaha{font-weight:bold;font-size:1.25em}.besar td{font-weight:bold;font-size:1.15em}.garis{border-top:1px dashed #000;height:0;margin:1.2mm 0}.logo{display:block;width:14mm;height:14mm;margin:0 auto 1mm}' +
+    '.struk{width:' + isi + 'mm;margin:0 auto;padding:2mm 0 4mm;overflow-wrap:anywhere;word-wrap:break-word}table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:0}.k{text-align:right;white-space:nowrap;padding-left:2mm}.kw{text-align:right;padding-left:2mm;word-break:break-word}' +
+    '.t{text-align:center}.b{font-weight:bold}.usaha{font-weight:bold;font-size:1.25em}.besar td{font-weight:bold;font-size:1.15em}.status{border:2px solid #000;padding:2mm 1mm;font-size:1.3em;margin:2mm 0;page-break-inside:avoid}.bayaran{margin-top:2mm}.garis{border-top:1px dashed #000;height:0;margin:1.2mm 0}.logo{display:block;width:14mm;height:14mm;margin:0 auto 1mm}' +
     '@media screen{body{background:#e6eaef;padding:12px 0}.struk{background:#fff;width:' + (isi + 8) + 'mm;padding:4mm;box-shadow:0 2px 14px rgba(0,0,0,.18)}}';
   function baris(kiri, kanan, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + kiri + '</td><td class="k">' + kanan + '</td></tr>'; }
   var tunai = r.bayaran.filter(function (p) { return p.tenderedAmount !== undefined && p.tenderedAmount !== null; }).slice(-1)[0];
@@ -169,7 +185,9 @@ function coreNotaStrukHtml(record, settings, opt) {
     (coreNum(record.discountAmount) ? baris('Diskon' + (coreNum(record.discountPercent) ? ' ' + coreNum(record.discountPercent) + '%' : ''), '-' + uang(record.discountAmount)) : '') +
     (coreNum(record.shipping) ? baris('Ongkir', uang(record.shipping)) : '') + baris('TOTAL', uang(r.total), 'besar') +
     (r.periksa ? '' : (tunai ? baris('Tunai', uang(tunai.tenderedAmount)) + baris('Kembali', uang(tunai.change)) : '') + baris('Dibayar', uang(r.bayar)) + (r.sisa > 0 ? baris('SISA', uang(r.sisa), 'besar') : '')) + '</table>' + garis +
-    '<div class="t b">** ' + r.status + ' **</div><div class="t">' + (r.batal ? 'Nota ini tidak berlaku' : 'Terima kasih') + '</div></div></body></html>';
+    (r.bayaran.length ? '<div class="b">RIWAYAT PEMBAYARAN</div>' + r.bayaran.map(function(p) { return '<div class="bayaran">' + e(coreNotaTanggalSah(p.tanggal) ? coreNotaTgl(p.tanggal) : 'Tanggal belum tercatat') + '<table>' + baris(e(coreNotaMetode(p.metode)),uang(p.jumlah)) + '</table>' + (p.catatan ? '<div>' + e(p.catatan).replace(/\n/g,'<br>') + '</div>' : '') + '</div>'; }).join('') + garis : '') +
+    (record.notes ? '<div>Catatan: ' + e(record.notes).replace(/\n/g,'<br>') + '</div>' + garis : '') +
+    '<div class="t b status">** ' + r.status + ' **</div>' + (r.lunas ? '<div class="t">' + (r.tanggalLunas ? 'Pelunasan ' + e(coreNotaTgl(r.tanggalLunas)) : r.total === 0 ? 'Total tagihan 0' : 'Tanggal pelunasan belum tercatat') + '</div>' : '') + '<div class="t">' + (r.batal ? 'Nota ini tidak berlaku' : 'Terima kasih') + '</div></div></body></html>';
 }
 /* One amount paid to a supplier for several orders, as the earlier application
    did it: divided by each order's remaining balance. Whole rupiah only, the
