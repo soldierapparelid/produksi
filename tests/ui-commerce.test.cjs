@@ -14,6 +14,7 @@ function harness(){
   function openSheet(fn){lastSheet=fn();}function dropForm(){drops++;}function slipCetak(models){prints.push(models);return Promise.resolve();}function slipUnduh(action,payload){pdfs.push({action:action,payload:payload});return Promise.resolve();}function coreCommerceSlipModel(m,r){return {reference:r.id,module:m,rows:r.items};}
   var window={scrollTo:function(){}};
   `,context);
+  const unitStart=html.indexOf('function satuanPendek('),unitEnd=html.indexOf('/* bahan yang dipakai',unitStart);assert.ok(unitStart>=0&&unitEnd>unitStart,'actual unit helper exists');vm.runInContext(html.slice(unitStart,unitEnd),context);
   const helperStart=html.indexOf('function fTanggal('),helperEnd=html.indexOf('/* ---------- hitungan PO',helperStart);vm.runInContext(html.slice(helperStart,helperEnd),context);vm.runInContext(block,context);
   const run=code=>vm.runInContext(code,context);const json=code=>JSON.parse(run('JSON.stringify('+code+')'));
   function seed(module,data){run(`var e=commerceEntry(${JSON.stringify(module)});e.data=${JSON.stringify(data)};e.version=10;e.tried=true;`);}
