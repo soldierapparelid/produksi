@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.51 - Rincian ukuran pada nota dan struk
+
+- Nota penjualan dapat mencatat jumlah setiap ukuran per barang, misalnya M 10 pcs, L 12 pcs, dan XL 10 pcs. Jumlah barang dihitung dari rincian tersebut.
+- Rincian yang sama tampil pada detail nota, invoice A4/PDF, serta struk thermal 58 mm dan 80 mm. Harga, diskon, pembayaran, dan status lunas tetap mengikuti nota.
+- Nota lama yang hanya berisi rentang ukuran tetap utuh. Lengkapi pembagian ukuran lewat **Edit nota → Rincian jumlah per ukuran**; aplikasi tidak menebak pembagiannya.
+- Pasang **Core.gs** dan **Index.html** bersama. Isian lama dari perangkat lain tidak dapat menghapus rincian ukuran tanpa tindakan yang jelas.
+
 ## Rilis 1.5.50 - Hapus dari riwayat PO dan nota
 
 - Owner dapat memakai **Hapus dari riwayat** untuk mengeluarkan PO atau nota yang tidak diperlukan dari daftar riwayat. Catatan masuk **Sampah** dan dapat dipulihkan dari sana.
