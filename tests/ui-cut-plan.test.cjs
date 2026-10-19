@@ -120,21 +120,23 @@ test('legacy plans without target quantities keep the server default size choice
   evaluate(c,"po.ukuranAktif=[]");assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),[],'invalid explicit active sizes do not fall back to defaults');
   evaluate(c,"delete po.ukuranAktif;po.ukuran={M:0};po.cutting.ukuran=['XL'];po.workflow.ukuran={M:{qcOk:1}}");assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),['XL'],'verified worker size projection augments old targets while inspected sizes remain excluded');
 });
-test('additional cut guidance requests all results once and success never promises unsupported repeated-size continuation',async()=>{
+test('additional cut guidance distinguishes repeated sizes from sizes that can still be recorded later',async()=>{
   const c=ui();evaluate(c,"openPotong('po','plan')");assert.match(c.rendered,/Boleh simpan satu ukuran dulu/);
   evaluate(c,"S.state.potong=[{id:'earlier-cut',poId:'po',rencanaId:'earlier-plan',ukuran:{M:50}}];openPotong('po','plan')");
-  assert.match(c.rendered,/Isi seluruh hasil kain tambahan per ukuran dalam satu kali simpan/);
-  assert.match(c.rendered,/Bahan dan hasil potong sebelumnya tetap tersimpan/);
+  assert.match(c.rendered,/Isi semua hasil tambahan untuk ukuran yang sudah pernah dipotong/);
+  assert.match(c.rendered,/Ukuran yang belum pernah dipotong boleh dicatat menyusul/);
   assert.doesNotMatch(c.rendered,/Boleh simpan satu ukuran dulu|Ukuran lain dicatat menyusul/);
   const result=evaluate(c,'A.potongSave(el)');c.calls[0].resolve({});await result;
   assert.equal(c.messages.at(-1),'Hasil potong tersimpan.');
 });
 test('a different cutter sees additional-batch guidance even when previous cutters records are omitted from their state',()=>{
   const c=ui();evaluate(c,"S.state.potong=[];po.agg={total:{potong:272}};openPotong('po','plan')");
-  assert.match(c.rendered,/Isi seluruh hasil kain tambahan per ukuran dalam satu kali simpan/);
+  assert.match(c.rendered,/Isi semua hasil tambahan untuk ukuran yang sudah pernah dipotong/);
+  assert.match(c.rendered,/Ukuran yang belum pernah dipotong boleh dicatat menyusul/);
   assert.doesNotMatch(c.rendered,/Boleh simpan satu ukuran dulu|Ukuran lain dicatat menyusul/);
   evaluate(c,"delete po.agg;po.workflow.ukuran={M:{potong:272}};openPotong('po','plan')");
-  assert.match(c.rendered,/Isi seluruh hasil kain tambahan per ukuran dalam satu kali simpan/);
+  assert.match(c.rendered,/Isi semua hasil tambahan untuk ukuran yang sudah pernah dipotong/);
+  assert.match(c.rendered,/Ukuran yang belum pernah dipotong boleh dicatat menyusul/);
   assert.doesNotMatch(c.rendered,/Boleh simpan satu ukuran dulu|Ukuran lain dicatat menyusul/);
 });
 test('cutter queue shows only prepared active clean work and own consumed work',()=>{
@@ -282,11 +284,41 @@ test('1.5.41: a PO cut in part from the owner fabric is a continuing job with it
   const habis=ui();evaluate(habis,"el={getAttribute:function(k){return {'data-id':'po','data-lanjut':'1'}[k];},closest:function(){return form;}};A.potongOpen(el)");assert.match(habis.rendered,/Tidak ada ukuran yang bisa dilanjutkan/);
 });
 test('1.5.41: the owner sees a partly cut PO as continuing in the PO sheet and the first-cut form says one size may be saved first',()=>{
-  const c=ui();evaluate(c,`actor={id:'owner',divisi:'owner'};plan.status='terpakai';po.cutting={ukuran:['M','L'],pendingUkuran:['L'],lanjut:'plan'};`);
-  const panel=evaluate(c,'rencanaPotongPanel(po)');assert.match(panel,/<b>Dipotong sebagian\.<\/b> Belum dipotong: L\./);assert.match(panel,/data-a="potongOpen" data-id="po" data-lanjut="1">Catat lanjutan potong/);
-  evaluate(c,"po.cutting.lanjut=''");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/Dipotong sebagian/);
+  const c=ui();evaluate(c,`actor={id:'owner',divisi:'owner'};plan.status='terpakai';po.cutting={ukuran:['M','L'],pendingUkuran:['L'],lanjut:'plan'};po.agg={total:{potong:20},ukuran:{M:{potong:20}}};`);
+  const panel=evaluate(c,'rencanaPotongPanel(po)');assert.match(panel,/<b>Dipotong sebagian<\/b>/);assert.match(panel,/Belum dipotong: <b>L<\/b>/);assert.match(panel,/data-a="potongOpen" data-id="po" data-lanjut="1">Lanjut dengan kain lama/);
+  evaluate(c,"po.cutting.lanjut=''");assert.match(evaluate(c,'rencanaPotongPanel(po)'),/Dipotong sebagian/);assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-lanjut/);
   assert.match(html,/if \(po\.cutting && po\.cutting\.lanjut\) return false;/,'such a PO is not labelled as waiting for fabric');
   assert.match(html,/Boleh simpan satu ukuran dulu\. Ukuran lain dicatat menyusul dari daftar Potong; bahan ini dihitung sekali saja\./);
+});
+test('partial cutting is concise and puts additional fabric next to unfinished sizes, while material usage stays collapsed history',()=>{
+  const c=ui();evaluate(c,`actor.divisi='owner';po.ukuranAktif=['M','XL','XXL'];plan.status='terpakai';
+    po.cutting={verified:true,ukuran:['M','XL','XXL'],pendingUkuran:['XL','XXL'],lanjut:'plan'};
+    po.agg={total:{potong:272},ukuran:{M:{potong:272},XL:{potong:0},XXL:{potong:0}}};`);
+  const before=JSON.stringify(plain(c.S.state)), panel=evaluate(c,'rencanaPotongPanel(po)');
+  assert.match(panel,/<b>Dipotong sebagian<\/b><span>Sudah dipotong: M 272 pcs<\/span><span>Belum dipotong: <b>XL · XXL<\/b>/);
+  assert.equal((panel.match(/>Tambah kain<\/button>/g)||[]).length,1);
+  assert.ok(panel.indexOf('>Tambah kain</button>') < panel.indexOf('Riwayat bahan'));
+  assert.match(panel,/<details class="rj-lipat"><summary>Riwayat bahan · 1 persiapan<\/summary>/);
+  assert.doesNotMatch(panel,/<details[^>]* open|chip[^>]*>Sudah dipotong/);
+  assert.match(panel,/Bahan tercatat terpakai/);assert.match(panel,/Jika tidak menambah kain/);
+  assert.equal(JSON.stringify(plain(c.S.state)),before,'simplifying a view does not edit production or material records');
+  evaluate(c,"S.state.rencanaPotong.push({...plan,id:'extra-ready',status:'siap',dibuat:'2026-10-19'})");
+  const ready=evaluate(c,'rencanaPotongPanel(po)');assert.match(ready,/data-rencana="extra-ready">Catat hasil potong/);assert.match(ready,/<details class="rj-lipat"><summary>Rincian kain · 2 rol<\/summary>/);
+  assert.ok(ready.indexOf('data-rencana="extra-ready"') < ready.indexOf('Riwayat bahan'));
+  assert.doesNotMatch(ready,/data-lanjut="1"|Jika tidak menambah kain/,'a prepared additional batch is not bypassed by a no-fabric continuation');
+  evaluate(c,"actor.divisi='potong'");const cutter=evaluate(c,'rencanaPotongPanel(po)');assert.doesNotMatch(cutter,/Tambah kain|Ubah bahan/);assert.match(cutter,/data-rencana="extra-ready">Catat hasil potong/);
+});
+test('PO detail hides unavailable QC controls but retains repair work and folds size management and help away',()=>{
+  const c=ui();evaluate(c,"var queue=[],repairs=[];function antreanQC(){return queue;}function repairQueue(){return repairs;}");
+  vm.runInContext(part('function qcEntryButton(', 'function poTahap('),c);
+  assert.equal(evaluate(c,'qcEntryButton(po,true)'),'');
+  assert.match(evaluate(c,'qcEntryButton(po)'),/QC belum siap/,'other screens keep their existing explicit state');
+  evaluate(c,"repairs=[{poId:'po'}]");assert.match(evaluate(c,'qcEntryButton(po,true)'),/Input QC/);
+  const detail=part('function poSheet(id)', '/* ukuran aktif yang belum dipotong dilepas');
+  assert.match(detail,/<details class="small"><summary>Kelola ukuran<\/summary>/);
+  assert.match(detail,/<details><summary class="small muted">Alur hitung &amp; QC<\/summary>/);
+  assert.doesNotMatch(detail,/Hitung fisik dan pemeriksaan QC adalah tahap terpisah/);
+  assert.equal((detail.match(/qcEntryButton\(po, true\)/g)||[]).length,2);
 });
 
 test('1542b: every cutter card says which sizes must be cut, without opening the PO',()=>{
