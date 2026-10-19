@@ -35,7 +35,7 @@ function ui(){
     function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}
     function fNum(t,n,v){return '<label>'+t+'<input name="'+n+'" value="'+esc(v)+'"></label>';}
     function fSelect(t,n){return '<select name="'+n+'"></select>';}function fTanggal(t,n){return '<input name="'+n+'">';}
-    function fCatatan(){return '<textarea name="catatan"></textarea>';}function footSave(a){return '<button data-a="'+a+'">Simpan</button>';}
+    function fCatatan(){return '<textarea name="catatan"></textarea>';}function footSave(a,label){return '<button data-a="'+a+'">'+(label||'Simpan')+'</button>';}
     function emptyBox(s){return s;}function sizesSplit(){return {main:['M'],extra:[]};}function sizeGrid(sizes){return sizes.map(function(s){return '<input data-size="'+s+'">';}).join('');}
     function sumLine(){return '';}function tarifBawaan(){return 200;}function recalc(){}
     function cocok(q,x){return !q||x.some(function(y){return String(y||'').includes(q);});}function thumb(){return '';}
@@ -55,9 +55,79 @@ test('owner prepares existing-stock materials in PO detail; worker and held PO c
   const c=ui();
   assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongOpen"/);
   evaluate(c,"actor.divisi='owner'");
-  const owner=evaluate(c,'rencanaPotongPanel(po)');assert.match(owner,/Siapkan bahan/);assert.match(owner,/Katun &lt;biru>/);assert.doesNotMatch(owner,/<owner>/);
+  const owner=evaluate(c,'rencanaPotongPanel(po)');assert.match(owner,/Tambah kain/);assert.match(owner,/Katun &lt;biru>/);assert.doesNotMatch(owner,/<owner>/);
   evaluate(c,'A.rencanaPotongOpen(el)');assert.match(c.rendered,/Ubah bahan potong/);assert.match(c.rendered,/name="revision" value="rev1"/);assert.match(c.rendered,/name="rol"/);
   evaluate(c,"po.workflow.issues=['Periksa data lama']");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongOpen"/);
+});
+test('additional fabric creates a separate prepared batch while ready materials remain editable and history stays unchanged',()=>{
+  const c=ui();
+  evaluate(c,`actor.divisi='owner';plan.status='terpakai';plan.dibuat='2026-10-12';
+    S.state.potong=[{id:'cut-original',poId:'po',rencanaId:'plan',ukuran:{M:272},total:272}];
+    S.state.rencanaPotong.push({...plan,id:'ready-old',status:'siap',dibuat:'2026-10-13'},{...plan,id:'ready-new',status:'siap',dibuat:'2026-10-19'},{...plan,id:'cancelled',status:'batal'});
+    var selectedSizes=[];function poPrepareHtml(id,additional,sizes){selectedSizes=sizes;return '<div data-new-plan="'+id+'">Pilih kain dari stok</div>';}
+    function poUkuranAktif(){return ['M','L','XL','XXL'];}function poUkuranPotong(){return ['XL','XXL'];}
+    po.ukuranAktif=['M','L','XL','XXL'];po.cutting={pendingUkuran:['XL','XXL'],lepasUkuran:['XXL']};po.workflow.ukuran={M:{complete:false},L:{complete:true},XL:{complete:false}};
+    var sourceBefore=JSON.stringify(S.state);
+    var newEl={getAttribute:function(k){return k==='data-po'?'po':'';}};`);
+  const panel=evaluate(c,'rencanaPotongPanel(po)');
+  assert.match(panel,/data-a="rencanaPotongOpen" data-po="po">Tambah kain/);
+  assert.ok(panel.indexOf('data-id="ready-new"') < panel.indexOf('data-id="ready-old"'));
+  assert.ok(panel.indexOf('data-id="ready-old"') < panel.indexOf('2026-10-12'));
+  assert.match(panel,/data-id="ready-new">Ubah bahan/);
+  assert.doesNotMatch(panel,/data-id="plan"|cancelled/);
+  evaluate(c,'A.rencanaPotongOpen(newEl)');
+  assert.match(c.rendered,/Tambah kain untuk dipotong/);
+  assert.match(c.rendered,/name="id" value="new-plan"/);
+  assert.match(c.rendered,/name="revision" value=""/);
+  assert.match(c.rendered,/Bahan dan hasil potong sebelumnya tetap tersimpan/);
+  assert.match(c.rendered,/Stok terpakai saat hasil potong disimpan/);
+  assert.match(c.rendered,/Simpan tambahan kain/);
+  assert.doesNotMatch(c.rendered,/data-a="rencanaPotongCancel"/);
+  assert.deepEqual(plain(c.selectedSizes),['M','XL'],'already-cut M remains available, completed L and released XXL do not');
+  assert.equal(JSON.stringify(plain(c.S.state)),c.sourceBefore,'opening add-fabric does not rewrite existing cuts, plans, or quantities');
+  evaluate(c,"form.values={id:'new-plan',poId:'po',revision:'',rol:'1',catatan:'Tambahan XL'};form.rows=[{values:{nama:'Katun <biru>',qty:'3'}}]");
+  const value=plain(evaluate(c,"rencanaPotongValues(form,'siap')"));
+  assert.equal(value.rencana.id,'new-plan');assert.equal(value.rencana.poId,'po');assert.equal(value.expectedRevision,undefined);
+  assert.deepEqual(value.rencana.bahanList,[{nama:'Katun <biru>',qty:3,satuan:'kg'}]);
+});
+test('first preparation retains its simple label and additional fabric stays owner-only on active unblocked POs',()=>{
+  const c=ui();evaluate(c,"actor.divisi='owner';S.state.rencanaPotong=[];S.state.potong=[]");
+  assert.match(evaluate(c,'rencanaPotongPanel(po)'),/Siapkan bahan potong/);
+  evaluate(c,"S.state.potong=[{poId:'po',total:10}]");assert.match(evaluate(c,'rencanaPotongPanel(po)'),/Tambah kain/);
+  for(const role of ['potong','admin','qc']){evaluate(c,`actor.divisi='${role}'`);assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongOpen"/);}
+  evaluate(c,"actor.divisi='owner';po.status='selesai'");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongOpen"/);
+  evaluate(c,"po.status='aktif';po.workflow.blockingIssues=['Periksa jumlah']");assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongOpen"/);
+});
+test('any inspected size leaves new fabric and normal cutting choices, while untouched sizes remain usable',()=>{
+  const c=ui();evaluate(c,`actor.divisi='owner';po.ukuran={M:100,L:100,XL:100};po.workflow.ukuran={M:{qcOk:1},L:{qcPerbaikan:1},XL:{potong:40}};
+    function poUkuranAktif(){return ['M','L','XL'];}var newEl={getAttribute:function(k){return k==='data-po'?'po':'';}};`);
+  assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),['XL']);
+  evaluate(c,"openPotong('po','plan')");assert.match(c.rendered,/data-size="XL"/);assert.doesNotMatch(c.rendered,/data-size="M"|data-size="L"/);
+  evaluate(c,"po.workflow.ukuran.XL.qcOffline=1;rendered='';A.rencanaPotongOpen(newEl)");
+  assert.equal(c.rendered,'');assert.match(c.messages.at(-1),/sudah masuk QC, buat PO baru/);
+  assert.match(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongOpen" data-po="po" disabled>Tambah kain/);
+  evaluate(c,"openPotong('po','plan')");assert.match(c.rendered,/Tidak ada ukuran yang masih bisa dipotong/);assert.doesNotMatch(c.rendered,/data-a="potongSave"/);
+});
+test('legacy plans without target quantities keep the server default size choices; zero target keys and explicit active sizes stay exact',()=>{
+  const c=ui();evaluate(c,`actor.divisi='owner';S.state.settings.ukuran=['S','M','L','XL'];po.ukuran={};po.asal='lama';
+    function poUkuranAktif(){return [];}function poPrepareHtml(id,additional,sizes){selectedSizes=sizes;return 'Pilih bahan';}
+    var newEl={getAttribute:function(k){return k==='data-po'?'po':'';}};`);
+  assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),['S','M','L','XL']);
+  evaluate(c,"openPotong('po','plan')");assert.match(c.rendered,/data-size="M"/);assert.match(c.rendered,/data-size="XL"/);assert.match(c.rendered,/data-a="potongSave"/);
+  evaluate(c,'A.rencanaPotongOpen(newEl)');assert.match(c.rendered,/Tambah kain untuk dipotong/);assert.deepEqual(plain(c.selectedSizes),['S','M','L','XL']);
+  evaluate(c,"po.ukuran={M:0,L:0}");assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),['M','L']);
+  evaluate(c,"po.ukuranAktif=['XL'];po.cutting={verified:true,ukuran:['M','L']}");assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),['XL'],'an explicit active set cannot widen to target or projected source sizes');
+  evaluate(c,"po.ukuranAktif=[]");assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),[],'invalid explicit active sizes do not fall back to defaults');
+  evaluate(c,"delete po.ukuranAktif;po.ukuran={M:0};po.cutting.ukuran=['XL'];po.workflow.ukuran={M:{qcOk:1}}");assert.deepEqual(plain(evaluate(c,'rencanaPotongUkuranTambah(po)')),['XL'],'verified worker size projection augments old targets while inspected sizes remain excluded');
+});
+test('additional cut guidance requests all results once and success never promises unsupported repeated-size continuation',async()=>{
+  const c=ui();evaluate(c,"openPotong('po','plan')");assert.match(c.rendered,/Boleh simpan satu ukuran dulu/);
+  evaluate(c,"S.state.potong=[{id:'earlier-cut',poId:'po',rencanaId:'earlier-plan',ukuran:{M:50}}];openPotong('po','plan')");
+  assert.match(c.rendered,/Isi seluruh hasil kain tambahan per ukuran dalam satu kali simpan/);
+  assert.match(c.rendered,/Bahan dan hasil potong sebelumnya tetap tersimpan/);
+  assert.doesNotMatch(c.rendered,/Boleh simpan satu ukuran dulu|Ukuran lain dicatat menyusul/);
+  const result=evaluate(c,'A.potongSave(el)');c.calls[0].resolve({});await result;
+  assert.equal(c.messages.at(-1),'Hasil potong tersimpan.');
 });
 test('cutter queue shows only prepared active clean work and own consumed work',()=>{
   const c=ui();evaluate(c,`D.po.held={id:'held',status:'aktif',workflow:{issues:['review']}};D.po.closed={id:'closed',status:'selesai'};
