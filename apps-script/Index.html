@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261017-hapus-riwayat-1550';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261019-rincian-ukuran-nota-1551';</script>
 <script>
 (function () {
 'use strict';
@@ -498,7 +498,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.50';
+var APP_VERSION = '1.5.51';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6417,7 +6417,7 @@ function coreCommerceRecordView(row, events, records, lookup) {
   return value;
 }
 function coreCommerceSlipModel(module,record,context) {
-  context=context||{};var nota=module==='nota',money=coreRupiah,productName=String((record.productSnapshot?record.productSnapshot.nama:record.productName)||'').trim()||'Nama produk tidak tersedia',rows=(record.items||[]).map(function(i){return nota?[i.name||'',String(i.size||'')+' '+String(i.color||''),coreRibuan(i.qty),money(i.price),String(coreNum(i.discPercent))+'%',money(i.subtotal)]:[productName,i.nama||'—',coreRibuan(i.jumlah),money(record.hargaSatuan),money(coreNum(i.jumlah)*coreNum(record.hargaSatuan))];});
+  context=context||{};var nota=module==='nota',money=coreRupiah,productName=String((record.productSnapshot?record.productSnapshot.nama:record.productName)||'').trim()||'Nama produk tidak tersedia',rows=(record.items||[]).map(function(i){return nota?[i.name||'',(coreNotaSizeText(i)||String(i.size||''))+' '+String(i.color||''),coreRibuan(i.qty),money(i.price),String(coreNum(i.discPercent))+'%',money(i.subtotal)]:[productName,i.nama||'—',coreRibuan(i.jumlah),money(record.hargaSatuan),money(coreNum(i.jumlah)*coreNum(record.hargaSatuan))];});
   var payments=(record.payments||[]).map(function(p){return [p.tanggal||'',p.metode||'',money(p.jumlah),p.tenderedAmount===undefined?'':money(p.tenderedAmount),p.change===undefined?'':money(p.change),p.voided?'Dibatalkan: '+(p.voidReason||''):(p.catatan||'')];});
   var summary=nota?[{label:'Subtotal barang',value:money(record.subtotal)},{label:'Diskon nota ('+coreNum(record.discountPercent)+'%)',value:money(record.discountAmount)},{label:'Ongkir',value:money(record.shipping)}]:[];
   summary=summary.concat([{label:'Total',value:money(nota?record.total:record.totalHarga),emphasis:true},{label:'Dibayar untuk tagihan',value:money(record.totalPaid)},{label:'Sisa',value:money(record.balance),emphasis:true},{label:'Status',value:record.status==='review'?'Perlu diperiksa':record.status}]);
@@ -6435,6 +6435,24 @@ function coreNotaEsc(v) { return String(v === undefined || v === null ? '' : v).
 function coreNotaTgl(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(m[3]) + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][Number(m[2]) - 1] + ' ' + m[1] : String(s || '-'); }
 function coreNotaLogo(v) { return typeof v === 'string' && v.length <= 60000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+\/=]+$/.test(v) ? v : ''; }
 function coreNotaMetode(m) { return { cash: 'Tunai', transfer: 'Transfer', qris: 'QRIS', lainnya: 'Lainnya' }[m] || String(m || ''); }
+/* A legacy range such as M-XL never supplies quantities. Only a complete,
+   internally consistent breakdown is used by the screen and both documents. */
+function coreNotaSizeBreakdown(item) {
+  item=item||{};var rows=item.sizeBreakdown,seen=Object.create(null),total=0,out=[];
+  if(!Array.isArray(rows)||!rows.length||rows.length>40||typeof item.qty!=='number'||!Number.isSafeInteger(item.qty)||item.qty<=0||item.qty>1e8)return [];
+  for(var n=0;n<rows.length;n++){
+    var row=rows[n];if(!row||typeof row!=='object'||Array.isArray(row)||typeof row.size!=='string'||typeof row.qty!=='number')return [];
+    var size=row.size.trim().replace(/\s+/g,' ').toUpperCase(),qty=row.qty;
+    if(!size||size.length>30||seen[size]||!Number.isSafeInteger(qty)||qty<=0||qty>1e8)return [];
+    seen[size]=true;total+=qty;out.push({size:size,qty:qty});
+  }
+  return total===Number(item.qty)?out:[];
+}
+function coreNotaSizeText(item) { return coreNotaSizeBreakdown(item).map(function(row){return row.size+' '+coreRibuan(row.qty)+' pcs';}).join(' · '); }
+function coreNotaSizeHtml(item) {
+  var rows=coreNotaSizeBreakdown(item);if(!rows.length)return '';
+  return '<div class="rincian-ukuran"><b>Ukuran:</b> '+rows.map(function(row){return '<span class="ukuran-pcs">'+coreNotaEsc(row.size)+' <b>'+coreRibuan(row.qty)+' pcs</b></span>';}).join(' · ')+'</div>';
+}
 function coreNotaTanggalSah(value) {
   var s = String(value || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
@@ -6454,7 +6472,8 @@ function coreNotaRingkas(record, settings) {
   }
   var items = (record.items || []).map(function (i) {
     var qty = coreNum(i.qty), price = coreNum(i.price), disc = coreNum(i.discPercent);
-    return { name: i.name || '', color: i.color || '', size: i.size || '', qty: qty, price: price, disc: disc, subtotal: i.subtotal === undefined || i.subtotal === null ? Math.round(qty * price * (100 - disc) / 100) : coreNum(i.subtotal) };
+    var sizes=coreNotaSizeBreakdown(i);
+    return { name: i.name || '', color: i.color || '', size: sizes.length?sizes.map(function(row){return row.size;}).join(', '):i.size || '', sizeBreakdown:sizes, qty: qty, price: price, disc: disc, subtotal: i.subtotal === undefined || i.subtotal === null ? Math.round(qty * price * (100 - disc) / 100) : coreNum(i.subtotal) };
   });
   return { batal: batal, periksa: periksa, lunas: lunas, tanggalLunas: tanggalLunas, total: coreNum(record.total), bayar: bayar, sisa: sisa, items: items, adaDiskon: items.some(function (i) { return i.disc > 0; }),
     status: batal ? 'DIBATALKAN' : periksa ? 'PERLU DIPERIKSA' : lunas ? 'LUNAS' : bayar > 0 ? 'DP / BELUM LUNAS' : 'BELUM DIBAYAR', warna: batal || periksa ? '#8a8f98' : lunas ? '#2e7d32' : '#b26a00',
@@ -6472,6 +6491,7 @@ function coreNotaInvoiceHtml(record, settings, opt) {
     '.nama{font-size:13pt;font-weight:bold}.cap{display:inline-block;padding:7px 14px;border:3px solid #1b1f24;font-size:16pt;font-weight:bold;letter-spacing:1.5px}.pelunasan{margin-top:5px;font-size:9pt}.info td{width:50%}' +
     '.barang{margin-top:16px;table-layout:fixed}.barang th{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-size:8.5pt;letter-spacing:1px;text-transform:uppercase;text-align:left;padding:7px 8px}' +
     '.barang td{padding:7px 8px;border-bottom:1px solid #d9dee4}.barang th.kanan,.barang td.kanan{text-align:right}.barang th.tengah,.barang td.tengah{text-align:center}.barang tr{page-break-inside:avoid}' +
+    '.rincian-ukuran{margin-top:5px;font-size:9pt;line-height:1.5;color:#1b1f24}.ukuran-pcs{display:inline-block;max-width:100%;vertical-align:top}' +
     '.bawah{margin-top:12px;table-layout:fixed}.jumlah{page-break-inside:avoid}.jumlah td{padding:4px 8px}.jumlah .total td{border-top:2px solid #1b1f24;border-bottom:2px solid #1b1f24;font-weight:bold;font-size:12.5pt;padding:8px}' +
     '.jumlah .sisa td{font-weight:bold;font-size:12pt;border-top:1px solid #d9dee4}.kotak{border:1px solid #d9dee4;padding:8px 10px;font-size:9.5pt;margin-bottom:10px}' +
     '.riwayat{margin-top:18px}.bayar{table-layout:fixed}.bayar td,.bayar th{padding:5px 8px 5px 0;font-size:9.5pt;border-bottom:1px solid #d9dee4}.bayar th{text-align:left}.bayar th.kanan{text-align:right}.bayar tr{page-break-inside:avoid}.ttd{margin-top:34px;page-break-inside:avoid}.ttd td{width:50%;text-align:center;font-size:9.5pt}.ttd .ruang{height:58px}' +
@@ -6481,10 +6501,12 @@ function coreNotaInvoiceHtml(record, settings, opt) {
     '</td><td class="kanan"><div class="judul">INVOICE</div><div class="kecil">No. <b>' + e(r.nomor) + '</b></div><div class="kecil">Tanggal ' + e(coreNotaTgl(record.date)) + '</div></td></tr></table>';
   var info = '<table class="info"><tr><td><div class="label">Kepada</div><div class="nama">' + e(c.name || '-') + '</div>' + [c.phone, c.address].filter(Boolean).map(function (x) { return '<div class="kecil">' + e(x) + '</div>'; }).join('') +
     '</td><td class="kanan"><div class="label">Status pembayaran</div><span class="cap" style="color:' + r.warna + ';border-color:' + r.warna + '">' + r.status + '</span>' + (r.lunas ? '<div class="pelunasan">' + (r.tanggalLunas ? 'Pelunasan ' + e(coreNotaTgl(r.tanggalLunas)) : r.total === 0 ? 'Total tagihan Rp 0' : 'Tanggal pelunasan belum tercatat') + '</div>' : '') + '</td></tr></table>';
-  var barang = '<table class="barang"><thead><tr><th class="tengah" style="width:7%">No</th><th>Barang</th><th class="tengah" style="width:12%">Ukuran</th><th class="tengah" style="width:9%">Qty</th><th class="kanan" style="width:17%">Harga</th>' +
+  var ukuranDiBarang=r.items.some(function(i){return i.sizeBreakdown.length>0;});
+  var barang = '<table class="barang"><thead><tr><th class="tengah" style="width:7%">No</th><th>Barang</th>' + (ukuranDiBarang?'':'<th class="tengah" style="width:12%">Ukuran</th>') + '<th class="tengah" style="width:9%">Qty</th><th class="kanan" style="width:17%">Harga</th>' +
     (r.adaDiskon ? '<th class="tengah" style="width:9%">Disk.</th>' : '') + '<th class="kanan" style="width:19%">Jumlah</th></tr></thead><tbody>' +
     r.items.map(function (i, n) {
-      return '<tr><td class="tengah">' + (n + 1) + '</td><td><b>' + e(i.name) + '</b>' + (i.color ? '<div class="kecil">' + e(i.color) + '</div>' : '') + '</td><td class="tengah">' + e(i.size || '-') + '</td><td class="tengah">' + coreRibuan(i.qty) + '</td><td class="kanan">' + rp(i.price) + '</td>' +
+      var detail=coreNotaSizeHtml(i)||(ukuranDiBarang&&i.size?'<div class="rincian-ukuran"><b>Ukuran:</b> '+e(i.size)+'</div>':'');
+      return '<tr><td class="tengah">' + (n + 1) + '</td><td><b>' + e(i.name) + '</b>' + (i.color ? '<div class="kecil">' + e(i.color) + '</div>' : '') + detail + '</td>' + (ukuranDiBarang?'':'<td class="tengah">'+e(i.size||'-')+'</td>') + '<td class="tengah">' + coreRibuan(i.qty) + '</td><td class="kanan">' + rp(i.price) + '</td>' +
         (r.adaDiskon ? '<td class="tengah">' + (i.disc ? i.disc + '%' : '-') + '</td>' : '') + '<td class="kanan">' + rp(i.subtotal) + '</td></tr>';
     }).join('') + '</tbody></table>';
   var jumlah = '<table class="jumlah"><tr><td>Subtotal</td><td class="kanan">' + rp(r.subtotal) + '</td></tr>' +
@@ -6508,6 +6530,7 @@ function coreNotaStrukHtml(record, settings, opt) {
   var css = '@page{margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:"Courier New",Consolas,monospace;font-size:' + (lebar === 80 ? '10.5pt' : '9pt') + ';line-height:1.25;color:#000}' +
     '.struk{width:' + isi + 'mm;margin:0 auto;padding:2mm 0 4mm;overflow-wrap:anywhere;word-wrap:break-word}table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:0}.k{text-align:right;white-space:nowrap;padding-left:2mm}.kw{text-align:right;padding-left:2mm;word-break:break-word}' +
     '.t{text-align:center}.b{font-weight:bold}.usaha{font-weight:bold;font-size:1.25em}.besar td{font-weight:bold;font-size:1.15em}.status{border:2px solid #000;padding:2mm 1mm;font-size:1.3em;margin:2mm 0;page-break-inside:avoid}.bayaran{margin-top:2mm}.garis{border-top:1px dashed #000;height:0;margin:1.2mm 0}.logo{display:block;width:14mm;height:14mm;margin:0 auto 1mm}' +
+    '.rincian-ukuran{margin:.7mm 0;line-height:1.4}.ukuran-pcs{display:inline-block;max-width:100%;vertical-align:top}' +
     '@media screen{body{background:#e6eaef;padding:12px 0}.struk{background:#fff;width:' + (isi + 8) + 'mm;padding:4mm;box-shadow:0 2px 14px rgba(0,0,0,.18)}}';
   function baris(kiri, kanan, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + kiri + '</td><td class="k">' + kanan + '</td></tr>'; }
   var tunai = r.bayaran.filter(function (p) { return p.tenderedAmount !== undefined && p.tenderedAmount !== null; }).slice(-1)[0];
@@ -6515,7 +6538,7 @@ function coreNotaStrukHtml(record, settings, opt) {
   return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Struk ' + e(r.nomor) + '</title><style>' + css + '</style></head><body><div class="struk">' +
     (logo ? '<img class="logo" src="' + logo + '" alt="">' : '') + '<div class="t usaha">' + e(r.usaha) + '</div>' + r.sub.map(function (x) { return '<div class="t">' + e(x) + '</div>'; }).join('') + garis +
     '<table><tr><td>No</td><td class="kw">' + e(r.nomor) + '</td></tr><tr><td>Tanggal</td><td class="kw">' + e(coreNotaTgl(record.date)) + '</td></tr><tr><td>Pelanggan</td><td class="kw">' + e(c.name || '-') + '</td></tr></table>' + garis +
-    r.items.map(function (i) { return '<div class="b">' + e([i.name, i.color, i.size].filter(Boolean).join(' ')) + '</div><table>' + baris(uang(i.qty) + ' x ' + uang(i.price) + (i.disc ? ' -' + i.disc + '%' : ''), uang(i.subtotal)) + '</table>'; }).join('') + garis +
+    r.items.map(function (i) { return '<div class="b">' + e([i.name, i.color, i.sizeBreakdown.length?'':i.size].filter(Boolean).join(' ')) + '</div>' + coreNotaSizeHtml(i) + '<table>' + baris(uang(i.qty) + ' x ' + uang(i.price) + (i.disc ? ' -' + i.disc + '%' : ''), uang(i.subtotal)) + '</table>'; }).join('') + garis +
     '<table>' + (coreNum(record.discountAmount) || coreNum(record.shipping) ? baris('Subtotal', uang(r.subtotal)) : '') +
     (coreNum(record.discountAmount) ? baris('Diskon' + (coreNum(record.discountPercent) ? ' ' + coreNum(record.discountPercent) + '%' : ''), '-' + uang(record.discountAmount)) : '') +
     (coreNum(record.shipping) ? baris('Ongkir', uang(record.shipping)) : '') + baris('TOTAL', uang(r.total), 'besar') +
@@ -6598,6 +6621,23 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     checkRows('CommerceEvent',[event]);store.append('CommerceEvent',event);return answer();
   };
   function sourcePicture(v){if(!v)return '';if(typeof v!=='string'||v.length>48000||!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v))fail('Gambar harus JPEG/PNG/WebP berukuran kecil.');return v;}
+  function notaSizes(item,previous,quantity){
+    var rows=item.sizeBreakdown,clear=item.clearSizeBreakdown,had=previous&&Array.isArray(previous.sizeBreakdown)&&previous.sizeBreakdown.length;
+    if(clear!==undefined&&typeof clear!=='boolean')fail('Pilihan menghapus rincian ukuran tidak sah.');
+    if(rows!==undefined&&!Array.isArray(rows))fail('Rincian ukuran harus berupa daftar ukuran dan jumlah.');
+    if(rows&&rows.length>40)fail('Isi maksimal 40 ukuran pada satu barang.');
+    if(!rows||!rows.length){if(had&&clear!==true)fail('Rincian ukuran yang sudah tersimpan tidak boleh hilang. Muat ulang nota, atau hapus rincian ukuran melalui pilihan yang tersedia.');return [];}
+    if(clear===true)fail('Pilih memakai atau menghapus rincian ukuran, bukan keduanya.');
+    var seen=Object.create(null),total=0,out=rows.map(function(row){
+      if(!row||typeof row!=='object'||Array.isArray(row))fail('Isi ukuran dan jumlah yang sah.');
+      var size=text(row.size,30,true).replace(/\s+/g,' ').toUpperCase(),qty=num(row.qty,1e8,true,true);
+      if(size.length>30)fail('Nama ukuran maksimal 30 karakter.');
+      if(seen[size])fail('Ukuran yang sama cukup satu kali. Gabungkan jumlahnya pada ukuran tersebut.');
+      seen[size]=true;total+=qty;return {size:size,qty:qty};
+    });
+    if(total!==quantity)fail('Total rincian ukuran harus sama dengan jumlah barang.');
+    return out;
+  }
   function normalize(kind,r,previous){
     var out={id:id(r.id)},old=previous&&coreCommerceData(previous);
     if(kind==='supplier'){out.nama=text(r.nama,100,true);out.kontak=text(r.kontak,80);out.alamat=text(r.alamat,400);out.catatan=text(r.catatan,500);out.aktif=r.aktif!==false;}
@@ -6605,7 +6645,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     if(kind==='order'||kind==='nota'){
       if(!(r.items instanceof Array)||!r.items.length||r.items.length>100)fail('Isi 1 sampai 100 baris barang.');var seen={};
       out.items=r.items.map(function(i){var x={id:id(i.id)};if(seen[x.id])fail('Identitas baris barang ganda.');seen[x.id]=true;
-        if(kind==='order'){x.nama=text(i.nama,120,true);x.jumlah=num(i.jumlah,1e8,true,true);}else{x.name=text(i.name,120,true);x.size=text(i.size,40);x.color=text(i.color,60);x.qty=num(i.qty,1e8,true,true);x.price=num(i.price,1e12,false,true);x.discPercent=num(i.discPercent===undefined?0:i.discPercent,100,false,false);x.subtotal=Math.round(x.qty*x.price*(100-x.discPercent)/100);if(!Number.isSafeInteger(x.subtotal))fail('Subtotal terlalu besar.');}return x;});
+        if(kind==='order'){x.nama=text(i.nama,120,true);x.jumlah=num(i.jumlah,1e8,true,true);}else{x.name=text(i.name,120,true);x.size=text(i.size,40);x.color=text(i.color,60);x.qty=num(i.qty,1e8,true,true);var prior=(old&&old.items||[]).filter(function(value){return value.id===x.id;})[0],sizes=notaSizes(i,prior,x.qty);if(sizes.length)x.sizeBreakdown=sizes;x.price=num(i.price,1e12,false,true);x.discPercent=num(i.discPercent===undefined?0:i.discPercent,100,false,false);x.subtotal=Math.round(x.qty*x.price*(100-x.discPercent)/100);if(!Number.isSafeInteger(x.subtotal))fail('Subtotal terlalu besar.');}return x;});
       if(kind==='order'){var names=Object.create(null),duplicate=false;out.items.forEach(function(i){var name=i.nama.replace(/\s+/g,' ').toLowerCase();if(names[name])duplicate=true;names[name]=true;});
         /* An unchanged historical list may still receive metadata/price edits. Never
            add, reorder, rename or increase duplicate rows, nor guess receipt links. */
@@ -7101,7 +7141,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.50';
+var UI_VERSION = '1.5.51';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -11595,8 +11635,22 @@ VIEWS.nota=function(){return commerceLoadView('nota','Nota penjualan','Nota pela
     (history?'<p class="small muted">Nota lunas masuk riwayat otomatis. Jika pembayaran dikoreksi dan masih ada sisa, nota kembali aktif. Arsip manual dan nota yang dihapus tetap tersimpan di sini.</p>':'')+
     fSelect('Status nota','commerceStatus',choices,S.f['commerceStatus-'+key]||'','data-c="commerceStatus" data-m="'+key+'"')+
     commerceList(key,rows,function(r){if(r.historyHidden)return commerceHistoryTrashCard('nota',[r]);var ringkas=coreNotaRingkas(r,S.state.settings);return '<div class="corder"><button class="item" data-a="commerceNotaDetail" data-id="'+esc(r.id)+'"><span class="grow"><b>'+esc(r.noNota||r.number||r.id)+'</b><br><span>'+esc((r.customer||{}).name)+'</span><br><span class="small muted">'+tgl(r.date)+'</span> '+commerceNotaChip(r)+(ringkas.lunas&&ringkas.tanggalLunas?'<br><span class="small muted">Lunas '+tgl(ringkas.tanggalLunas)+'</span>':'')+'</span><span class="right"><b>'+rp(r.total)+'</b><br><span class="small muted">Dibayar '+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.bayar))+'</span><br><span class="small muted">Sisa '+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.sisa))+'</span></span>'+ic('chev')+'</button>'+(history&&me().divisi==='owner'?'<div class="row wrap corder-act">'+commerceHistoryButton('nota',[r],false)+'</div>':'')+'</div>';},function(r){return[r.id,r.noNota,r.number,(r.customer||{}).name];},function(r,status){return commerceNotaSaring(r,status,history);})+commerceEmptyActions('nota');});};
-function commerceNotaLine(row){return '<div class="card col gap-s" data-commerce-line data-id="'+esc(row.id||newId())+'">'+fText('Nama barang','lineName',row.name,'maxlength="150"')+'<div class="grid g-2">'+fText('Warna','color',row.color,'maxlength="100"')+fText('Ukuran','size',row.size,'maxlength="40"')+'</div><div class="f-row three">'+fNum('Jumlah pcs','qty',row.qty==null?1:row.qty,'step="1"')+fNum('Harga satuan (Rp)','price',row.price==null?'':row.price,'step="1"')+fNum('Diskon item (%)','discPercent',row.discPercent||0,'max="100" step="0.01"')+'</div><button class="btn ghost sm" data-a="commerceRemoveLine">Hapus item</button></div>';}
-function commerceNotaValues(f){return $$('[data-commerce-line]',f).map(function(el){var v=formVals(el),qty=commerceNumber(v.qty,'Jumlah pcs',true,1e9),price=commerceNumber(v.price,'Harga satuan',true),disc=commerceNumber(v.discPercent,'Diskon item',false,100);if(!v.lineName.trim()||!qty||!price)throw new Error('Setiap item perlu nama, jumlah, dan harga lebih dari nol.');return{id:el.getAttribute('data-id'),name:v.lineName.trim(),size:v.size.trim(),color:v.color.trim(),qty:qty,price:price,discPercent:disc};});}
+function commerceNotaSizeLine(row){row=row||{};return '<div class="row gap-s" data-commerce-size-row><div class="grow">'+fText('Ukuran','notaSize',row.size,'maxlength="30" placeholder="M, L, XL..." autocapitalize="characters"')+'</div><div style="width:110px;max-width:36%">'+fNum('Jumlah pcs','notaSizeQty',row.qty==null?'':row.qty,'min="1" max="100000000" step="1"')+'</div><button type="button" class="btn ghost sm" data-a="commerceNotaRemoveSize" aria-label="Hapus ukuran">'+ic('trash','s')+'</button></div>';}
+function commerceNotaSizeValues(el){
+  var rows=$$('[data-commerce-size-row]',el),seen={},total=0;
+  if(!rows.length||rows.length>40)throw new Error('Isi 1 sampai 40 ukuran pada rincian barang.');
+  return rows.map(function(row){var v=formVals(row),size=String(v.notaSize||'').trim().replace(/\s+/g,' ').toUpperCase(),qty=commerceNumber(v.notaSizeQty,'Jumlah per ukuran',true,1e8);if(!size||size.length>30||!qty)throw new Error('Isi ukuran dan jumlah pcs lebih dari nol di setiap baris.');if(seen['$'+size])throw new Error('Ukuran '+size+' terisi dua kali pada barang yang sama. Gabungkan jumlahnya.');seen['$'+size]=true;total+=qty;if(total>1e8)throw new Error('Total jumlah per barang terlalu besar.');return {size:size,qty:qty};});
+}
+function commerceNotaSizeSync(f){
+  $$('[data-commerce-line]',f).forEach(function(line){var toggle=$('[data-commerce-size-toggle]',line),qty=$('[name="qty"]',line);if(!toggle||!qty)return;if(toggle.checked&&!qty.readOnly)line._commerceSimpleQty=qty.value;if(!toggle.checked&&qty.readOnly&&line._commerceSimpleQty!==undefined){try{commerceNotaSizeValues(line);}catch(e){qty.value=line._commerceSimpleQty;}}qty.readOnly=toggle.checked;var panel=$('[data-commerce-size-panel]',line),label=$('[data-commerce-size-label]',line),hint=$('[data-commerce-size-hint]',line);if(panel)panel.hidden=!toggle.checked;if(label)label.hidden=toggle.checked;if(hint)hint.hidden=toggle.checked;
+    if(toggle.checked){var total=0;$$('[data-commerce-size-row]',line).forEach(function(row){var n=Number(($('[name="notaSizeQty"]',row)||{}).value);if(Number.isFinite(n)&&Number.isInteger(n)&&n>0)total+=n;});qty.value=total;}
+  });
+}
+C.commerceNotaSizeToggle=function(el){var line=el.closest('[data-commerce-line]'),f=line.closest('[data-form]');if(f._commerceLocked)return;line._commerceSizeClear=!el.checked&&line.getAttribute('data-had-size-breakdown')==='1';var box=$('[data-commerce-size-rows]',line);if(el.checked&&!$$('[data-commerce-size-row]',line).length)box.insertAdjacentHTML('beforeend',commerceNotaSizeLine({}));R.commerce(f);};
+A.commerceNotaAddSize=function(el){var line=el.closest('[data-commerce-line]'),f=line.closest('[data-form]');if(f._commerceLocked)return;if($$('[data-commerce-size-row]',line).length>=40)return toast('Maksimal 40 ukuran per barang.',true);var box=$('[data-commerce-size-rows]',line);box.insertAdjacentHTML('beforeend',commerceNotaSizeLine({}));var last=$$('[data-commerce-size-row]',line).slice(-1)[0],field=last&&$('[name="notaSize"]',last);if(field)field.focus();R.commerce(f);};
+A.commerceNotaRemoveSize=function(el){var row=el.closest('[data-commerce-size-row]'),line=row.closest('[data-commerce-line]'),f=line.closest('[data-form]');if(f._commerceLocked)return;if($$('[data-commerce-size-row]',line).length<=1)return toast('Isi minimal satu ukuran, atau matikan rincian ukuran.',true);row.remove();R.commerce(f);};
+function commerceNotaLine(row){var sizes=Array.isArray(row.sizeBreakdown)?row.sizeBreakdown:[],detailed=sizes.length>0;return '<div class="card col gap-s" data-commerce-line data-id="'+esc(row.id||newId())+'" data-had-size-breakdown="'+(detailed?'1':'0')+'">'+fText('Nama barang','lineName',row.name,'maxlength="150"')+'<div class="grid g-2">'+fText('Warna','color',row.color,'maxlength="100"')+'<div data-commerce-size-label'+(detailed?' hidden':'')+'>'+fText('Ukuran / keterangan','size',row.size,'maxlength="40" placeholder="Contoh: M–XL"')+'</div></div><label class="row gap-s"><input type="checkbox" data-commerce-size-toggle data-c="commerceNotaSizeToggle"'+(detailed?' checked':'')+'>Rincian jumlah per ukuran</label><p class="small muted" data-commerce-size-hint'+(detailed?' hidden':'')+'>Aktifkan untuk mengisi M, L, XL, dan jumlahnya di struk serta PDF. Jumlah per ukuran belum tercatat; isi sesuai pesanan.</p><div class="col gap-s" data-commerce-size-panel'+(detailed?'':' hidden')+'><div class="col gap-s" data-commerce-size-rows>'+sizes.map(commerceNotaSizeLine).join('')+'</div><button type="button" class="btn sm" data-a="commerceNotaAddSize">'+ic('plus','s')+'Tambah ukuran</button><p class="small muted">Jumlah barang dihitung otomatis dari rincian ukuran.</p></div><div class="f-row three">'+fNum('Jumlah pcs','qty',row.qty==null?1:row.qty,'max="100000000" step="1"'+(detailed?' readonly':''))+fNum('Harga satuan (Rp)','price',row.price==null?'':row.price,'step="1"')+fNum('Diskon item (%)','discPercent',row.discPercent||0,'max="100" step="0.01"')+'</div><button class="btn ghost sm" data-a="commerceRemoveLine">Hapus item</button></div>';}
+function commerceNotaValues(f){return $$('[data-commerce-line]',f).map(function(el){var v=formVals(el),toggle=$('[data-commerce-size-toggle]',el),sizes=toggle&&toggle.checked?commerceNotaSizeValues(el):[],qty=sizes.length?sizes.reduce(function(n,r){return n+r.qty;},0):commerceNumber(v.qty,'Jumlah pcs',true,1e8),price=commerceNumber(v.price,'Harga satuan',true),disc=commerceNumber(v.discPercent,'Diskon item',false,100);if(!v.lineName.trim()||!qty||!price)throw new Error('Setiap item perlu nama, jumlah, dan harga lebih dari nol.');var item={id:el.getAttribute('data-id'),name:v.lineName.trim(),size:v.size.trim(),color:v.color.trim(),qty:qty,price:price,discPercent:disc};if(sizes.length)item.sizeBreakdown=sizes;else if(el._commerceSizeClear)item.clearSizeBreakdown=true;return item;});}
 function commerceNotaTotals(items,discount,shipping){var subtotal=items.reduce(function(n,it){return n+Math.round(it.qty*it.price*(1-it.discPercent/100));},0),deduction=Math.round(subtotal*discount/100);return{subtotal:subtotal,discountAmount:deduction,total:subtotal-deduction+shipping};}
 A.commerceNotaOpen=function(el){var row=commerceRecord('nota',el.getAttribute('data-id'))||{},customer=row.customer||{};if(el.getAttribute('data-id')&&!row.id)return toast('Nota tidak tersedia atau ada di Sampah riwayat. Pulihkan sebelum mengedit.',true);
   var body=commerceEditFields(row)+(row.id&&Number(row.totalPaid)>0?'<div class="note">Nota ini sudah dibayar <b>'+rp(row.totalPaid)+'</b>. Harga, jumlah, ukuran, dan barangnya boleh diperbaiki; pembayarannya tidak berubah, jadi total baru tidak boleh lebih kecil dari yang sudah dibayar.</div>':'')+fTanggal('Tanggal nota','date',row.date?String(row.date).slice(0,10):undefined)+'<div class="grid g-2">'+fText('Nama pelanggan','customerName',customer.name,'maxlength="150"')+fSelect('Jenis pelanggan','customerType',[['walkin','Umum'],['reseller','Reseller']],customer.type||'walkin')+'</div><div class="grid g-2">'+fText('Telepon','phone',customer.phone,'maxlength="80"')+fText('Alamat','address',customer.address,'maxlength="300"')+'</div><div class="col" data-commerce-lines>'+((row.items&&row.items.length)?row.items:[{}]).map(commerceNotaLine).join('')+'</div><button class="btn" data-a="commerceAddNotaLine">Tambah barang</button><div class="grid g-2">'+fNum('Diskon tambahan (%)','discountPercent',row.discountPercent||0,'max="100" step="0.01"')+fNum('Ongkir (Rp)','shipping',row.shipping||0,'step="1"')+'</div>';
@@ -11612,7 +11666,7 @@ function commerceNotaChip(r){var ringkas=coreNotaRingkas(r,S.state.settings);ret
 function commerceNotaRincian(id){
   var row=commerceRecord('nota',id);if(!row)return sheetHtml('Nota',emptyBox('Nota ini belum tersedia. Muat ulang daftar.'));
   var attrs=commerceRecordAttr('nota',id),c=row.customer||{},ringkas=coreNotaRingkas(row,S.state.settings),batal=ringkas.batal,owner=me().divisi==='owner',bayar=Number(row.totalPaid)||0,bisaEdit=!batal&&!row.legacy&&!ringkas.periksa;
-  var baris=(row.items||[]).map(function(it){var d=Number(it.discPercent)||0,varian=[it.color,it.size].filter(Boolean).join(' · ');return '<div class="item"><span class="grow"><b>'+esc(it.name)+'</b>'+(varian?' <span class="small muted">'+esc(varian)+'</span>':'')+'<br><span class="small muted">'+nf(it.qty)+' pcs × '+rp(it.price)+(d?' · diskon '+nfQty(d)+'%':'')+'</span></span><b>'+rp(it.subtotal)+'</b></div>';}).join('');
+  var baris=(row.items||[]).map(function(it){var d=Number(it.discPercent)||0,sizeText=typeof coreNotaSizeText==='function'?coreNotaSizeText(it):'',varian=[it.color,sizeText?'':it.size].filter(Boolean).join(' · ');return '<div class="item"><span class="grow"><b>'+esc(it.name)+'</b>'+(varian?' <span class="small muted">'+esc(varian)+'</span>':'')+(sizeText?'<div class="small" style="margin-top:5px;line-height:1.6">'+esc(sizeText)+'</div>':'<br>')+'<span class="small muted">'+nf(it.qty)+' pcs × '+rp(it.price)+(d?' · diskon '+nfQty(d)+'%':'')+'</span></span><b>'+rp(it.subtotal)+'</b></div>';}).join('');
   var hitung='<dl class="kv">'+(Number(row.discountAmount)||Number(row.shipping)?'<dt>Subtotal</dt><dd>'+rp(row.subtotal)+'</dd>':'')+(Number(row.discountAmount)?'<dt>Diskon '+nfQty(row.discountPercent)+'%</dt><dd>-'+rp(row.discountAmount)+'</dd>':'')+(Number(row.shipping)?'<dt>Ongkir</dt><dd>'+rp(row.shipping)+'</dd>':'')+
     '<dt>Total</dt><dd class="b">'+rp(row.total)+'</dd><dt>Sudah dibayar</dt><dd class="b">'+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.bayar))+'</dd><dt>Sisa</dt><dd class="b">'+(ringkas.periksa?'Perlu diperiksa':rp(ringkas.sisa))+'</dd></dl>';
   var utama=batal?'':'<div class="row wrap">'+(ringkas.sisa>0&&!ringkas.periksa?'<button class="btn pri" data-a="commercePaymentOpen"'+attrs+'>'+ic('plus','s')+'Tambah DP / pembayaran</button><button class="btn" data-a="commercePaymentOpen"'+attrs+' data-pelunasan="1">Lunasi sisa '+rp(ringkas.sisa)+'</button>':'')+
@@ -11695,7 +11749,7 @@ function commerceHppLive(f,kotak){
     if(sim)sim.disabled=true;
   }
 }
-R.commerce=function(f){if(f._commerceBatch){commerceBatchPaint(f);return;}if(f._commerceReceipt){commerceReceiptAmountPaint(f);return;}if(f._commerceGroupOrders){commerceGroupAmountPaint(f);return;}var hppLive=$('[data-commerce-hpp-live]',f);if(hppLive)return commerceHppLive(f,hppLive);var target=$('[data-commerce-total]',f);if(!target)return;try{var v=formVals(f),nota=f.getAttribute('data-module')==='nota',total,qty;if(nota)total=commerceNotaTotals(commerceNotaValues(f),commerceNumber(v.discountPercent,'Diskon tambahan',false,100),commerceNumber(v.shipping,'Ongkir',true)).total;else{qty=commerceOrderValues(f).reduce(function(n,r){return n+r.jumlah;},0);total=qty*commerceNumber(v.hargaSatuan,'Harga satuan',true);}target.textContent=(nota?'Total ':'Total seluruh varian: '+nf(qty)+' pcs · ')+rp(total)+(v.dp!==undefined?' · Sisa '+rp(Math.max(0,total-Number(v.dp||0)))+(Number(v.dp)>total?' · Kembalian '+rp(Number(v.dp)-total):''):'')+(nota&&f._commerceOriginal&&Number(f._commerceOriginal.totalPaid)>0?' · Sudah dibayar '+rp(f._commerceOriginal.totalPaid)+' · Sisa '+rp(Math.max(0,total-Number(f._commerceOriginal.totalPaid))):'');}catch(e){target.textContent=e.message;}};
+R.commerce=function(f){if(f._commerceBatch){commerceBatchPaint(f);return;}if(f._commerceReceipt){commerceReceiptAmountPaint(f);return;}if(f._commerceGroupOrders){commerceGroupAmountPaint(f);return;}var hppLive=$('[data-commerce-hpp-live]',f);if(hppLive)return commerceHppLive(f,hppLive);var target=$('[data-commerce-total]',f);if(!target)return;try{var nota=f.getAttribute('data-module')==='nota';if(nota)commerceNotaSizeSync(f);var v=formVals(f),total,qty;if(nota)total=commerceNotaTotals(commerceNotaValues(f),commerceNumber(v.discountPercent,'Diskon tambahan',false,100),commerceNumber(v.shipping,'Ongkir',true)).total;else{qty=commerceOrderValues(f).reduce(function(n,r){return n+r.jumlah;},0);total=qty*commerceNumber(v.hargaSatuan,'Harga satuan',true);}target.textContent=(nota?'Total ':'Total seluruh varian: '+nf(qty)+' pcs · ')+rp(total)+(v.dp!==undefined?' · Sisa '+rp(Math.max(0,total-Number(v.dp||0)))+(Number(v.dp)>total?' · Kembalian '+rp(Number(v.dp)-total):''):'')+(nota&&f._commerceOriginal&&Number(f._commerceOriginal.totalPaid)>0?' · Sudah dibayar '+rp(f._commerceOriginal.totalPaid)+' · Sisa '+rp(Math.max(0,total-Number(f._commerceOriginal.totalPaid))):'');}catch(e){target.textContent=e.message;}};
 
 /* foto model HPP diambil dari foto PO atau produk produksi yang sama (yang sudah ada di perangkat); biaya yang
    sudah diketahui ditulis langsung di daftar seperti tabel HPP di aplikasi sebelumnya */
