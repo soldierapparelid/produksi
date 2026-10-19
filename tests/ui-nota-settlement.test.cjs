@@ -16,7 +16,7 @@ function harness(){
   `,context);
   const helperStart=html.indexOf('function fTanggal('),helperEnd=html.indexOf('/* ---------- hitungan PO',helperStart);vm.runInContext(html.slice(helperStart,helperEnd),context);vm.runInContext(block,context);
   const coreSource=fs.readFileSync(path.resolve(__dirname,'../src/core.js'),'utf8'),notaSource=fs.readFileSync(path.resolve(__dirname,'../src/commerce.js'),'utf8');
-  vm.runInContext(coreSource.match(/function coreNum\(v\) \{[^\r\n]+/)[0]+notaSource.slice(notaSource.indexOf('function coreNotaTanggalSah('),notaSource.indexOf('function coreNotaInvoiceHtml(')),context);
+  vm.runInContext(coreSource.match(/function coreNum\(v\) \{[^\r\n]+/)[0]+notaSource.slice(notaSource.indexOf('function coreNotaSizeBreakdown('),notaSource.indexOf('function coreNotaInvoiceHtml(')),context);
   vm.runInContext(html.slice(html.indexOf('function seg('),html.indexOf('function searchBox(')),context);
   const run=code=>vm.runInContext(code,context);const json=code=>JSON.parse(run('JSON.stringify('+code+')'));
   function seed(module,data){run(`var e=commerceEntry(${JSON.stringify(module)});e.data=${JSON.stringify(data)};e.version=10;e.tried=true;`);}

@@ -17,7 +17,7 @@ function harness(){
   const unitStart=html.indexOf('function satuanPendek('),unitEnd=html.indexOf('/* bahan yang dipakai',unitStart);assert.ok(unitStart>=0&&unitEnd>unitStart,'actual unit helper exists');vm.runInContext(html.slice(unitStart,unitEnd),context);
   const helperStart=html.indexOf('function fTanggal('),helperEnd=html.indexOf('/* ---------- hitungan PO',helperStart);vm.runInContext(html.slice(helperStart,helperEnd),context);vm.runInContext(block,context);
   const coreSource=fs.readFileSync(path.resolve(__dirname,'../src/core.js'),'utf8'),notaSource=fs.readFileSync(path.resolve(__dirname,'../src/commerce.js'),'utf8');
-  vm.runInContext(coreSource.match(/function coreNum\(v\) \{[^\r\n]+/)[0]+notaSource.slice(notaSource.indexOf('function coreNotaTanggalSah('),notaSource.indexOf('function coreNotaInvoiceHtml(')),context);
+  vm.runInContext(coreSource.match(/function coreNum\(v\) \{[^\r\n]+/)[0]+notaSource.slice(notaSource.indexOf('function coreNotaSizeBreakdown('),notaSource.indexOf('function coreNotaInvoiceHtml(')),context);
   const run=code=>vm.runInContext(code,context);const json=code=>JSON.parse(run('JSON.stringify('+code+')'));
   function seed(module,data){run(`var e=commerceEntry(${JSON.stringify(module)});e.data=${JSON.stringify(data)};e.version=10;e.tried=true;`);}
   function form(values,module,rows=[]){run(`currentForm.values=${JSON.stringify(values)};currentForm.module=${JSON.stringify(module)};currentForm._commerceScope=commerceScope();currentForm.rows=${JSON.stringify(rows)}.map(function(r){return {values:r.values,getAttribute:function(){return r.id;}};});`);}
