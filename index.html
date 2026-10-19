@@ -13749,7 +13749,7 @@ function openPotong(poId, rencanaId, lanjut) {
   var fid = newId();
   openSheet(function () {
     var po = D.po[poId]; if (!po) return sheetHtml('Catat potong', emptyBox('PO tidak ditemukan.'));
-    var plan = rencanaId ? rencanaPotongById(rencanaId) : null, blocked = rencanaPotongBlocked(po), potongTambahan = !!(plan && ((S.state && S.state.potong) || []).some(function (r) { return r.poId === po.id && r.rencanaId !== plan.id; }));
+    var plan = rencanaId ? rencanaPotongById(rencanaId) : null, blocked = rencanaPotongBlocked(po), potongTambahan = !!(plan && (coreNum(po.agg && po.agg.total && po.agg.total.potong) > 0 || Object.keys(workflowFor(po).ukuran || {}).some(function (s) { return coreNum(workflowFor(po).ukuran[s].potong) > 0; }) || ((S.state && S.state.potong) || []).some(function (r) { return r.poId === po.id && r.rencanaId !== plan.id; })));
     if (blocked) return sheetHtml('Catat potong', emptyBox(blocked));
     if (plan && plan.legacyBlocked) return sheetHtml('Catat potong', emptyBox(plan.legacyBlocked));
     if (rencanaId && (!plan || plan.poId !== poId || plan.status !== 'siap')) return sheetHtml('Catat potong', emptyBox('Rencana sudah dipakai atau berubah. Muat data terbaru dan pilih pekerjaan yang masih siap.'));
