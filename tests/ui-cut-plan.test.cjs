@@ -129,6 +129,14 @@ test('additional cut guidance requests all results once and success never promis
   const result=evaluate(c,'A.potongSave(el)');c.calls[0].resolve({});await result;
   assert.equal(c.messages.at(-1),'Hasil potong tersimpan.');
 });
+test('a different cutter sees additional-batch guidance even when previous cutters records are omitted from their state',()=>{
+  const c=ui();evaluate(c,"S.state.potong=[];po.agg={total:{potong:272}};openPotong('po','plan')");
+  assert.match(c.rendered,/Isi seluruh hasil kain tambahan per ukuran dalam satu kali simpan/);
+  assert.doesNotMatch(c.rendered,/Boleh simpan satu ukuran dulu|Ukuran lain dicatat menyusul/);
+  evaluate(c,"delete po.agg;po.workflow.ukuran={M:{potong:272}};openPotong('po','plan')");
+  assert.match(c.rendered,/Isi seluruh hasil kain tambahan per ukuran dalam satu kali simpan/);
+  assert.doesNotMatch(c.rendered,/Boleh simpan satu ukuran dulu|Ukuran lain dicatat menyusul/);
+});
 test('cutter queue shows only prepared active clean work and own consumed work',()=>{
   const c=ui();evaluate(c,`D.po.held={id:'held',status:'aktif',workflow:{issues:['review']}};D.po.closed={id:'closed',status:'selesai'};
     S.state.rencanaPotong.push({...plan,id:'held-plan',poId:'held'},{...plan,id:'closed-plan',poId:'closed'},{...plan,id:'cancel',status:'batal'},{...plan,id:'done',status:'terpakai',potongId:'cut'},{...plan,id:'other-done',status:'terpakai',potongId:'other-cut'});
