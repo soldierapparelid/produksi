@@ -91,7 +91,7 @@ test('invalid last roll and incompatible units reject the entire receipt without
     inv => { inv.items[1].rolls[0].qty = 0; },
     inv => { inv.items[1].rolls[0].qty = 1.0001; },
     inv => { inv.items[1].rolls[0].qty = true; },
-    inv => { inv.items[1].satuan = 'meter'; },
+    inv => { inv.items[1].satuan = 'liter'; },
     inv => { inv.items[1].rolls = []; }
   ]) {
     const f = fixture(), before = f.raw('StokBahan'), writes = f.h.sheets.StokBahan.writes, inv = f.receipt(); change(inv);

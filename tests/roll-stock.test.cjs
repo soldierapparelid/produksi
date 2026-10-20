@@ -19,7 +19,7 @@ test('individual weights are never inferred from aggregate counts or flat marked
   assert.deepEqual(run(`coreFlattenInvoiceRolls([{bahan:'Cotton',satuan:'kg',qty:21,rol:5,harga:10}])`),[{bahan:'Cotton',satuan:'kg',qty:21,rol:5,harga:10}]);
   for (const items of [
     [{bahan:'Cotton',satuan:'kg',qty:21,rol:5,stockMode:'roll'}],
-    [{bahan:'Cotton',satuan:'meter',rolls:[{qty:4}]}],
+    [{bahan:'Cotton',satuan:'liter',rolls:[{qty:4}]}],
     [{bahan:'Cotton',satuan:'kg',rolls:[]}]
   ]) assert.throws(() => run(`coreFlattenInvoiceRolls(${JSON.stringify(items)})`));
 });
