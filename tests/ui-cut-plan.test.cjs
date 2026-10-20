@@ -331,3 +331,118 @@ test('1542b: every cutter card says which sizes must be cut, without opening the
   const w=ui();evaluate(w,"S.state.rencanaPotong=[];po.cutting={ukuran:['M','L'],pendingUkuran:['L']};");assert.match(evaluate(w,"VIEWS['p-kerja']()"),/Menunggu bahan dari owner<\/span><div class="po-ukuran kecil"><span class="xs muted">Harus dipotong<\/span><span class="sz-aktif potong">L<\/span><\/div>/);
   assert.doesNotMatch(html.slice(html.indexOf("VIEWS['p-kerja'] ="),html.indexOf("VIEWS['p-riwayat'] =")),/Belum dipotong:/,'one wording on every card');
 });
+
+function unitStockUI(){
+  const c=ui();
+  vm.runInContext(part('function poPrepareOwner()', 'A.poNew ='),c);
+  vm.runInContext(part('function jumlahPerSatuan(', 'function pilihRentang('),c);
+  evaluate(c,`
+    actor.divisi='owner';stocks=[
+      {nama:'Big One',satuan:'yard',saldo:200,tersedia:200,legacyTersedia:200},
+      {nama:'Katun',satuan:'kg',saldo:25,tersedia:25,legacyTersedia:10},
+      {nama:'Rib',satuan:'kg',saldo:4,tersedia:4,legacyTersedia:4}
+    ];
+    S.state.stokRol=[{id:'katun-rol',bahan:'Katun',satuan:'kg',qty:15,tersedia:15,rollLabel:'Rol 1'}];
+    form.values={id:'new-plan',poId:'po',prepareMode:'roll',legacyRol:'0',revision:''};
+    form.choices=[];form.bulk=[];form.legacy=[];
+    form.nodes['[data-roll-picker]']={getAttribute:function(k){return k==='data-plan'?(form.planId||''):'';}};
+    form.nodes['[data-roll-summary]']={textContent:''};
+    form.nodes['[data-po-material-summary]']={innerHTML:''};
+    var previousOne=$,previousMany=$$,lastSelections={};
+    $=function(q,scope){
+      if(q==='[data-roll-select]')return scope.selected;
+      if(q==='[data-roll-qty]'||q==='[data-roll-bulk-qty]')return scope.input;
+      return previousOne(q,scope);
+    };
+    $$=function(q,scope){
+      if(q==='[data-roll-choice]')return scope.choices||[];
+      if(q==='[data-roll-bulk]')return scope.bulk||[];
+      if(q==='[data-roll-bulk-qty]')return (scope.bulk||[]).map(function(r){return r.input;});
+      if(q==='[data-po-legacy-bahan]')return scope.legacy||[];
+      return previousMany(q,scope);
+    };
+    function bulkRow(name,qty){return {input:{value:String(qty)},getAttribute:function(){return name;}};}
+    function rollRow(qty){return {input:{value:String(qty)},selected:{checked:true},getAttribute:function(){return 'katun-rol';}};}
+    fSelect=function(t,n,options,value,attrs){lastSelections[n]=value;return '<select name="'+n+'"></select>';};
+  `);
+  return c;
+}
+
+test('1554: yard stock has a direct quantity input and saves a unit-preserving plan without inventing rolls',()=>{
+  const c=unitStockUI();
+  const view=evaluate(c,"rollChoicesHtml('Big One',[],'')");
+  assert.match(view,/Tersedia <b>200 yard<\/b>/);
+  assert.match(view,/Jumlah untuk PO \(yard\)/);
+  assert.match(view,/data-roll-bulk-qty/);
+  assert.doesNotMatch(view,/Saldo lama|Belum ada rol|data-roll-choice|kg/);
+  evaluate(c,"S.state.stokRol=[];poPrepareHtml('new-plan',true,['M'])");
+  assert.equal(c.lastSelections.prepareMode,'roll','yard stock alone uses the direct stock picker');
+  evaluate(c,"form.bulk=[bulkRow('Big One',60)]");
+  assert.deepEqual(plain(evaluate(c,"rencanaPotongValues(form,'siap')")),{
+    rencana:{bahanList:[{nama:'Big One',qty:60,satuan:'yard'}],rol:0,id:'new-plan',poId:'po',catatan:'',status:'siap'}
+  });
+  evaluate(c,'R.po(form)');
+  assert.match(c.form.nodes['[data-po-material-summary]'].innerHTML,/Big One · 60 yd/);
+  assert.doesNotMatch(c.form.nodes['[data-po-material-summary]'].innerHTML,/kg|rol/);
+  assert.equal(c.form.nodes['[data-roll-summary]'].textContent,'60 yd');
+});
+
+test('1554: mixed roll and yard preparation keeps units separate in payload and both visible summaries',()=>{
+  const c=unitStockUI();evaluate(c,"form.choices=[rollRow(5)];form.bulk=[bulkRow('Big One',60)]");
+  assert.deepEqual(plain(evaluate(c,'rollPreparedValues(form)')),{
+    alokasiBahan:[{stokId:'katun-rol',qty:5}],legacyBahanList:[{nama:'Big One',qty:60,satuan:'yard'}],legacyRol:0
+  });
+  evaluate(c,'R.po(form)');
+  const summary=c.form.nodes['[data-po-material-summary]'].innerHTML;
+  assert.match(summary,/Katun · 5 kg/);assert.match(summary,/Big One · 60 yd/);
+  assert.match(summary,/Total: 5 kg · 60 yd/);assert.doesNotMatch(summary,/65 kg/);
+  assert.equal(c.form.nodes['[data-roll-summary]'].textContent,'1 rol · 5 kg · 60 yd');
+  evaluate(c,"form.values.includeLegacy=true;form.legacy=[{values:{legacyBahan:'Rib',legacyQty:'2'}}]");
+  assert.deepEqual(plain(evaluate(c,'rollPreparedValues(form).legacyBahanList')),[{nama:'Big One',qty:60,satuan:'yard'},{nama:'Rib',qty:2,satuan:'kg'}]);
+});
+
+test('1554: direct yard amounts reject invalid quantities and duplicates, including duplicate stock-source rows',()=>{
+  const c=unitStockUI();
+  for(const qty of ['',0,-1,201,0.0001,'NaN','Infinity']){
+    c.badQty=qty;evaluate(c,"form.bulk=[bulkRow('Big One',badQty)]");
+    assert.throws(()=>evaluate(c,'rollPreparedValues(form)'),/dalam yard.*stok tersedia/);
+  }
+  evaluate(c,"form.bulk=[bulkRow('Big One',60),bulkRow('Big One',10)]");
+  assert.throws(()=>evaluate(c,'rollPreparedValues(form)'),/berbeda pada setiap baris/);
+  evaluate(c,"form.bulk=[bulkRow('Big One',60)];form.values.includeLegacy=true;form.legacy=[{values:{legacyBahan:'Big One',legacyQty:'10'}}]");
+  assert.throws(()=>evaluate(c,'rollPreparedValues(form)'),/diisi dua kali/);
+  evaluate(c,"form.values.includeLegacy=false;actor.divisi='potong'");
+  assert.throws(()=>evaluate(c,'rollPreparedValues(form)'),/owner/);
+});
+
+test('1554: an existing ready plan can retain its own reserved yard quantity without using another plans reservation',()=>{
+  const c=unitStockUI();evaluate(c,`
+    stocks[0].legacyTersedia=140;stocks[0].tersedia=140;
+    plan.legacyBahanList=[{nama:'Big One',qty:60,satuan:'yard'}];
+    form.planId='plan';form.values.id='plan';form.values.revision='rev1';
+    form.bulk=[bulkRow('Big One',200)];`);
+  assert.match(evaluate(c,"rollChoicesHtml('Big One',[],'plan')"),/Tersedia <b>200 yard<\/b>/);
+  assert.equal(evaluate(c,"rencanaPotongValues(form,'siap').expectedRevision"),'rev1');
+  assert.equal(evaluate(c,'rollPreparedValues(form).bahanList[0].qty'),200);
+  evaluate(c,"form.planId='other-plan'");
+  assert.throws(()=>evaluate(c,'rollPreparedValues(form)'),/stok tersedia/);
+  evaluate(c,"form.planId='plan';plan.status='terpakai'");
+  assert.throws(()=>evaluate(c,'rollPreparedValues(form)'),/stok tersedia/);
+});
+
+test('1554: switching a material cannot silently discard selected rolls or a typed yard quantity',()=>{
+  const c=unitStockUI();evaluate(c,`
+    var material={bulk:[bulkRow('Big One',60)],choices:[],nodes:{'[data-roll-choices]':{innerHTML:'existing quantity controls'}}};
+    var select={value:'Katun',attrs:{'data-selected-material':'Big One'},
+      getAttribute:function(k){return this.attrs[k]||'';},setAttribute:function(k,v){this.attrs[k]=v;},
+      closest:function(q){return q==='[data-form]'?form:q==='[data-roll-material]'?material:form.nodes['[data-roll-picker]'];}};
+    C.rollMaterial(select);`);
+  assert.equal(c.select.value,'Big One');assert.equal(c.material.bulk[0].input.value,'60');
+  assert.equal(c.material.nodes['[data-roll-choices]'].innerHTML,'existing quantity controls');
+  assert.match(c.messages.at(-1),/Jumlah bahan ini sudah diisi/);
+  evaluate(c,"material.bulk[0].input.value='';select.value='Katun';C.rollMaterial(select)");
+  assert.equal(c.select.attrs['data-selected-material'],'Katun');
+  assert.match(c.material.nodes['[data-roll-choices]'].innerHTML,/data-roll-choice="katun-rol"/);
+  evaluate(c,"material.bulk=[];material.choices=[rollRow(5)];select.value='Big One';C.rollMaterial(select)");
+  assert.equal(c.select.value,'Katun');assert.equal(c.material.choices[0].input.value,'5');
+});
