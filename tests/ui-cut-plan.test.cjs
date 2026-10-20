@@ -303,8 +303,10 @@ test('partial cutting is concise and puts additional fabric next to unfinished s
   assert.match(panel,/Bahan tercatat terpakai/);assert.match(panel,/Jika tidak menambah kain/);
   assert.equal(JSON.stringify(plain(c.S.state)),before,'simplifying a view does not edit production or material records');
   evaluate(c,"S.state.rencanaPotong.push({...plan,id:'extra-ready',status:'siap',dibuat:'2026-10-19'})");
-  const ready=evaluate(c,'rencanaPotongPanel(po)');assert.match(ready,/data-rencana="extra-ready">Catat hasil potong/);assert.match(ready,/<details class="rj-lipat"><summary>Rincian kain · 2 rol<\/summary>/);
-  assert.ok(ready.indexOf('data-rencana="extra-ready"') < ready.indexOf('Riwayat bahan'));
+  const ready=evaluate(c,'rencanaPotongPanel(po)');assert.match(ready,/data-rencana="extra-ready">Catat hasil potong/);assert.match(ready,/<details class="rj-lipat"><summary>Riwayat bahan · 2 persiapan<\/summary>/);
+  assert.equal((ready.match(/data-po-material-group=/g)||[]).length,2,'same materials share cards across the old and additional preparation');
+  assert.ok(ready.indexOf('data-rencana="extra-ready"') > ready.indexOf('Riwayat bahan'),'source-specific actions stay inside the collapsed source history');
+  assert.doesNotMatch(ready.replace(/<details\b[\s\S]*?<\/details>/g,''),/data-rencana=|data-po-material-totals/);
   assert.doesNotMatch(ready,/data-lanjut="1"|Jika tidak menambah kain/,'a prepared additional batch is not bypassed by a no-fabric continuation');
   evaluate(c,"actor.divisi='potong'");const cutter=evaluate(c,'rencanaPotongPanel(po)');assert.doesNotMatch(cutter,/Tambah kain|Ubah bahan/);assert.match(cutter,/data-rencana="extra-ready">Catat hasil potong/);
 });
