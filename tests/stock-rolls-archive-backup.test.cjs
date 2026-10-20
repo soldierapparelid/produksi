@@ -63,7 +63,7 @@ test('itemising is the owner\'s, stays within the stock that has no roll detail,
   f.bad('rinciStokRol', request, /owner/, f.admin); f.bad('rinciStokRol', request, /owner/, f.cutter);
   f.bad('rinciStokRol', { ...request, rolls: [{ qty: 200 }, { qty: 28.06 }] }, /melebihi stok yang belum dirinci/);
   for (const rolls of [[], [{ qty: 0 }], [{ qty: -1 }], [{ qty: 1.0001 }], [{ qty: 'banyak' }], [{}], Array.from({ length: 101 }, () => ({ qty: 1 }))]) f.bad('rinciStokRol', { ...request, rolls });
-  f.bad('rinciStokRol', { ...request, bahan: 'Tidak Ada' }, /belum ada di daftar stok/); f.bad('rinciStokRol', { ...request, bahan: 'Furing' }, /kg/);
+  f.bad('rinciStokRol', { ...request, bahan: 'Tidak Ada' }, /belum ada di daftar stok/); f.bad('rinciStokRol', { ...request, bahan: 'Furing', satuan: 'kg' }, /Satuan/);
   f.bad('rinciStokRol', { ...request, id: 'x' }, /Identitas/);
   assert.equal(f.raw('StokBahan').length, rows);
 });

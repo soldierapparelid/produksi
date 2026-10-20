@@ -216,8 +216,16 @@ test('eight roll receipts remain one invoice and aggregate canonical material na
  const groups=u.json(`stokInvoiceGroups(${JSON.stringify(rows)})`);assert.equal(groups.length,1);assert.equal(groups[0].rol,8);
  const materials=u.json(`stokInvoiceMaterials(${JSON.stringify(rows)})`);assert.deepEqual(materials.map(g=>[g.rows.length,g.qty,g.rol]),[[5,15,5],[3,21,3]]);
 });
-test('non-kilogram materials retain aggregate quantities instead of sending unsupported identified-roll data',()=>{
- const u=ui();u.run("addRoll(form.rows[1],99);R.invoiceBahan(form)");const item=u.json('invoiceBahanValues(form).items[1]');assert.equal(item.satuan,'meter');assert.equal(item.qty,'3');assert.equal(item.rolls,undefined);assert.match(u.run("invoiceBahanRowsHtml({bahan:'Linen'})"),/tanpa membuat identitas rol kilogram/);
+test('new yard and meter purchases preserve the actual quantity of each roll while old aggregate rows stay aggregate',async()=>{
+ for(const unit of ['yard','meter']){
+  const u=ui();u.run("form.rows=[row({bahan:'Kemeja',satuan:"+JSON.stringify(unit)+",harga:'12000'})];addRoll(form.rows[0],100);addRoll(form.rows[0],100);R.invoiceBahan(form)");
+  const item=u.json('invoiceBahanValues(form).items[0]');assert.equal(item.satuan,unit);assert.deepEqual(item.rolls,[{qty:'100',rollLabel:'Rol 1'},{qty:'100',rollLabel:'Rol 2'}]);assert.equal(item.qty,undefined);
+  assert.match(u.run("form.rows[0].meta['[data-invoice-line-qty]'].textContent"),/2 rol · 200 (yd|m)/);
+  const save=u.run('A.invoiceSave(saveButton)');assert.equal(u.run('requests.length'),1);assert.deepEqual(u.json('requests[0].payload.invoice.items[0].rolls'),item.rolls);u.resolve(0,{});await save;
+  const view=u.run("invoiceBahanRowsHtml({bahan:'Kemeja',satuan:"+JSON.stringify(unit)+"})");assert.match(view,/data-invoice-entry="roll"/);assert.match(view,/data-invoice-roll-entry>/);assert.match(view,/Satuan setiap rol/);
+ }
+ const u=ui();u.run("form.rows[1].attrs['data-invoice-entry']='total';addRoll(form.rows[1],99);R.invoiceBahan(form)");const old=u.json('invoiceBahanValues(form).items[1]');assert.equal(old.satuan,'meter');assert.equal(old.qty,'3');assert.equal(old.rolls,undefined);
+ const view=u.run("invoiceBahanRowsHtml({bahan:'Linen',qty:200,rol:0})");assert.match(view,/data-invoice-entry="total"/);assert.doesNotMatch(view,/data-invoice-roll>/);assert.match(view,/tanpa membuat perkiraan rol/);
 });
 
 test('new invoice prefills one material price and keeps a deliberately edited purchase price',()=>{

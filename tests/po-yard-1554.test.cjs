@@ -145,7 +145,7 @@ test('yard decimals are retained while incompatible units and conversion to kilo
   f.good('createPotong', f.cut(plan), f.cutter);
   assert.equal(f.stock().saldo, 139.875); assert.equal(f.stock().satuan, 'yard');
   const badInvoice = f.call('saveInvoiceBahan', { invoice: { id: 'yard-wrong-roll-invoice', invoice: 'YARD-ROLL-INVALID',
-    tanggal: '2026-10-20', items: [{ bahan: 'Bahan Kemeja Fixture', satuan: 'yard', harga: 15000, rolls: [{ qty: 200 }] }] } });
-  assert.equal(badInvoice.ok, false); assert.match(badInvoice.error, /Berat rol harus dicatat dalam kg/);
+    tanggal: '2026-10-20', items: [{ bahan: 'Bahan Kemeja Fixture', satuan: 'kg', harga: 15000, rolls: [{ qty: 200 }] }] } });
+  assert.equal(badInvoice.ok, false); assert.match(badInvoice.error, /Satuan tidak bisa diganti/);
   assert.equal(f.raw('StokBahan').length, 2);
 });

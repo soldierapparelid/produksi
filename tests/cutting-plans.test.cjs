@@ -42,7 +42,7 @@ test('shared reservations reject overspending and stale edits; cancellation rele
 });
 test('prepared result consumes once via one authoritative append, retries are idempotent and other cutter cannot take it',()=>{
   const f=fixture(),p=f.plan();const before=f.raw('RencanaPotong'),planWrites=f.h.sheets.RencanaPotong.writes,stockBefore=f.raw('StokBahan');
-  const cut=f.good('createPotong',f.payload(p),f.cutter);assert.equal(cut.rencanaId,p.id);assert.equal(cut.kg,6);assert.equal(cut.rol,2);assert.equal(cut.userId,'cutter01');assert.deepEqual(JSON.parse(cut.bahanList),[{nama:'Cotton',qty:6}]);
+  const cut=f.good('createPotong',f.payload(p),f.cutter);assert.equal(cut.rencanaId,p.id);assert.equal(cut.kg,6);assert.equal(cut.rol,2);assert.equal(cut.userId,'cutter01');assert.deepEqual(JSON.parse(cut.bahanList),[{nama:'Cotton',qty:6,satuan:'kg'}]);
   f.good('createPotong',f.payload(p),f.cutter);assert.equal(f.raw('Potong').length,1);assert.deepEqual(f.raw('RencanaPotong'),before);assert.deepEqual(f.raw('StokBahan'),stockBefore);assert.equal(f.h.sheets.RencanaPotong.writes,planWrites);
   const second=f.call('createPotong',f.payload(p,'cutout02'),f.cutter2);assert.equal(second.ok,false);assert.match(second.error,/sudah dipakai/);
   const sameid=f.call('createPotong',f.payload(p),f.cutter2);assert.equal(sameid.ok,false);assert.match(sameid.error,/permintaan berbeda/);

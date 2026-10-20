@@ -33,7 +33,7 @@ test('the form shows what has no roll detail yet and says plainly that nothing i
   assert.match(view,/Rinci rol/);assert.match(view,/Scuba Hitam/);assert.match(view,/155,925/);assert.match(view,/bukan pembelian baru/);assert.match(view,/Total stok tidak berubah/);
   assert.match(view,/name="id" value="rinci-form-1"/);assert.match(view,/data-sisa="155.925"/);assert.equal((view.match(/data-rinci-roll>/g)||[]).length,2);assert.match(view,/data-a="rinciRolSave">Simpan rol/);
   h.run("info.legacyTersedia=0;A.rinciRolOpen("+el+")");assert.match(h.run('rendered'),/sudah dirinci per rol atau sedang dicadangkan/);assert.doesNotMatch(h.run('rendered'),/rinciRolSave/);
-  h.run("info.legacyTersedia=40;info.satuan='meter';A.rinciRolOpen("+el+")");assert.match(h.run('rendered'),/hanya untuk bahan yang dicatat dalam kg/);
+  h.run("info.legacyTersedia=40;info.satuan='meter';A.rinciRolOpen("+el+")");assert.match(h.run('rendered'),/Panjang rol \(meter\)/);assert.match(h.run('rendered'),/name="satuan" value="meter"/);assert.doesNotMatch(h.run('rendered'),/\bkg\b/);
   h.run("info.satuan='kg';actor.divisi='admin';rendered='';A.rinciRolOpen("+el+")");assert.equal(h.run('rendered'),'');assert.match(h.run('messages[messages.length-1]'),/owner/);
 });
 
@@ -42,8 +42,16 @@ test('each roll is numbered, the total and what is left are shown, and the saved
   assert.deepEqual(h.json('form.inputs.map(function(i){return i.label.textContent;})'),['Rol 1','Rol 2','Rol 3']);
   assert.equal(h.run("form.nodes['[data-rinci-jumlah]'].textContent"),'2 rol');assert.equal(h.run("form.nodes['[data-rinci-total]'].textContent"),'49 kg');assert.equal(h.run("form.nodes['[data-rinci-sisa]'].textContent"),'106,925 kg');
   const sent=h.run('A.rinciRolSave(null)');h.run('A.rinciRolSave(null)');assert.equal(h.run('requests.length'),1,'a double tap sends once');
-  assert.deepEqual(h.json('requests[0]'),{action:'rinciStokRol',payload:{id:'rinci-form-1',bahan:'Scuba Hitam',rolls:[{qty:25},{qty:24}],catatan:'timbang'}});
+  assert.deepEqual(h.json('requests[0]'),{action:'rinciStokRol',payload:{id:'rinci-form-1',bahan:'Scuba Hitam',satuan:'kg',rolls:[{qty:25},{qty:24}],catatan:'timbang'}});
   h.run('requests[0].resolve({})');await sent;assert.equal(h.run('closed'),1);assert.equal(h.run('refreshed'),1,'an open PO or cut form shows the new rolls at once');assert.match(h.run('messages[messages.length-1]'),/2 rol tersimpan/);
+});
+
+test('existing 200 yard stays unitemised until the owner types two real 100 yard rolls',async()=>{
+ const h=ui();h.run("info={nama:'Kemeja',satuan:'yard',legacyTersedia:200};A.rinciRolOpen("+el+")");
+ const view=h.run('rendered');assert.match(view,/Panjang rol \(yard\)/);assert.match(view,/Rol tidak dibagi otomatis/);assert.doesNotMatch(view,/name="rollQty"[^>]*value="100"/);assert.doesNotMatch(view,/\bkg\b/);
+ h.run("form.values.satuan='yard';form.values.bahan='Kemeja';form.attrs['data-sisa']='200';isi([100,100]);R.rinciRol(form)");
+ assert.equal(h.run("form.nodes['[data-rinci-jumlah]'].textContent"),'2 rol');assert.equal(h.run("form.nodes['[data-rinci-total]'].textContent"),'200 yard');assert.equal(h.run("form.nodes['[data-rinci-sisa]'].textContent"),'0 yard');
+ const save=h.run('A.rinciRolSave(null)');assert.deepEqual(h.json('requests[0].payload'),{id:'rinci-form-1',bahan:'Kemeja',satuan:'yard',rolls:[{qty:100},{qty:100}],catatan:'timbang'});h.run('requests[0].resolve({})');await save;
 });
 
 test('a mistyped roll that nobody used yet can be taken back; the list offers it only for such rolls',async()=>{
