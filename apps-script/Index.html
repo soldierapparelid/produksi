@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261020-stok-rol-1555';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261020-kain-gabungan-1556';</script>
 <script>
 (function () {
 'use strict';
@@ -498,7 +498,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.55';
+var APP_VERSION = '1.5.56';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -7294,7 +7294,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.55';
+var UI_VERSION = '1.5.56';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -13888,29 +13888,97 @@ function poMaterialTotalsHtml(plans) {
     return '<div class="kg-blok"><div class="row"><b class="grow">' + esc(r.nama) + '</b><b>' + nfQty(r.total) + ' ' + unit + '</b></div><p class="small muted">' + parts.join(' · ') + '</p></div>';
   }).join('') + '</div>';
 }
+/* Satu kartu per bahan dan satuan. Jumlah berasal dari bahanList; rincian rol hanya menjelaskan asalnya. */
+function poMaterialGroupUnit(value) {
+  var unit=String(value||'kg').trim().toLowerCase()||'kg';
+  return ({kilogram:'kg',yd:'yard',m:'meter'})[unit]||unit;
+}
+function poMaterialGroups(plans) {
+  var groups=[],byKey=Object.create(null),seen=Object.create(null),buckets=['siap','terpakai','menyiapkan','perluDiperiksa'];
+  function round(n){return Math.round(n*1000)/1000;}
+  function keyOf(name,unit){return coreNormBahan(name)+'|'+poMaterialGroupUnit(unit);}
+  (plans||[]).forEach(function(plan,index){
+    if(!plan||['siap','terpakai','menyiapkan'].indexOf(plan.status)<0||(plan.id&&seen[plan.id]))return;
+    if(plan.id)seen[plan.id]=true;
+    var sourceKey=plan.id||'legacy-'+index,bucket=plan.status==='siap'&&plan.legacyBlocked?'perluDiperiksa':plan.status,materials=Object.create(null),order=[];
+    coreParseJSON(plan.bahanList,[]).forEach(function(b){
+      if(!b)return;var name=String(b.nama||'').trim(),qty=Number(b.qty),unit=poMaterialGroupUnit(b.satuan),key=keyOf(name,unit);
+      if(!name||!Number.isFinite(qty)||qty<=0)return;
+      if(!materials[key]){materials[key]={nama:name,satuan:unit,qty:0};order.push(key);}materials[key].qty+=qty;
+    });
+    var allocations=coreParseJSON(plan.alokasiBahan,[]),rolls=coreParseJSON(plan.rincianRol,[]),legacy=coreParseJSON(plan.legacyBahanList,allocations.length?[]:coreParseJSON(plan.bahanList,[])),legacyKeys=[];
+    legacy.forEach(function(b){if(b&&Number(b.qty)>0){var key=keyOf(b.nama,b.satuan);if(legacyKeys.indexOf(key)<0)legacyKeys.push(key);}});
+    var legacyRolls=plan.legacyRol===undefined?Math.max(0,coreNum(plan.rol)-Math.max(allocations.length,rolls.length)):coreNum(plan.legacyRol);
+    order.forEach(function(key){
+      var mat=materials[key],group=byKey[key];
+      if(!group){group=byKey[key]={key:key,nama:mat.nama,satuan:mat.satuan,total:0,siap:0,terpakai:0,menyiapkan:0,perluDiperiksa:0,rol:0,rolBelumDirinci:false,ukuran:[],sources:[],_rolls:Object.create(null),_sizes:Object.create(null)};groups.push(group);}
+      var source={planId:plan.id||'',status:plan.status,bucket:bucket,dibuat:plan.dibuat||'',qty:round(mat.qty),rol:0,rolBelumDirinci:false,rolls:[],catatan:plan.catatan||'',legacyBlocked:plan.legacyBlocked||'',shared:order.length>1,legacyUkuran:plan.legacyUkuran||[]},sourceRolls=Object.create(null),knownQty=0;
+      group[bucket]+=mat.qty;
+      rolls.forEach(function(r,ri){
+        if(!r||keyOf(r.bahan,r.satuan)!==key||!Number.isFinite(Number(r.qty))||Number(r.qty)<=0)return;
+        var id=r.stokId||sourceKey+'-roll-'+ri,size=String(r.ukuran||'').trim(),qty=Number(r.qty),sizeGroup=group._sizes[size];
+        if(sourceRolls[id])return;
+        if(!sizeGroup)sizeGroup=group._sizes[size]={ukuran:size,qty:0,rol:0,_rolls:Object.create(null)};
+        if(!sizeGroup._rolls[id]){sizeGroup._rolls[id]=true;sizeGroup.rol++;}sizeGroup.qty+=qty;
+        if(!group._rolls[id]){group._rolls[id]=true;group.rol++;}
+        if(!sourceRolls[id]){sourceRolls[id]=true;source.rol++;}
+        knownQty+=qty;source.rolls.push({stokId:r.stokId||'',rollLabel:r.rollLabel||'Rol',invoice:r.invoice||'',ukuran:size,qty:qty,satuan:mat.satuan});
+      });
+      var uncovered=Math.max(0,round(mat.qty-knownQty));
+      if(uncovered>0.0005){
+        var unassigned=group._sizes[''];if(!unassigned)unassigned=group._sizes['']={ukuran:'',qty:0,rol:0,_rolls:Object.create(null)};
+        unassigned.qty+=uncovered;
+        /* Rol tanpa identitas hanya dapat diberikan ke satu bahan bila sumbernya tidak ambigu. */
+        var count=legacyKeys.length===1&&legacyKeys[0]===key?legacyRolls:!allocations.length&&!rolls.length&&order.length===1?coreNum(plan.rol):0;
+        if(count>0&&Number.isInteger(count)){source.rol+=count;group.rol+=count;unassigned.rol+=count;}
+        else{source.rolBelumDirinci=true;group.rolBelumDirinci=true;}
+      }
+      group.sources.push(source);
+    });
+  });
+  groups.forEach(function(group){
+    buckets.forEach(function(b){group[b]=round(group[b]);});group.total=round(buckets.reduce(function(n,b){return n+group[b];},0));
+    group.ukuran=coreSizeOrder(Object.keys(group._sizes).filter(Boolean)).concat(group._sizes['']?['']:[]).map(function(s){var x=group._sizes[s];return {ukuran:s,qty:round(x.qty),rol:x.rol};});
+    group.sources.sort(function(a,b){return (a.status==='siap'?0:1)-(b.status==='siap'?0:1)||String(b.dibuat).localeCompare(String(a.dibuat));});
+    delete group._rolls;delete group._sizes;
+  });
+  return groups;
+}
+function poMaterialGroupsHtml(plans,po,owner,blocked) {
+  return poMaterialGroups(plans).map(function(group){
+    var unit=esc(satuanPendek(group.satuan)),status=[],labels={siap:'Siap dipotong',terpakai:'Tercatat terpakai',menyiapkan:'Sedang disiapkan',perluDiperiksa:'Perlu diperiksa owner'};
+    ['siap','terpakai','menyiapkan','perluDiperiksa'].forEach(function(k){if(group[k]>0)status.push('<span class="chip '+(k==='siap'?'warn':k==='perluDiperiksa'?'bad':'')+'">'+labels[k]+' '+nfQty(group[k])+' '+unit+'</span>');});
+    return '<div class="card col gap-s" data-po-material-group="'+esc(group.key)+'"><div class="row"><h3 class="grow">'+esc(group.nama)+'</h3><span><span class="xs muted">Total </span><b>'+nfQty(group.total)+' '+unit+'</b></span></div>'+
+      '<div class="row wrap gap-s"><b>'+(group.rol>0?nf(group.rol)+' rol'+(group.rolBelumDirinci?' diketahui':''):'Jumlah rol belum dirinci')+'</b>'+(group.rol>0&&group.rolBelumDirinci?'<span class="xs muted">Sebagian bahan belum dirinci per rol</span>':'')+'</div><div class="chips">'+status.join('')+'</div>'+
+      '<div class="col gap-s" data-po-material-sizes>'+group.ukuran.map(function(s){return '<div class="row small"><span class="grow">'+(s.ukuran?'Ukuran '+esc(s.ukuran):'Belum dibagi ukuran')+'</span><span>'+(s.rol>0?nf(s.rol)+' rol · ':'')+nfQty(s.qty)+' '+unit+'</span></div>';}).join('')+'</div>'+
+      '<details class="rj-lipat"><summary>Riwayat bahan · '+nf(group.sources.length)+' persiapan</summary><div class="col gap-s">'+group.sources.map(function(source){
+        var canCut=source.planId&&source.status==='siap'&&!source.legacyBlocked&&!blocked;
+        return '<div class="kg-blok" data-po-material-source="'+esc(source.planId)+'"><div class="row"><span class="grow small">'+tgl(String(source.dibuat).slice(0,10))+'</span><span>'+(source.rol>0?nf(source.rol)+' rol · ':'')+'<b>'+nfQty(source.qty)+' '+unit+'</b></span></div><div class="small muted">'+(source.status==='terpakai'?'Bahan tercatat terpakai':labels[source.bucket])+'</div>'+
+          (source.rolls.length?'<div class="chips">'+source.rolls.map(function(r){return '<span class="chip" title="'+esc(r.invoice)+'">'+esc(r.rollLabel)+(r.ukuran?' · '+esc(r.ukuran):'')+' · '+nfQty(r.qty)+' '+unit+'</span>';}).join('')+'</div>':'')+
+          (source.legacyUkuran.length?'<p class="small muted">Ukuran jatah: '+source.legacyUkuran.map(esc).join(' · ')+'</p>':'')+
+          (source.catatan?'<p class="small muted">'+esc(source.catatan)+'</p>':'')+
+          (source.legacyBlocked?'<p class="small muted">'+esc(source.legacyBlocked)+'</p>':'')+
+          (source.shared&&source.status==='siap'?'<p class="xs muted">Persiapan ini juga memuat bahan lain. Tindakan berlaku untuk seluruh persiapan.</p>':'')+
+          (canCut?'<div class="row wrap"><button class="btn sm" data-a="potongOpen" data-id="'+esc(po.id)+'" data-rencana="'+esc(source.planId)+'">Catat hasil potong</button>'+(owner?'<button class="btn sm" data-a="rencanaPotongOpen" data-po="'+esc(po.id)+'" data-id="'+esc(source.planId)+'">Ubah bahan</button>':'')+'</div>':owner&&source.planId&&source.status==='siap'?'<button class="btn sm ghost" data-a="rencanaPotongReview" data-po="'+esc(po.id)+'" data-id="'+esc(source.planId)+'">Periksa / batalkan rencana</button>':'')+'</div>';
+      }).join('')+'</div></details></div>';
+  }).join('');
+}
 function rencanaPotongPanel(po) {
   var review = (po.cutting && po.cutting.reviewPlans) || [], rows = rencanaPotongRows(po.id).filter(function (r) { return r.status !== 'batal'; }), owner = rencanaPotongOwner(), blocked = rencanaPotongBlocked(po), tambahan = rencanaPotongTambahan(po), bisaTambah = !tambahan || rencanaPotongUkuranTambah(po).length > 0;
   rows.sort(function (a,b) { return (a.status === 'siap' ? 0 : 1) - (b.status === 'siap' ? 0 : 1) || String(b.dibuat || '').localeCompare(String(a.dibuat || '')); });
   if (!rows.length && !owner) return '';
-  var ready = rows.filter(function (r) { return r.status === 'siap'; }), history = rows.filter(function (r) { return r.status !== 'siap'; }), cutting = po.cutting || {}, pending = cutting.pendingUkuran || [], flowSizes = workflowFor(po).ukuran || {}, cutSizes = {}, aggSizes = (po.agg && po.agg.ukuran) || {};
+  var ready = rows.filter(function (r) { return r.status === 'siap'; }), cutting = po.cutting || {}, pending = cutting.pendingUkuran || [], flowSizes = workflowFor(po).ukuran || {}, cutSizes = {}, aggSizes = (po.agg && po.agg.ukuran) || {};
   Object.keys(flowSizes).forEach(function (s) { if (coreNum(flowSizes[s].potong) > 0) cutSizes[s] = coreNum(flowSizes[s].potong); });
   if (!Object.keys(cutSizes).length) Object.keys(aggSizes).forEach(function (s) { if (coreNum(aggSizes[s].potong) > 0) cutSizes[s] = coreNum(aggSizes[s].potong); });
   if (!Object.keys(cutSizes).length) ((S.state && S.state.potong) || []).forEach(function (r) { if (r.poId === po.id) Object.keys(coreMap(r.ukuran)).forEach(function (s) { cutSizes[s] = coreNum(cutSizes[s]) + coreNum(coreMap(r.ukuran)[s]); }); });
   var cutTotal = coreSumSizes(cutSizes) || coreNum(po.agg && po.agg.total && po.agg.total.potong), partial = po.status === 'aktif' && pending.length > 0 && (cutTotal > 0 || !!cutting.lanjut);
   var addButton = owner && !blocked ? '<button class="btn sm pri" data-a="rencanaPotongOpen" data-po="' + esc(po.id) + '"' + (bisaTambah ? '' : ' disabled') + '>' + ic('plus','s') + (tambahan ? 'Tambah kain' : 'Siapkan bahan potong') + '</button>' : '';
-  function readyCard(r) {
-    var list = coreParseJSON(r.bahanList, []), summary = list.map(function (b) { return '<div class="row"><span class="grow">' + esc(b.nama) + '</span><b>' + nfQty(b.qty) + ' ' + esc(satuanPendek(b.satuan)) + '</b></div>'; }).join('');
-    return '<div class="card col gap-s"><div class="row"><span class="grow small">' + tgl(String(r.dibuat || '').slice(0,10)) + '</span><span class="chip warn">' + (r.legacyBlocked ? 'Perlu diperiksa owner' : 'Siap dipotong') + '</span></div>' + summary +
-      '<details class="rj-lipat"><summary>Rincian kain' + (coreNum(r.rol) > 0 ? ' · ' + nf(r.rol) + ' rol' : '') + '</summary>' + rencanaBahanHtml(r,true) + '</details>' + (r.legacyBlocked ? '<p class="small muted">' + esc(r.legacyBlocked) + '</p>' : '') +
-      (!blocked && !r.legacyBlocked ? '<div class="row wrap"><button class="btn sm pri" data-a="potongOpen" data-id="' + esc(po.id) + '" data-rencana="' + esc(r.id) + '">Catat hasil potong</button>' + (owner ? '<button class="btn sm" data-a="rencanaPotongOpen" data-po="' + esc(po.id) + '" data-id="' + esc(r.id) + '">Ubah bahan</button>' : '') + '</div>' : owner ? '<button class="btn sm ghost" data-a="rencanaPotongReview" data-po="'+esc(po.id)+'" data-id="'+esc(r.id)+'">Periksa / batalkan rencana</button>' : '') + '</div>';
-  }
   return '<div class="card col"><div class="row wrap"><h3 class="grow">Potong &amp; kain</h3>' + (!partial ? addButton : '') + '</div>' +
     (partial ? '<div class="note"><div class="col gap-s"><b>Dipotong sebagian</b>' + (cutTotal ? '<span>Sudah dipotong: ' + (Object.keys(cutSizes).length ? esc(coreSizeOrder(Object.keys(cutSizes)).map(function (s) { return s + ' ' + nf(cutSizes[s]) + ' pcs'; }).join(' · ')) : nf(cutTotal) + ' pcs') + '</span>' : '') + '<span>Belum dipotong: <b>' + pending.map(esc).join(' · ') + '</b></span>' + (addButton ? '<div class="row wrap">' + addButton + '</div>' : '') + '</div></div>' : '') +
     (owner && !blocked && !bisaTambah ? '<p class="small muted">Tidak ada ukuran yang bisa ditambah kain. Ukuran yang sudah masuk QC memakai PO baru untuk pemotongan berikutnya.</p>' : '') +
-    poMaterialTotalsHtml(rows) + ready.map(readyCard).join('') +
+    poMaterialGroupsHtml(rows,po,owner,blocked) +
     (!rows.length ? '<p class="small muted">Pilih kain dari stok untuk menyiapkan potongan.</p>' : '') +
     (partial && !blocked && cutting.lanjut && !ready.length ? '<div class="col gap-s"><p class="small muted">Jika tidak menambah kain, catat hasil dari kain yang sudah disiapkan.</p><div class="row wrap"><button class="btn sm" data-a="potongOpen" data-id="' + esc(po.id) + '" data-lanjut="1">Lanjut dengan kain lama</button></div></div>' : '') +
-    (history.length ? '<details class="rj-lipat"><summary>Riwayat bahan · ' + nf(history.length) + ' persiapan</summary><div class="col gap-s">' + history.map(function (r) { return '<div class="card col gap-s"><div class="row"><span class="grow small">' + tgl(String(r.dibuat || '').slice(0,10)) + '</span><span class="chip">Bahan tercatat terpakai</span></div>' + rencanaBahanHtml(r) + '</div>'; }).join('') + '</div></details>' : '') +
     (owner ? review.map(function(r){return '<div class="note warn"><b>Jatah bahan lama · perlu diperiksa</b><p>'+esc(r.reason)+'</p>'+(r.ukuran.length?'<span class="small">Ukuran: '+r.ukuran.map(esc).join(' · ')+'</span>':'')+'</div>';}).join('') : '') +
     (blocked && owner ? '<p class="small muted">' + esc(blocked) + '</p>' : '') + '</div>';
 }
@@ -13989,7 +14057,21 @@ A.rencanaPotongCheck = function (el) { var f=el.closest('[data-form]'); return a
 A.potongOpen = function (el) {
   var poId = el.getAttribute('data-id'), rencana = el.getAttribute('data-rencana') || '', langsung = el.getAttribute('data-langsung') === '1', lanjut = el.getAttribute('data-lanjut') === '1';
   /* "Catat potong" pada PO yang bahannya sudah disiapkan: rol dan kilonya langsung mengikuti persiapan itu. */
-  if (!rencana && !langsung && isAdmin()) { var siap = rencanaPotongRows(poId).filter(function (r) { return r.status === 'siap' && !r.legacyBlocked; }); if (siap.length) rencana = siap[0].id; }
+  if (!rencana && !langsung && isAdmin()) {
+    var siap = rencanaPotongRows(poId).filter(function (r) { return r.status === 'siap' && !r.legacyBlocked; });
+    if (siap.length > 1) {
+      var blocked = rencanaPotongBlocked(D.po[poId]); if (blocked) return toast(blocked, true);
+      return openSheet(function () {
+        return sheetHtml('Pilih kain yang dipotong', '<div class="col"><p class="small muted">Pilih bagian kain yang hasilnya akan dicatat sekarang. Semua bahan pada bagian yang dipilih akan tercatat terpakai.</p>' +
+          siap.map(function (r) {
+            var list = coreParseJSON(r.bahanList, []), amounts = list.map(function (b) { return esc(b.nama) + ' · ' + nfQty(b.qty) + ' ' + esc(satuanPendek(b.satuan)); }).join('<br>');
+            var sizes = coreSizeOrder(coreParseJSON(r.rincianRol, []).map(function (a) { return a.ukuran || ''; }).filter(function (s, i, all) { return s && all.indexOf(s) === i; }));
+            return '<button class="btn" style="text-align:left;white-space:normal" data-a="potongOpen" data-id="' + esc(poId) + '" data-rencana="' + esc(r.id) + '"><span class="col gap-s grow"><b>' + amounts + '</b><span class="small">' + tgl(String(r.dibuat || '').slice(0,10)) + (coreNum(r.rol) > 0 ? ' · ' + nf(r.rol) + ' rol' : '') + (sizes.length ? ' · ' + sizes.map(esc).join(', ') : '') + '</span></span></button>';
+          }).join('') + '</div>', '<button class="btn" data-a="close">Batal</button>');
+      });
+    }
+    if (siap.length) rencana = siap[0].id;
+  }
   if (langsung && el.closest) { var asal = el.closest('[data-form]'); if (asal) { if (asal._potongBusy || asal._potongUncertain) return; dropForm(asal); } }
   /* PO yang sebagian ukurannya sudah dipotong: dilanjutkan tanpa persiapan baru */
   if (!rencana && !langsung && !lanjut) { var pl = D.po[poId], cl = pl && pl.cutting; lanjut = !!(pl && pl.status === 'aktif' && cl && cl.lanjut && (cl.pendingUkuran || []).length); }
