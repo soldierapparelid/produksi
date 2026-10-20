@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.55 - Hapus stok salah dan rol yard
+
+- Owner dapat memakai **Hapus stok** pada satu jenis bahan, satu rol, atau saldo tanpa rincian rol. Pratinjau menyebutkan jumlah yang akan dikurangi sebelum dikonfirmasi. Saldo bahan lain tetap; pembelian dan pemakaian sebelumnya tersimpan.
+- Hapus stok berbeda dari **Hapus rincian saja**: hapus rincian mengembalikan rol ke saldo tanpa rincian, sedangkan hapus stok mengurangi saldo fisiknya. Setelah stok salah dihapus, catat kembali bahan yang benar lewat Pembelian.
+- Kain kilogram, yard, dan meter dapat dicatat per rol sesuai jumlah sebenarnya. Contoh dua rol masing-masing 100 yard tampil sebagai dua rol dengan total 200 yard dan dapat dipilih untuk PO.
+- Stok yard lama tetap utuh. Isi panjang tiap rol lewat **Rinci rol** untuk membuat rincian yang dapat dipilih; aplikasi tidak membagi saldo lama secara perkiraan.
+- Cadangan PO dan perubahan dari perangkat lain diperiksa sebelum penghapusan. Pengiriman ulang tidak menggandakan pengurangan stok. Pasang **Core.gs** dan **Index.html** bersama.
+
 ## Rilis 1.5.54 - Bahan yard untuk PO
 
 - Memilih bahan yard pada persiapan PO langsung menampilkan jumlah dan stok tersedia, tanpa perlu mencari rol atau beralih ke pilihan saldo lama.
