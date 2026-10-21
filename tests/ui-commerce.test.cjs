@@ -295,7 +295,7 @@ test('both import files survive overlapping reads and no preview runs against ha
 
 test('HPP uses the actual price engine and preserves recommended marketplace prices on save',()=>{
   const h=harness();vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src/commerce-hpp.js'),'utf8'),h.context);h.seed('hpp',{models:[],config:{marketplace:{shop:{nama:'Shop',fee:10,fixedPerPcs:1}},pajak:1},revision:'old'});
-  h.form({modelId:'m',revision:'old',reviewed:true,jahitMode:'manual',hargaJahit:'5',biayaLain:'2',ketLain:'Packing',targetMargin:'20'},'hpp');h.run('currentForm._commerceModel={id:"m",kain:{complete:true,perPcs:100},potong:{complete:true,perPcs:10}};A.commerceHppSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.hargaJual.shop,200);
+  h.form({modelId:'m',revision:'old',reviewed:true,jahitMode:'manual',hargaJahit:'5',biayaLain:'2',ketLain:'Packing',targetMargin:'20'},'hpp');h.run('currentForm._commerceModel={id:"m",basis:{ukuran:"XL"},kain:{complete:true,perPcs:100},potong:{complete:true,perPcs:10}};A.commerceHppSave(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.hargaJual.shop,200);
   assert.match(h.run("commerceHppEvidence({kain:{details:[{jenis:'Unpriced',qty:2,unit:'kg',avgHarga:null,totalCost:null}]}})"),/Belum diketahui/);
 });
 
