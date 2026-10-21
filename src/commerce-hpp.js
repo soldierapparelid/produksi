@@ -380,7 +380,7 @@ function coreCommerceHpp(input) {
   legacyModels.forEach(function(m){groups[m.id]={id:m.id,series:m.series,nama:m.namaBarang,sizes:m.sizes.slice(),legacy:m,poIds:[],nativeCuts:[],assignments:[],warnings:[],members:m.members.slice(),rates:[]};});
   var poMap=Object.create(null), poRows=Object.create(null), stockById=Object.create(null), stockByName=Object.create(null), planById=Object.create(null), productById=Object.create(null);
   rows(tables.Produk).forEach(function(r){productById[r.id]=r;});
-  rows(tables.RencanaPotong).forEach(function(r){planById[r.id]=r;});
+  rows(tables.RencanaPotong).forEach(function(r){if(planById[r.id])planById[r.id]=false;else if(planById[r.id]!==false)planById[r.id]=r;});
   stockRows.filter(function(r){return r.jenis==='beli'||r.jenis==='rinci'||r.jenis==='koreksi'&&!r.sourceStockId&&n(r.qty)>0;}).forEach(function(r){
     if(stockById[r.id])stockById[r.id]=false;else if(stockById[r.id]!==false)stockById[r.id]=r;
     var key=C.norm(r.bahan);if(r.jenis!=='rinci')(stockByName[key] || (stockByName[key]=[])).push(r);
@@ -403,32 +403,88 @@ function coreCommerceHpp(input) {
   });
   rows(tables.SlipKirim).forEach(function(r){if(r.asal==='lama'&&originals.length)return;var g=poMap[r.poId];if(g)g.assignments.push(r);});
   rows(tables.KoreksiRiwayat).forEach(function(r){var g=poMap[r.poId];if(g)g.warnings.push('Jumlah riwayat memiliki koreksi fisik; cocokkan acuan biaya lama sebelum memakai HPP.');});
+  function nativeMaterials(r){var list=rows(json(r.bahanList,[]));return !list.length&&r.bahan?[{nama:r.bahan,qty:r.kg}]:list;}
+  function materialTotals(list){
+    var totals=Object.create(null),valid=!!list.length;
+    list.forEach(function(b){var name=C.norm(b.nama),q=n(b.qty),units=unique((stockByName[name]||[]).map(function(p){return unit(p.satuan);})),u=b.satuan?unit(b.satuan):(units.length===1?units[0]:null);if(!name||!u||q===null||q<=0){valid=false;return;}var key=name+'|'+u;totals[key]=(totals[key]||0)+q;});
+    return valid?totals:null;
+  }
+  function sameTotals(a,b){return !!a&&!!b&&Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(function(key){return b[key]!==undefined&&Math.abs(a[key]-b[key])<0.000001;});}
+  function sizedNativeCut(r){
+    var allocations=rows(json(r.alokasiBahan,[])),plan=planById[r.rencanaId];
+    if(!allocations.length||allocations.every(function(a){return String(a.ukuran||'').trim();})||!plan||plan.poId!==r.poId||plan.status==='batal')return r;
+    /* Old result snapshots may lack size labels. Borrow only the labels from
+       the exact plan; never substitute its material quantities or source IDs. */
+    var planned=rows(json(plan.alokasiBahan,[])),byId=Object.create(null),seen=Object.create(null),actual=Object.create(null),valid=planned.length===allocations.length;
+    if(!planned.some(function(a){return String(a.ukuran||'').trim();}))return r;
+    if(rows(tables.Potong).filter(function(c){return c.rencanaId===r.rencanaId&&c.asal!=='lanjut';}).length!==1)valid=false;
+    planned.forEach(function(a){if(!a.stokId||byId[a.stokId])valid=false;byId[a.stokId]=a;});
+    var recovered=allocations.map(function(a){
+      var p=byId[a.stokId],receipt=stockById[a.stokId],q=n(a.qty),u=unit(receipt&&receipt.satuan),size=String(a.ukuran||'').trim().toUpperCase(),planSize=String(p&&p.ukuran||'').trim().toUpperCase();
+      if(seen[a.stokId]||!receipt||!u||q===null||q<=0||!p||n(p.qty)===null||Math.abs(q-Number(p.qty))>=0.000001||size&&planSize&&size!==planSize){valid=false;return a;}
+      seen[a.stokId]=true;var key=C.norm(receipt.bahan)+'|'+u;actual[key]=(actual[key]||0)+q;
+      return Object.assign({},a,{ukuran:size||planSize});
+    });
+    var declared=materialTotals(nativeMaterials(r)),prepared=materialTotals(nativeMaterials(plan));
+    return valid&&sameTotals(declared,prepared)&&sameTotals(declared,actual)?Object.assign({},r,{alokasiBahan:recovered}):Object.assign({},r,{_hppPlanSizeMismatch:true});
+  }
   function nativeXLReference(r){
+    r=sizedNativeCut(r);
+    if(r._hppPlanSizeMismatch)return null;
     var sizes=json(r.ukuran,{}),active=Object.keys(sizes).filter(function(k){return (n(sizes[k])||0)>0;}),xlKey=active.filter(function(k){return String(k).trim().toUpperCase()==='XL';});
-    if(xlKey.length!==1)return null;if(active.length===1)return r;
+    var allocations=rows(json(r.alokasiBahan,[]));
+    if(xlKey.length!==1)return null;if(active.length===1&&!allocations.some(function(a){var size=String(a.ukuran||'').trim().toUpperCase();return size&&size!=='XL';}))return r;
     /* Explicit per-size roll assignments can isolate XL from a mixed result,
        but only when every material quantity is completely linked and sized. */
-    var allocations=rows(json(r.alokasiBahan,[])),list=rows(json(r.bahanList,[])),declared=Object.create(null),used=Object.create(null),selected=[],selectedMaterial=Object.create(null),seen=Object.create(null),valid=true;
-    if(!list.length&&r.bahan)list=[{nama:r.bahan,qty:r.kg}];
+    var list=nativeMaterials(r),declared=materialTotals(list),used=Object.create(null),selected=[],selectedMaterial=Object.create(null),seen=Object.create(null),valid=true;
     if(!allocations.length||!list.length||n(r.total)!==sum(active.map(function(k){return n(sizes[k])||0;})))return null;
-    list.forEach(function(b){var key=C.norm(b.nama),q=n(b.qty),units=unique((stockByName[key]||[]).map(function(p){return unit(p.satuan);})),u=unit(b.satuan)||(units.length===1?units[0]:null);if(!key||!u||q===null||q<=0){valid=false;return;}key+='|'+u;declared[key]=(declared[key]||0)+q;});
     allocations.forEach(function(a){var receipt=stockById[a.stokId],size=String(a.ukuran||'').trim().toUpperCase(),q=n(a.qty),u=unit(receipt&&receipt.satuan),key=receipt&&C.norm(receipt.bahan)+'|'+u;
       if(!receipt||receipt.stockMode!=='roll'||!u||q===null||q<=0||seen[a.stokId]||!active.some(function(k){return String(k).trim().toUpperCase()===size;})){valid=false;return;}
       seen[a.stokId]=true;used[key]=(used[key]||0)+q;
       if(size==='XL'){selected.push(a);var b=selectedMaterial[key]||(selectedMaterial[key]={nama:receipt.bahan,satuan:u,qty:0});b.qty+=q;}
     });
-    if(!valid||!selected.length||Object.keys(declared).length!==Object.keys(used).length||Object.keys(declared).some(function(k){return Math.abs(declared[k]-(used[k]||0))>0.000001;}))return null;
+    if(!valid||!selected.length||!sameTotals(declared,used))return null;
     var sizeQty=n(sizes[xlKey[0]]);if(!Number.isSafeInteger(sizeQty)||sizeQty<=0)return null;
     return Object.assign({},r,{total:sizeQty,ukuran:{XL:sizeQty},bahanList:Object.keys(selectedMaterial).map(function(k){return selectedMaterial[k];}),alokasiBahan:selected});
+  }
+  function nativeXLReferences(g){
+    var byPO=Object.create(null),out=[];
+    g.nativeCuts.forEach(function(r){(byPO[r.poId]||(byPO[r.poId]=[])).push(r);});
+    Object.keys(byPO).forEach(function(poId){
+      var poCuts=byPO[poId],initial=poCuts.filter(function(r){return r.asal!=='lanjut';}),groups=initial.map(function(r){return {first:sizedNativeCut(r),cuts:[r]};}),ambiguous=false;
+      poCuts.filter(function(r){return r.asal==='lanjut';}).forEach(function(r){
+        var matches=r.rencanaId?groups.filter(function(b){return b.first.rencanaId===r.rencanaId;}):groups;
+        /* Current continuation writes have no plan ID. They are attributable
+           only when the PO has exactly one initial material batch. */
+        if(matches.length!==1){ambiguous=true;return;}matches[0].cuts.push(r);
+      });
+      if(ambiguous)return;
+      groups.forEach(function(b){
+        if(b.cuts.length===1){var single=nativeXLReference(b.first);if(single)out.push(single);return;}
+        var sizes=Object.create(null),valid=true;
+        b.cuts.forEach(function(r){var map=json(r.ukuran,{}),q=n(r.total),actual=0;Object.keys(map).forEach(function(size){var count=n(map[size]);if(count===null||!Number.isSafeInteger(count)){valid=false;return;}actual+=count;var key=String(size).trim().toUpperCase();sizes[key]=(sizes[key]||0)+count;});if(!Number.isSafeInteger(q)||q<=0||actual!==q)valid=false;
+          if(r!==b.cuts[0]&&(nativeMaterials(r).length||rows(json(r.alokasiBahan,[])).length||n(r.kg)>0))valid=false;
+        });
+        if(!valid||!sizes.XL)return;
+        var merged=Object.assign({},b.first,{ukuran:sizes,total:sum(Object.keys(sizes).map(function(k){return sizes[k];}))}),selected=nativeXLReference(merged);
+        if(!selected)return;
+        var materialPlaced=false,batchId=b.first.rencanaId||b.first.id;
+        b.cuts.forEach(function(r){var map=json(r.ukuran,{}),q=sum(Object.keys(map).filter(function(k){return String(k).trim().toUpperCase()==='XL';}).map(function(k){return n(map[k])||0;}));if(!q)return;
+          /* Attach the XL material once, preserving each output's own tariff.
+             The first XL output can itself be a continuation after M. */
+          var first=!materialPlaced;materialPlaced=true;
+          out.push(Object.assign({},r,{total:q,ukuran:{XL:q},bahanList:first?nativeMaterials(selected):[],alokasiBahan:first?json(selected.alokasiBahan,[]):[],bahan:'',kg:0,asal:first?'':'lanjut',rencanaId:b.first.rencanaId||'',_hppBatchId:batchId}));
+        });
+      });
+    });
+    return out;
   }
   function nativeCosts(g){
     if(!g.nativeCuts.length)return null;
     /* A pure XL batch is the model reference. Weight observations by their pcs,
        never average per-batch prices equally or allocate mixed cloth to XL alone.
        Continuations share the material on the first cut and stay together. */
-    var poLanjut=Object.create(null);g.nativeCuts.forEach(function(r){if(r.asal==='lanjut')poLanjut[r.poId]=true;});
-    Object.keys(poLanjut).forEach(function(id){var batch=g.nativeCuts.filter(function(r){return r.poId===id;});poLanjut[id]=!batch.some(function(r){return r.asal!=='lanjut';})||batch.some(function(r){var sizes=json(r.ukuran,{}),active=Object.keys(sizes).filter(function(k){return (n(sizes[k])||0)>0;});return active.length!==1||String(active[0]).trim().toUpperCase()!=='XL';});});
-    var acuanXL=g.nativeCuts.map(function(r){return poLanjut[r.poId]?null:nativeXLReference(r);}).filter(Boolean),cuts=acuanXL.length?acuanXL:g.nativeCuts;
+    var acuanXL=nativeXLReferences(g),cuts=acuanXL.length?acuanXL:g.nativeCuts;
     var pcs=0,fabricCost=0,cutCost=0,warnings=[],cutWarnings=[],details=[],cutDetails=[];
     function warn(s){warnings.push(s);}
     function price(p){var effective=effectivePrices&&effectivePrices.byId[p.id];if(effective)return effective.priceComplete&&n(effective.harga)>0?Number(effective.harga):null;var qty=n(p.qty),rate=n(p.harga),total=n(p.total);if(qty===null||qty<=0)return null;if(rate!==null&&rate>0){if(total!==null&&Math.abs(total-qty*rate)>Math.max(1,qty*rate*0.000001))return null;return rate;}return total!==null&&total>0?total/qty:null;}
@@ -498,7 +554,7 @@ function coreCommerceHpp(input) {
     if(native)(native.includedCuts||[]).forEach(function(r){
       var q=n(r.total),map=json(r.ukuran,{});if(q===null||!Number.isSafeInteger(q)||q<=0||sum(Object.keys(map).map(function(k){return n(map[k])||0;}))!==q)return;
       Object.keys(map).forEach(function(size){addSize(size,n(map[size]));});
-      var b=batch('native:'+r.poId);b.totalPcs+=q;
+      var b=batch('native:'+(r._hppBatchId||r.rencanaId||r.poId));b.totalPcs+=q;
       if(r.asal==='lanjut')return;
       var details=(native.fabric.details||[]).filter(function(d){return d.cutId===r.id;}),alloc=rows(json(r.alokasiBahan,[]));
       if(!details.length||details.some(function(d){return !d.sourceId;})||!alloc.length)b.complete=false;
@@ -549,10 +605,11 @@ function coreCommerceHpp(input) {
     if(total!==null&&(!Number.isFinite(total)||total>Number.MAX_SAFE_INTEGER)){total=null;warnings.push('Total HPP melampaui batas perhitungan.');}
     if(biayaLain===null)warnings.push('Biaya lain belum valid.');if(margin===null||margin>=100)warnings.push('Target margin harus nol sampai kurang dari 100%.');
     if(!pakaiXL)warnings.push('Belum ada hasil XL dengan bahan terpisah. HPP masih perkiraan seluruh hasil; rekomendasi harga menunggu acuan XL.');
-    var ready=pakaiXL&&!!value&&ci.source==='model'&&ci.complete&&value.costSchema===2&&value.costsReviewed===true&&basisReviewed&&total!==null&&margin!==null&&margin<100&&!g.warnings.length,prices={};
+    var configSaved=false;if(ci.source==='model'&&ci.complete){try{coreCommerceHppConfig(value);configSaved=true;}catch(invalidConfig){}}
+    var ready=pakaiXL&&configSaved&&basisReviewed&&total!==null&&margin!==null&&margin<100&&!g.warnings.length,prices={};
     Object.keys(cfg.marketplace || {}).forEach(function(key){var mp=cfg.marketplace[key] || {},price=n(value&&value.hargaJual&&value.hargaJual[key]);if(!ready)return;prices[key]=coreCommercePriceQuote({hpp:total,price:price===null?0:price,margin:margin,fee:n(mp.fee),tax:n(cfg.pajak),fixed:mp.fixedPerPcs===undefined?0:n(mp.fixedPerPcs)});});
     kain.basis=basis;kain.observasi=observations(g,lc,nativeReference,kain,pakaiXL);basis.provisional=kain.observasi.provisional;
-    return {id:id,series:g.series,nama:g.nama,namaBarang:g.nama,sizes:unique(g.sizes).sort(),poIds:unique(g.poIds),kain:summary(kain),potong:summary(potong),jahit:summary(jahit),config:ci,basis:basis,hargaJahit:hargaJahit,biayaLain:biayaLain,targetMargin:margin,hppTotal:total,configured:ready,complete:ready,warnings:unique(warnings),prices:prices};
+    return {id:id,series:g.series,nama:g.nama,namaBarang:g.nama,sizes:unique(g.sizes).sort(),poIds:unique(g.poIds),kain:summary(kain),potong:summary(potong),jahit:summary(jahit),config:ci,basis:basis,hargaJahit:hargaJahit,biayaLain:biayaLain,targetMargin:margin,hppTotal:total,configSaved:configSaved,configured:ready,complete:ready,warnings:unique(warnings),prices:prices};
   });
   return {models:models,warnings:unique(allWarnings)};
 }
