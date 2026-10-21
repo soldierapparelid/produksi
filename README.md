@@ -2,6 +2,12 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.57 - Acuan XL dan penyimpanan biaya HPP
+
+- HPP membaca pembagian rol per ukuran dari persiapan yang cocok dengan hasil potong, termasuk hasil bertahap yang dapat ditelusuri. Biaya kain ukuran XL menjadi acuan untuk ukuran lainnya; kain campuran tanpa pembagian tetap ditandai sementara.
+- Pengaturan biaya yang tersimpan dibedakan dari kesiapan acuan XL. Biaya lain dan margin dapat disimpan sambil melengkapi acuan produksi; rekomendasi harga menunggu biaya yang lengkap.
+- Kesalahan simulasi satu marketplace tidak menghalangi penyimpanan biaya model. Pasang **Core.gs** dan **Index.html** bersama.
+
 ## Rilis 1.5.56 - Kain sejenis dalam satu kartu PO
 
 - Tambahan kain dari tanggal berbeda tampil dalam satu kartu per jenis bahan dan satuan, lengkap dengan total, jumlah rol, dan rincian ukuran. Bahan berbeda tetap terpisah.

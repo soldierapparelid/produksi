@@ -103,3 +103,54 @@ test('HPP corrected draft saves its exact values and revision, then installs onl
   assert.equal(h.run('drops'),1);
 });
 
+test('a saved provisional model stays saved, checked, and clean while simulation waits for XL evidence',()=>{
+  const h=hppEditFixture();h.run("var m=commerceHppModel('hpp-edit');m.configured=false;m.configSaved=true;m.basis={policy:'complete-legacy-v1'};m.warnings=['Acuan XL belum lengkap'];recalc(currentForm);");
+  assert.equal(h.run('commerceHppDraft(currentForm).dirty'),false);
+  assert.match(h.run('currentForm.hppPreview.innerHTML'),/Sesuai biaya yang sudah tersimpan/);
+  assert.doesNotMatch(h.run('currentForm.hppPreview.innerHTML'),/perubahan belum disimpan/);
+  assert.match(h.run('currentForm.hppPreview.innerHTML'),/Rekomendasi harga menunggu acuan XL/);
+  assert.equal(h.run('currentForm.hppSim.disabled'),true);
+  assert.match(h.run('VIEWS.hpp()'),/Pengaturan tersimpan/);
+  assert.doesNotMatch(h.run('VIEWS.hpp()'),/>Periksa biaya</);
+  h.run("A.commerceHppOpen({getAttribute:function(){return 'hpp-edit';}});");
+  assert.match(h.run('lastSheet'),/name="reviewed" checked>/);
+  assert.match(h.run('lastSheet'),/sudah pernah disimpan/);
+  h.run("A.commerceHppSim({getAttribute:function(){return 'hpp-edit';}});");
+  assert.match(h.json('messages').at(-1).text,/Lengkapi/);
+});
+
+test('valid manual and other costs can be saved before cloth and cutting evidence are complete',()=>{
+  const h=hppEditFixture();h.run("var m=commerceHppModel('hpp-edit');m.configured=false;m.configSaved=true;m.kain={complete:false,perPcs:null};m.potong={complete:false,perPcs:null};m.hppTotal=null;currentForm.values.biayaLain='5000';recalc(currentForm);A.commerceHppSave(null);");
+  assert.match(h.run('currentForm.hppPreview.innerHTML'),/HPP belum lengkap/);
+  assert.match(h.run('currentForm.hppPreview.innerHTML'),/Pengaturan biaya tetap dapat disimpan/);
+  assert.doesNotMatch(h.run('currentForm.hppPreview.innerHTML'),/HPP Rp0/);
+  assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceHpp');
+  assert.equal(h.requests[0].payload.config.hargaJahit,8000);assert.equal(h.requests[0].payload.config.biayaLain,5000);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload.config.hargaJual)),{});
+  assert.equal(h.requests[0].payload.expectedRevision,'hpp-edit-before');
+});
+
+test('unknown automatic sewing cost can retain settings but never becomes an HPP zero or quote',()=>{
+  const h=hppEditFixture();h.run("var m=commerceHppModel('hpp-edit');m.configured=false;m.configSaved=true;m.jahit={complete:false,perPcs:null};m.hargaJahit=null;m.config.value.jahitMode='auto';currentForm.values.jahitMode='auto';recalc(currentForm);A.commerceHppSave(null);");
+  assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.jahitMode,'auto');assert.equal(h.requests[0].payload.config.hargaJahit,0,'unused manual value is numeric; automatic price stays unknown');
+  assert.equal(h.run('commerceHppDraft(currentForm).rate'),null);assert.equal(h.run('commerceHppDraft(currentForm).model.hppTotal'),null);
+  assert.match(h.run('currentForm.hppCost.innerHTML'),/Jahit \/ pcs<\/span><span class="v money">Belum lengkap/);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.requests[0].payload.config.hargaJual)),{});
+});
+
+test('an invalid marketplace quote does not block saving model costs and only valid prices are saved',()=>{
+  const h=hppEditFixture();vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src/commerce-hpp.js'),'utf8'),h.context);
+  h.run("commerceData('hpp').config={marketplace:{valid:{nama:'Toko sehat',fee:10,fixedPerPcs:100},bad:{nama:'Toko <biaya tinggi>',fee:80,fixedPerPcs:0}},pajak:1};currentForm.values.biayaLain='5000';recalc(currentForm);A.commerceHppSave(null);");
+  assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'saveCommerceHpp');
+  assert.ok(h.requests[0].payload.config.hargaJual.valid>44530);assert.equal(h.requests[0].payload.config.hargaJual.bad,undefined);
+  assert.match(h.run('currentForm.hppPreview.innerHTML'),/Rekomendasi berikut belum tersedia/);
+  assert.match(h.run('currentForm.hppPreview.innerHTML'),/Toko &lt;biaya tinggi&gt;/);
+  assert.equal(h.requests[0].payload.config.biayaLain,5000);
+});
+
+test('checking the review is an explicit step with an inline prompt and focus when it is missing',()=>{
+  const h=hppEditFixture();h.run("var hppReviewSelect=$;currentForm.hppReview={hidden:true};currentForm.reviewField={focused:0,focus:function(){this.focused++;}};$=function(s,f){if(s==='[data-commerce-hpp-review]')return f.hppReview;if(s==='[name=\"reviewed\"]')return f.reviewField;return hppReviewSelect(s,f);};currentForm.values.reviewed=false;A.commerceHppSave(null);");
+  assert.equal(h.requests.length,0);assert.equal(h.run('currentForm.hppReview.hidden'),false);assert.equal(h.run('currentForm.reviewField.focused'),1);
+  assert.match(h.json('messages').at(-1).text,/Centang pemeriksaan biaya/);
+  h.run('currentForm.values.reviewed=true;recalc(currentForm);');assert.equal(h.run('currentForm.hppReview.hidden'),true);
+});
