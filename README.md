@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.58 - Riwayat cetak, kartu per ukuran, dan gambar supplier
+
+- Gambar invoice supplier menyusun model dalam dua kolom agar lebih ringkas. Rincian varian, tanggal penerimaan, pembayaran, dan tanda lunas tetap tersedia.
+- Tombol **Cetak A4 / PDF** membuka dokumen putih untuk kertas A4. Invoice panjang dapat berlanjut ke halaman berikutnya tanpa menghilangkan rincian.
+- Daftar potong memiliki **Belum dicetak** dan **Riwayat cetak** yang tersimpan lintas perangkat. Setelah hasilnya tercetak, tekan **Sudah dicetak** di pratinjau; menutup atau membatalkan dialog cetak tidak memindahkan PO. Riwayat menyimpan rincian saat dicetak dan dapat dicetak ulang meski PO sudah diarsipkan.
+- Perubahan bahan atau ukuran PO memunculkan pekerjaan baru di daftar cetak. Catatan cetak tidak mengubah stok, hasil potong, penugasan jahit, atau QC.
+- Kartu jalan dibuat per barang dan per ukuran, empat kartu per A4, dengan kolom penjahit tersendiri. Tulisan dan garis dibuat lebih hitam dan tebal; bahan yang belum dialokasikan per ukuran ditandai sebagai bahan bersama PO.
+- Gambar dan cetakan memakai data invoice yang sama. Perubahan sesi atau invoice harus dimuat ulang sebelum mencetak. Pasang **Core.gs** dan **Index.html** bersama.
+
 ## Rilis 1.5.57 - Acuan XL dan penyimpanan biaya HPP
 
 - HPP membaca pembagian rol per ukuran dari persiapan yang cocok dengan hasil potong, termasuk hasil bertahap yang dapat ditelusuri. Biaya kain ukuran XL menjadi acuan untuk ukuran lainnya; kain campuran tanpa pembagian tetap ditandai sementara.

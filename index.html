@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261021-hpp-xl-simpan-1557';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261022-supplier-dua-kolom-1558';</script>
 <script>
 (function () {
 'use strict';
@@ -501,7 +501,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.57';
+var APP_VERSION = '1.5.58';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -521,6 +521,7 @@ var SCHEMA = {
   LegacySettlement:['id','batchId','sourceId','poId','maklonId','size','paymentRef','sourceSnapshot','poSnapshot','imporSumber','baselineSources','resolution','allocations','reason'],
   MigrasiJournal:['id','batchId','sheet','rowId','before','status','beforeHash','planHash','createdAt'],
   KoreksiRiwayat:['id','poId','sheet','rowId','sourceHash','sourceSnapshot','before','after','previousCorrectionId','reason','createdAt','createdBy'],
+  RiwayatCetak:['id','poId','jenis','signature','snapshot','dibuat','dibuatOleh','requestId','requestHash'],
   Gambar:    ['id','data','diubah'],
   /* stok bahan: satu baris per pembelian (jenis 'beli') atau koreksi stok (jenis 'koreksi', qty boleh minus) */
   StokBahan: ['id','jenis','tanggal','bahan','qty','satuan','rol','harga','total','supplier','invoice','sumber','alasan','catatan','dibuatOleh','dibuat','asal','invoiceId','stockMode','rollLabel','sourceStockId','saldoBefore','saldoAfter','previousCorrectionId','sourceRevision','requestHash','requestActor','mutationHash','mutationActor','priceScope'],
@@ -637,6 +638,38 @@ function coreDomainCanonical(value) {
 function coreDomainRevision(sheet, row) {
   var fields = {}; (SCHEMA[sheet] || []).forEach(function (k) { fields[k] = row && row[k] !== undefined && row[k] !== null ? row[k] : ''; });
   return coreHash(coreDomainCanonical([sheet,fields]));
+}
+/* Only printable work changes invalidate its receipt. Derived progress, unrelated
+   stock writes and the global sync version are intentionally outside this proof. */
+function printWorkSignature(po, plans, releasedSizes) {
+  po = po || {};
+  var source = {};
+  ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','bahan','catatan','status'].forEach(function (key) { source[key] = String(po[key] || ''); });
+  source.ukuran = coreParseJSON(po.ukuran, {});
+  source.ukuranAktif = coreParseJSON(po.ukuranAktif, []);
+  source.lepas = (releasedSizes instanceof Array ? releasedSizes : []).slice().map(String).sort();
+  var related = (plans || []).filter(function (row) { return row.poId === po.id; }).map(function (row) {
+    var allocations = coreParseJSON(row.alokasiBahan, []), materials = coreParseJSON(row.bahanList, []);
+    return {id:String(row.id || ''),revision:String(row.revision || ''),status:row.status === 'terpakai' ? 'siap' : String(row.status || ''),
+      bahanList:materials,alokasiBahan:allocations,
+      legacyBahanList:coreParseJSON(row.legacyBahanList, allocations.length ? [] : materials),rol:coreNum(row.rol),catatan:String(row.catatan || '')};
+  }).sort(function (a,b) { return a.id.localeCompare(b.id); });
+  return coreHash(coreDomainCanonical(['print-work-v1',source,related]));
+}
+/* Keep just the frozen fields used by the cutting sheet and size travel card.
+   Workflow/accounting objects and embedded or remote pictures are not history. */
+function printWorkSnapshot(input) {
+  input = input || {}; var original = input.po || {}, po = {};
+  ['id','noPO','nama','series','pelanggan','bahan','catatan','deadline','produkId'].forEach(function (key) { po[key] = String(original[key] || ''); });
+  po.gambar = /^[A-Za-z0-9_-]{1,100}$/.test(String(original.gambar || '')) ? String(original.gambar) : '';
+  return {po:po,tahap:['siap','lanjut','tunggu','periksa'].indexOf(input.tahap) >= 0 ? input.tahap : 'tunggu',sudah:coreNum(input.sudah),gambar:'',
+    ukuran:(input.ukuran instanceof Array ? input.ukuran : []).map(function (u) { return {s:String(u.s || ''),target:coreNum(u.target)}; }),
+    rencana:(input.rencana instanceof Array ? input.rencana : []).map(function (r) {
+      return {id:String(r.id || ''),rol:coreNum(r.rol),catatan:String(r.catatan || ''),
+        bahanList:coreParseJSON(r.bahanList,[]).map(function (b) { return {nama:String(b.nama || ''),qty:coreNum(b.qty),satuan:String(b.satuan || '')}; }),
+        rincianRol:coreParseJSON(r.rincianRol,[]).map(function (b) { return {bahan:String(b.bahan || ''),qty:coreNum(b.qty),satuan:String(b.satuan || ''),ukuran:String(b.ukuran || '')}; }),
+        legacyUkuran:(r.legacyUkuran instanceof Array ? r.legacyUkuran : []).map(String)};
+    })};
 }
 function corePayrollRevision(row) {
   var proof={};['id','pegawaiId','poId','jenis','size','tanggal','total','available','paidQty','rate','issues','needsReview'].forEach(function(k){proof[k]=row[k]===undefined?'':row[k];});
@@ -1609,6 +1642,7 @@ function createCore(store, env) {
     var produk = store.read('Produk');
     var po = withParsed(revisionRows('PO',store.read('PO')), 'ukuran', {});
     po.forEach(function (p) { if (p.ukuranAktif) p.ukuranAktif = coreParseJSON(p.ukuranAktif, p.ukuranAktif); });
+    if (coreIsAdmin(me)) { var printPlans = store.read('RencanaPotong'); po.forEach(function (p) { p.printSignature = printWorkSignature(p, printPlans, st.poUkuranLepas[p.id]); }); }
     var potong = withParsed(revisionRows('Potong',store.read('Potong')), 'ukuran', {});
     var kirim = withParsed(revisionRows('SlipKirim',store.read('SlipKirim')), 'ukuran', {});
     var setor = withParsed(revisionRows('SlipSetor',store.read('SlipSetor')), 'ukuran', {});
@@ -1850,6 +1884,68 @@ function createCore(store, env) {
   };
 
   actions.getState = function (p) { return buildState(auth(p), p); };
+
+  function publicPrintRow(row) {
+    return {id:row.id,poId:row.poId,jenis:row.jenis,signature:row.signature,snapshot:coreParseJSON(row.snapshot,{}),dibuat:row.dibuat,dibuatOleh:row.dibuatOleh};
+  }
+  actions.getPrintHistory = function (p) {
+    if (store.fresh) store.fresh('Pegawai');
+    var me = auth(p); mustAdmin(me);
+    if (p.jenis !== undefined && ['potong','jalan'].indexOf(p.jenis) < 0) fail('Jenis riwayat cetak tidak dikenal.');
+    if (store.fresh) store.fresh('RiwayatCetak');
+    return {rows:store.read('RiwayatCetak').filter(function (row) { return !p.jenis || row.jenis === p.jenis; }).slice().sort(function (a,b) {
+      return String(b.dibuat).localeCompare(String(a.dibuat)) || String(a.id).localeCompare(String(b.id));
+    }).map(publicPrintRow)};
+  };
+  actions.savePrintHistory = function (p) {
+    if (store.fresh) store.fresh('Pegawai');
+    var me = auth(p); mustAdmin(me);
+    var id = idOk(p.id), jenis = String(p.jenis || '');
+    if (!id) fail('Identitas cetakan tidak valid. Buka kembali pratinjau.');
+    if (['potong','jalan'].indexOf(jenis) < 0) fail('Jenis cetakan tidak dikenal.');
+    if (!(p.entries instanceof Array) || !p.entries.length || p.entries.length > 100) fail('Pilih 1 sampai 100 PO untuk satu cetakan.');
+    var seen = {}, chars = 0;
+    var entries = p.entries.map(function (entry) {
+      entry = entry || {};
+      var poId = String(entry.poId || ''), signature = String(entry.signature || ''), snapshot = entry.snapshot;
+      if (!poId || Object.prototype.hasOwnProperty.call(seen,poId)) fail('Setiap PO cukup satu kali dalam cetakan.');
+      seen[poId] = true;
+      if (!/^[a-z0-9]{2,32}$/.test(signature)) fail('Versi cetakan belum tersedia. Muat ulang lalu buka kembali pratinjau.');
+      if (!snapshot || typeof snapshot !== 'object' || snapshot instanceof Array || !snapshot.po || String(snapshot.po.id || '') !== poId) fail('Rincian cetakan tidak cocok dengan PO.');
+      var encoded;
+      try { encoded = JSON.stringify(snapshot); } catch (error) { fail('Rincian cetakan tidak dapat disimpan.'); }
+      if (!encoded || encoded.length > 45000 || (chars += encoded.length) > 1000000) fail('Rincian cetakan terlalu panjang. Kurangi jumlah PO lalu coba lagi.');
+      return {poId:poId,signature:signature,snapshot:printWorkSnapshot(JSON.parse(encoded))};
+    });
+    var hash = coreHash(coreDomainCanonical(['print-history-v1',me.id,jenis,entries]));
+    if (store.fresh) store.fresh('RiwayatCetak');
+    var history = store.read('RiwayatCetak'), old = history.filter(function (row) { return row.requestId === id; }), found = {};
+    /* The intent proof covers the entire batch. An uncertain write may have
+       succeeded: reuse its timestamp and fill only missing rows on retry. */
+    old.forEach(function (row) {
+      var index = Number(String(row.id).slice(id.length + 1)), entry = entries[index];
+      if (row.id !== id + '_' + corePad(index,3) || !entry || found[index] || row.requestHash !== hash || row.dibuatOleh !== me.id || row.jenis !== jenis || row.poId !== entry.poId || row.signature !== entry.signature || coreDomainCanonical(coreParseJSON(row.snapshot,null)) !== coreDomainCanonical(entry.snapshot)) fail('Identitas cetakan sudah dipakai untuk data berbeda. Muat ulang riwayat sebelum mencoba lagi.');
+      found[index] = row;
+    });
+    if (!old.length) {
+      ['PO','RencanaPotong','Pengaturan'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
+      var plans = store.read('RencanaPotong'), st = settings();
+      entries.forEach(function (entry) {
+        var po = findRow('PO',entry.poId);
+        if (!po) fail('PO pada cetakan tidak ditemukan. Muat ulang daftar.');
+        if (entry.signature !== printWorkSignature(po,plans,st.poUkuranLepas[po.id])) fail('Bahan atau rincian PO berubah sejak pratinjau dibuka. Muat ulang dan cetak data terbaru.');
+      });
+    }
+    var at = old.length ? old[0].dibuat : nowIso(), pending = [], result = entries.map(function (entry,index) {
+      if (found[index]) return found[index];
+      var rowId = id + '_' + corePad(index,3);
+      if (history.some(function (row) { return row.id === rowId; })) fail('Identitas baris cetakan sudah digunakan. Muat ulang riwayat.');
+      var row = {id:rowId,poId:entry.poId,jenis:jenis,signature:entry.signature,snapshot:JSON.stringify(entry.snapshot),dibuat:at,dibuatOleh:me.id,requestId:id,requestHash:hash};
+      pending.push(row); return row;
+    });
+    if (pending.length) { if (store.validateRows) store.validateRows('RiwayatCetak',pending); store.appendMany('RiwayatCetak',pending); }
+    return {rows:result.map(publicPrintRow),saved:pending.length,replayed:old.length > 0};
+  };
 
   actions.setupOwner = function (p) {
     if (adaOwner()) fail('Owner sudah dibuat. Silakan login.');
@@ -3565,7 +3661,7 @@ function createCore(store, env) {
   /* ---------- impor data lama ---------- */
   actions.importRows = function (p) {
     var me = adminAtauPemasangan(p);
-    var sheet = String(p.sheet || ''); if (!SCHEMA[sheet] || ['Pengaturan','Gambar','LegacySettlement','MigrasiJournal','GudangLama','KoreksiRiwayat','RencanaPotong','CommerceRecord','CommerceEvent','CommerceSource','CommerceImport'].indexOf(sheet) >= 0) fail('Sheet tidak dikenal.');
+    var sheet = String(p.sheet || ''); if (!SCHEMA[sheet] || ['Pengaturan','Gambar','LegacySettlement','MigrasiJournal','GudangLama','KoreksiRiwayat','RiwayatCetak','RencanaPotong','CommerceRecord','CommerceEvent','CommerceSource','CommerceImport'].indexOf(sheet) >= 0) fail('Sheet tidak dikenal.');
     if (sheet === 'StokBahan') ['StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
     var rows = p.rows instanceof Array ? p.rows : [];
     var existing = {}; store.read(sheet).forEach(function (r) { existing[r.id] = 1; });
@@ -3894,9 +3990,11 @@ function createCore(store, env) {
     tandaiLunas: 1, deleteRecord: 1, importRows: 1, ubahHarga: 1, ubahTargetJahit: 1, batalHitungSetor: 1,
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   WRITE.hapusStokBahan = 1;
+  WRITE.savePrintHistory = 1;
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
+  NO_STATE.savePrintHistory = 1;
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, deleteCommerceProduct:1, mergeCommerceInvoices:1, setCommerceHistoryVisibility:1, saveCommerceOrder:1, saveCommerceOrderBatch:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, gantiCommerceGroupPayment:1, salinCommerceOrderLama:1, cancelCommerceRecord:1, restoreCommerceRecord:1, arsipCommerceNota:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
 
@@ -3905,7 +4003,7 @@ function createCore(store, env) {
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
     var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
-    if ((contractAction[action] || COMMERCE_WRITE[action] || action === 'getHapusStokBahan' || action === 'hapusStokBahan') && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
+    if ((contractAction[action] || COMMERCE_WRITE[action] || action === 'getHapusStokBahan' || action === 'hapusStokBahan' || action === 'getPrintHistory' || action === 'savePrintHistory') && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {
       var updateError = new Error('Versi aplikasi sudah berubah. Muat ulang aplikasi versi terbaru sebelum menyimpan.');
@@ -7354,7 +7452,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.57';
+var UI_VERSION = '1.5.58';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -8006,7 +8104,7 @@ function req(action, payload) {
   if (S.buka) return Promise.reject(new Error('PIN masih diperiksa ke server. Tunggu sebentar, lalu ulangi.'));
   if (S.token && payload.token === undefined) payload.token = S.token;
   if (S.wantAll) payload.semua = true;
-  var workflowWrite = /^(savePO|savePOWithRencana|setStatusPO|saveInvoiceBahan|saveRencanaPotong|cocokkanStokRol|koreksiHargaBahan|koreksiHargaJenisBahan|createPotong|createKirim|createSetor|prosesSetor|createQC|simpanQCGabungan|createGudang|createUpah|deleteRecord|ubahHarga|tandaiLunas|importRows|gantiImpor|applyLegacyMigration|recoverLegacyMigration|saveHistoryCorrection|saveCommerceSupplier|saveCommerceProduct|deleteCommerceProduct|saveCommerceOrder|saveCommerceOrderBatch|saveCommerceNota|appendCommercePayment|appendCommerceGroupPayment|appendCommerceReceipt|voidCommerceEvent|gantiCommerceEvent|gantiCommerceGroupPayment|salinCommerceOrderLama|cancelCommerceRecord|setCommerceHistoryVisibility|saveCommerceHpp|saveCommerceHppSettings|applyCommerceImport)$/;
+  var workflowWrite = /^(savePO|savePOWithRencana|setStatusPO|saveInvoiceBahan|saveRencanaPotong|cocokkanStokRol|koreksiHargaBahan|koreksiHargaJenisBahan|createPotong|createKirim|createSetor|prosesSetor|createQC|simpanQCGabungan|createGudang|createUpah|deleteRecord|ubahHarga|tandaiLunas|importRows|gantiImpor|applyLegacyMigration|recoverLegacyMigration|saveHistoryCorrection|savePrintHistory|saveCommerceSupplier|saveCommerceProduct|deleteCommerceProduct|saveCommerceOrder|saveCommerceOrderBatch|saveCommerceNota|appendCommercePayment|appendCommerceGroupPayment|appendCommerceReceipt|voidCommerceEvent|gantiCommerceEvent|gantiCommerceGroupPayment|salinCommerceOrderLama|cancelCommerceRecord|setCommerceHistoryVisibility|saveCommerceHpp|saveCommerceHppSettings|applyCommerceImport)$/;
   if (workflowWrite.test(action) && Api.mode() !== 'demo' && (!S.state || S.state.workflowVersion !== 2)) {
     return Promise.reject(new Error('Pembaruan alur produksi di server belum selesai. Data tetap bisa dilihat; hubungi owner sebelum menyimpan perubahan.'));
   }
@@ -9631,7 +9729,7 @@ VIEWS.po = function () {
     }).join('');
     return (grup.length || stripBaru ? alat + stripBaru + poLegenda(rows, d.kosong.length) + isi + more : '<div class="card">' + emptyBox(d.tabArsip ? 'Arsip masih kosong. PO selesai atau batal bisa diarsipkan dari tabnya.' : st.po.length ? 'Tidak ada PO yang cocok dengan saringan ini.' : 'Belum ada PO.', st.po.length ? '' : '<button class="btn pri sm" data-a="poNew">Buat PO pertama</button>') + '</div>') + kakiBuang + arsip;
   };
-  return '<div class="head"><div class="grow"><h1>PO</h1><div class="sub">Satu PO untuk satu barang dalam satu putaran produksi. Dikelompokkan per seri; warna menunjukkan tahapnya. "Semua barang" memuat seluruh barang, termasuk yang belum di-PO.</div></div><button class="btn" data-a="tab" data-id="stokjual">Stok &amp; PO ulang</button><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
+  return (isAdmin()?'<div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn sm" data-a="potongCetak">Cetak &amp; riwayat potong</button></div>':'')+'<div class="head"><div class="grow"><h1>PO</h1><div class="sub">Satu PO untuk satu barang dalam satu putaran produksi. Dikelompokkan per seri; warna menunjukkan tahapnya. "Semua barang" memuat seluruh barang, termasuk yang belum di-PO.</div></div><button class="btn" data-a="tab" data-id="stokjual">Stok &amp; PO ulang</button><button class="btn pri" data-a="poNew">' + ic('plus') + 'PO baru</button></div>' +
     poPendingPlansHtml() + '<div class="tools"><div class="seg">' + [['semua', 'Semua barang'], ['aktif', 'Aktif'], ['selesai', 'Selesai'], ['batal', 'Batal'], ['arsip', 'Arsip']].map(function (o) { return '<button data-a="poStatus" data-v="' + o[0] + '"' + (f.poStatus === o[0] ? ' class="on"' : '') + '>' + o[1] + ' ' + nf(n[o[0]] || 0) + '</button>'; }).join('') + '</div>' +
     searchBox('q', 'Cari barang, nomor PO, pelanggan') + '</div>' +
     '<div class="tools">' + (f.poStatus === 'aktif' ? '<select data-c="poTahap" style="flex:1 1 180px" aria-label="Saring tahap">' + TAHAP_OPSI.map(function (o) { return '<option value="' + o[0] + '"' + (f.poTahap === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' : '') +
@@ -10286,9 +10384,9 @@ function slipInvokePrint(win, doc) {
 }
 var slipPreviews = [];
 function closeSlipPreviews() { (slipPreviews||[]).slice().forEach(function(close){close();}); }
-function slipCetak(list) {
+function slipCetak(list, preparedHtml) {
   var html;
-  try { html = slipDocumentHtml(list); } catch (e) { return Promise.reject(e); }
+  try { html = preparedHtml || slipDocumentHtml(list); } catch (e) { return Promise.reject(e); }
   return new Promise(function (resolve, reject) {
     var done = false, frame = null, overlay = null, timer, printButton, label, imageDeadline;
     function closePreview(){clearTimeout(timer);clearTimeout(imageDeadline);if(overlay&&overlay.parentNode)overlay.parentNode.removeChild(overlay);var i=slipPreviews.indexOf(closePreview);if(i>=0)slipPreviews.splice(i,1);if(!done){done=true;resolve({closed:true});}}
@@ -10336,7 +10434,7 @@ function slipCetak(list) {
 /* ---------- cetak daftar potong ---------- */
 /* Pegangan kerja tukang potong di kertas: A4 tegak, enam PO per lembar (2 x 3). Tiap kotak memuat gambar barang, ukuran
    yang harus dipotong, bahan yang disiapkan owner (kiloan tiap rol, per ukuran bila rolnya dibagi) dan tempat menulis
-   hasil. Hanya membaca data yang sudah ada di perangkat: tidak ada yang dikirim ke server. */
+   hasil. Riwayat cetak disimpan setelah pengguna menandai hasilnya sudah dicetak. */
 var POTONG_CETAK_PER_LEMBAR = 6, POTONG_CETAK_URUT = { siap: 0, lanjut: 1, tunggu: 2, periksa: 3 };
 var POTONG_CETAK_TAHAP = { siap: 'Bahan siap', lanjut: 'Lanjut potong', tunggu: 'Menunggu bahan', periksa: 'Perlu diperiksa' };
 var POTONG_CETAK_CSS = [
@@ -10345,39 +10443,40 @@ var POTONG_CETAK_CSS = [
   '.lembar{width:194mm;height:279mm;margin:0 auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto repeat(3,minmax(0,1fr));gap:3.5mm;overflow:hidden;page-break-after:always;break-after:page}',
   '.lembar:last-child{page-break-after:auto;break-after:auto}',
   '.kepala{grid-column:1/-1;display:flex;align-items:flex-end;gap:4mm;border-bottom:.6mm solid #161b22;padding-bottom:1.5mm}',
-  '.kepala .merek{font-size:7pt;letter-spacing:.2em;text-transform:uppercase;color:#6b7684}',
+  '.kepala .merek{font-size:7pt;letter-spacing:.2em;text-transform:uppercase;color:#111}',
   '.kepala h1{margin:0;font-size:16pt;line-height:1.05;letter-spacing:.05em;text-transform:uppercase}',
-  '.kepala .info{margin-left:auto;text-align:right;font-size:7.5pt;line-height:1.4;color:#4a5563}',
-  '.kartu{--f:9pt;font-size:var(--f);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border:.35mm solid #cfd6df;border-radius:3mm;background:#fff}',
+  '.kepala .info{margin-left:auto;text-align:right;font-size:7.5pt;line-height:1.4;color:#111}',
+  '.kartu{--f:9pt;font-size:var(--f);display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border:.35mm solid #333;border-radius:3mm;background:#fff}',
   '.kartu>header{display:flex;align-items:center;gap:2mm;padding:1.3mm 2.5mm;background:#161b22;color:#fff;font-size:8pt}',
   '.kartu>header .no{font-weight:700;letter-spacing:.04em;white-space:nowrap}',
-  '.kartu>header .seri{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:6.5pt;letter-spacing:.1em;text-transform:uppercase;opacity:.75}',
+  '.kartu>header .seri{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:6.5pt;letter-spacing:.1em;text-transform:uppercase;opacity:1}',
   '.kartu>header .tahap{padding:.5mm 2mm;border-radius:10mm;background:#f2b632;color:#161b22;font-size:6.5pt;font-weight:700;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}',
   '.t-siap>header .tahap,.t-lanjut>header .tahap{background:#9bd65a}.t-periksa>header .tahap{background:#ff9d92}',
   '.atas{display:flex;gap:2.5mm;padding:2.2mm 2.5mm 0}',
-  '.foto{flex:none;width:25mm;height:25mm;border:.3mm solid #dfe4ea;border-radius:2.5mm;background:#f1f3f6;object-fit:cover}',
-  'span.foto{display:flex;align-items:center;justify-content:center;font-size:16pt;font-weight:700;color:#9aa4b1}',
+  '.foto{flex:none;width:25mm;height:25mm;border:.3mm solid #333;border-radius:2.5mm;background:#f1f3f6;object-fit:cover}',
+  'span.foto{display:flex;align-items:center;justify-content:center;font-size:16pt;font-weight:700;color:#111}',
   '.judul{flex:1;min-width:0}',
   '.kartu h2{margin:0 0 1mm;font-size:1.28em;line-height:1.12;letter-spacing:.02em;text-transform:uppercase}',
-  '.label{margin-bottom:.6mm;font-size:.68em;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#6b7684}',
+  '.label{margin-bottom:.6mm;font-size:.68em;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#111}',
   '.ukuran{display:flex;flex-wrap:wrap;gap:1.2mm}',
   '.ukuran .uk{display:inline-flex;align-items:baseline;gap:1mm;padding:.6mm 2.6mm;border-radius:1.8mm;background:#f2b632;color:#161b22;font-size:1.45em;font-weight:800;line-height:1.15}',
   '.ukuran .uk small{font-size:.5em;font-weight:700}',
-  '.ket{margin-top:.8mm;font-size:.8em;color:#4a5563}',
+  '.ket{margin-top:.8mm;font-size:.8em;color:#111}',
   '.isi{flex:1;min-height:0;overflow:hidden;padding:1.6mm 2.5mm 0}',
-  '.bahan{padding:.8mm 0;border-top:.25mm solid #e3e7ec}.label+.bahan{padding-top:0;border-top:0}',
+  '.bahan{padding:.8mm 0;border-top:.25mm solid #333}.label+.bahan{padding-top:0;border-top:0}',
   '.bn{display:flex;align-items:baseline;gap:2mm}.bn span{flex:1;min-width:0;font-weight:600}.bn b{white-space:nowrap}',
   '.rol{display:flex;flex-wrap:wrap;align-items:center;gap:.9mm;margin-top:.7mm}',
-  '.rol span{padding:0 1.8mm;border:.25mm solid #b9c2cd;border-radius:10mm;font-size:.88em;line-height:1.45;font-variant-numeric:tabular-nums}',
+  '.rol span{padding:0 1.8mm;border:.25mm solid #333;border-radius:10mm;font-size:.88em;line-height:1.45;font-variant-numeric:tabular-nums}',
   '.rol b{min-width:8mm;padding:.2mm 1.2mm;border-radius:1.2mm;background:#161b22;color:#fff;font-size:.8em;text-align:center}',
-  '.belum{padding:1.5mm 2mm;border:.3mm dashed #b9c2cd;border-radius:2mm;font-size:.9em;color:#4a5563}',
-  '.cat{margin-top:.8mm;font-size:.8em;font-style:italic;color:#4a5563}.ringkas .cat{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.ringkas .foto{width:18mm;height:18mm}',
-  '.kartu>footer{margin-top:1.2mm;padding:1.4mm 2.5mm 2mm;border-top:.25mm solid #e3e7ec;background:#fafbfc}',
+  '.belum{padding:1.5mm 2mm;border:.3mm dashed #333;border-radius:2mm;font-size:.9em;color:#111}',
+  '.cat{margin-top:.8mm;font-size:.8em;font-style:italic;color:#111}.ringkas .cat{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.ringkas .foto{width:18mm;height:18mm}',
+  '.kartu>footer{margin-top:1.2mm;padding:1.4mm 2.5mm 2mm;border-top:.25mm solid #333;background:#fafbfc}',
   '.penuh>footer::before{content:"Bahan selengkapnya ada di aplikasi";display:block;margin-bottom:.8mm;font-size:.72em;color:#b3261e}',
-  '.hasil{display:flex;gap:1.2mm}.hasil span{position:relative;flex:1;min-width:0;height:9.5mm;border:.3mm solid #8d98a6;border-radius:1.6mm;background:#fff}',
-  '.hasil b{position:absolute;left:1.2mm;top:.5mm;font-size:.72em;color:#6b7684}',
-  '.ttd{display:flex;align-items:flex-end;gap:1.5mm;margin-top:1.6mm;font-size:.75em;color:#6b7684}.ttd i{flex:1;height:3.2mm;border-bottom:.25mm solid #8d98a6}',
+  '.hasil{display:flex;gap:1.2mm}.hasil span{position:relative;flex:1;min-width:0;height:9.5mm;border:.3mm solid #333;border-radius:1.6mm;background:#fff}',
+  '.hasil b{position:absolute;left:1.2mm;top:.5mm;font-size:.72em;color:#111}',
+  '.ttd{display:flex;align-items:flex-end;gap:1.5mm;margin-top:1.6mm;font-size:.75em;color:#111}.ttd i{flex:1;height:3.2mm;border-bottom:.25mm solid #333}',
   '@media screen{body{padding:10px 0;background:#e6eaef}.lembar{box-sizing:content-box;margin:0 auto 12px;padding:8mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18)}}'
+  ,'.label,.ket,.cat,.ttd,.hasil b,.info{font-weight:600}.hasil,.ttd{color:#000}.ttd i{border-bottom-width:.35mm}'
 ].join('');
 /* Yang bahannya sudah siap di depan, supaya lembar pertama berisi pekerjaan yang bisa langsung dikerjakan. */
 function potongCetakData(list) {
@@ -10439,11 +10538,11 @@ function potongCetakPaskan(doc) {
   });
 }
 /* Pratinjau yang selalu terlihat, seperti cetak slip: perintah cetak tidak boleh tampak tidak terjadi apa-apa. */
-function potongCetakBuka(html) { return dokumenCetakBuka(html, { nama: 'daftar potong', tanda: '.lembar', siap: potongCetakPaskan }); }
+function potongCetakBuka(html, selesai) { return dokumenCetakBuka(html, { nama: 'daftar potong', tanda: '.lembar', siap: potongCetakPaskan, selesai: selesai }); }
 /* o.nama: sebutan dokumennya; o.tanda: elemen yang menandai dokumennya sudah termuat; o.siap(doc): dirapikan sebelum dicetak */
 function dokumenCetakBuka(html, o) {
   return new Promise(function (resolve, reject) {
-    var done = false, overlay = null, frame = null, timer, batas, tombol, label;
+    var done = false, overlay = null, frame = null, timer, batas, tombol, label, selesaiButton;
     function tutup() { clearTimeout(timer); clearTimeout(batas); if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); var i = slipPreviews.indexOf(tutup); if (i >= 0) slipPreviews.splice(i, 1); if (!done) { done = true; resolve({ closed: true }); } }
     function gagal(e) { if (done) return; done = true; clearTimeout(timer); if (label) label.textContent = e.message; reject(e); }
     function cetak(win) {
@@ -10458,6 +10557,7 @@ function dokumenCetakBuka(html, o) {
         clearTimeout(batas); if (done) return;
         try {
           if (o.siap) o.siap(doc); tombol.disabled = false; tombol.onclick = function () { cetak(win); };
+          if (selesaiButton) selesaiButton.disabled = false;
           label.textContent = 'Pratinjau ' + o.nama + '. Tekan Cetak / Simpan PDF bila dialog cetak belum muncul.';
           if (typeof window.PK_UJI_CETAK === 'function') window.PK_UJI_CETAK(doc, frame); else cetak(win);
           done = true; clearTimeout(timer); resolve({ preview: true });
@@ -10474,20 +10574,52 @@ function dokumenCetakBuka(html, o) {
       var keluar = document.createElement('button'); keluar.type = 'button'; keluar.textContent = 'Tutup pratinjau'; keluar.style.cssText = 'padding:10px 18px;font:inherit;cursor:pointer'; keluar.onclick = tutup;
       frame = document.createElement('iframe'); frame.title = 'Pratinjau ' + o.nama; frame.style.cssText = 'width:100%;flex:1;border:0;background:#e6eaef';
       frame.onload = function () { try { siap(frame.contentWindow, frame.contentDocument); } catch (e) { gagal(e); } };
-      frame.srcdoc = html; alat.appendChild(tombol); alat.appendChild(label); alat.appendChild(keluar); overlay.appendChild(alat); overlay.appendChild(frame); slipPreviews.push(tutup); document.body.appendChild(overlay);
+      frame.srcdoc = html; alat.appendChild(tombol);
+      if (o.selesai) {
+        selesaiButton = document.createElement('button'); selesaiButton.type='button'; selesaiButton.textContent='Sudah dicetak · pindah ke riwayat'; selesaiButton.disabled=true;
+        selesaiButton.style.cssText='padding:10px 18px;font:700 14px Arial,sans-serif;cursor:pointer;background:#d8ed9c;border:1px solid #384515;color:#18210b';
+        selesaiButton.onclick=function(){
+          if(selesaiButton.disabled)return; selesaiButton.disabled=true; label.textContent='Menyimpan riwayat cetak…';
+          Promise.resolve().then(o.selesai).then(function(){selesaiButton.textContent='Tersimpan di riwayat';label.textContent='PO sudah pindah ke Riwayat cetak. Anda bisa mencetaknya lagi dari sana.';},function(e){selesaiButton.disabled=false;label.textContent=(e&&e.message)||'Riwayat belum tersimpan. Tekan Sudah dicetak lagi untuk mencoba ulang.';});
+        }; alat.appendChild(selesaiButton);
+      }
+      alat.appendChild(label); alat.appendChild(keluar); overlay.appendChild(alat); overlay.appendChild(frame); slipPreviews.push(tutup); document.body.appendChild(overlay);
     } catch (e) { gagal(e); }
   });
 }
 /* Pilih PO yang dicetak: daftar centang seperti "Karyawan yang dicetak" di slip gaji. Pilihan diingat selama aplikasi terbuka. */
 function potongCetakDaftar() {
   /* persis PO yang tampil di bagian "Harus dipotong" halaman PO */
-  var tampil = poDaftar().rows; return potongCetakData(poHarusDipotong().filter(function (p) { return tampil.indexOf(p) >= 0; }));
+  var tampil = poDaftar().rows, data=potongCetakData(poHarusDipotong().filter(function (p) { return tampil.indexOf(p) >= 0; }));
+  var history=S.potongPrintHistory||[];
+  return data.filter(function(x){var sig=x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id));return !history.some(function(r){return r.poId===x.po.id&&r.signature===sig;});});
 }
+function potongCetakSimpan(data, jenis) {
+  var request={id:newId(),jenis:jenis,entries:data.map(function(x){
+    var snapshot=printWorkSnapshot(x);
+    return {poId:x.po.id,signature:x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id)),snapshot:snapshot};
+  })};
+  return function(){return req('savePrintHistory',request).then(function(result){
+    var rows=result.rows||[], by={}; (S.potongPrintHistory||[]).concat(rows).forEach(function(r){by[r.id]=r;});
+    S.potongPrintHistory=Object.keys(by).map(function(k){return by[k];}).sort(function(a,b){return String(b.dibuat).localeCompare(String(a.dibuat));}); paintTop();
+  });};
+}
+function potongCetakHistorySheet(){
+  var rows=S.potongPrintHistory||[];
+  return '<div class="col">'+(rows.length?rows.map(function(r){var x=r.snapshot||{},p=x.po||{};return '<div class="card col gap-s"><div class="row"><b class="grow">'+esc(p.nama||p.noPO||'PO')+'</b><span class="chip ok">Sudah dicetak</span></div><div class="small muted">'+esc(p.noPO||'')+' · '+esc(tgl(r.dibuat))+' · '+(r.jenis==='jalan'?'Kartu jalan per ukuran':'Daftar potong')+'</div><div class="small">'+(x.ukuran||[]).map(function(u){return esc(u.s);}).join(' · ')+'</div><div class="row wrap gap-s"><button class="btn sm" data-a="potongCetakUlang" data-id="'+esc(r.id)+'" data-v="potong">Cetak daftar potong</button><button class="btn sm" data-a="potongCetakUlang" data-id="'+esc(r.id)+'" data-v="jalan">Kartu jalan per ukuran</button></div></div>';}).join(''):emptyBox('Belum ada riwayat cetak.'))+'</div>';
+}
+A.potongCetakUlang=function(el){var row=(S.potongPrintHistory||[]).filter(function(r){return r.id===el.getAttribute('data-id');})[0];if(!row||!row.snapshot)return;
+  var x=JSON.parse(JSON.stringify(row.snapshot)),ref=gambarRef(x.po),img=ref&&S.img[ref.id];x.gambar=img&&img.ver===ref.ver?img.data:'';
+  return act(el,el.getAttribute('data-v')==='jalan'?dokumenCetakBuka(kartuJalanHtml([x]),{nama:'kartu jalan PO',tanda:'.lembar'}):potongCetakBuka(potongCetakHtml([x]))).catch(quiet);
+};
+A.potongCetakTab=function(el){S.potongPrintTab=el.getAttribute('data-v');paintTop();};
 function potongCetakTidak() { if (!S.potongCetakPilih) S.potongCetakPilih = { tidak: {} }; return S.potongCetakPilih.tidak; }
 function potongCetakSheet() {
-  var data = potongCetakDaftar(), tidak = potongCetakTidak(), n = data.filter(function (x) { return !tidak[x.po.id]; }).length;
+  var data = potongCetakDaftar(), tidak = potongCetakTidak(), selected=data.filter(function (x) { return !tidak[x.po.id]; }), n = selected.length;
+  var tab=S.potongPrintTab||'baru', tabs='<div class="row wrap gap-s"><button class="btn '+(tab==='baru'?'pri':'')+'" data-a="potongCetakTab" data-v="baru">Belum dicetak</button><button class="btn '+(tab==='riwayat'?'pri':'')+'" data-a="potongCetakTab" data-v="riwayat">Riwayat cetak</button></div>';
+  if(tab==='riwayat')return sheetHtml('Cetak daftar potong','<div class="col">'+tabs+potongCetakHistorySheet()+'</div>','<button class="btn" data-a="close">Tutup</button>');
   var siap = data.filter(function (x) { return x.tahap === 'siap' || x.tahap === 'lanjut'; }).length;
-  var body = !data.length ? emptyBox('Tidak ada PO yang harus dipotong.') :
+  var body = !data.length ? emptyBox('Tidak ada PO yang belum dicetak. Cetakan sebelumnya ada di Riwayat cetak.') :
     '<div class="row wrap gap-s"><span class="label grow">PO yang dicetak</span><button class="btn ghost sm" data-a="potongCetakSemua" data-v="1">Pilih semua</button>' + (siap && siap < data.length ? '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="siap">Bahan siap saja</button>' : '') + '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="0">Kosongkan</button></div>' +
     '<div class="cetak-pilih">' + data.map(function (x) {
       var po = x.po, ok = x.tahap === 'siap' || x.tahap === 'lanjut';
@@ -10496,10 +10628,10 @@ function potongCetakSheet() {
         '<span class="chip ' + (ok ? 'ok' : x.tahap === 'periksa' ? 'bad' : 'warn') + '">' + POTONG_CETAK_TAHAP[x.tahap] + '</span></label>';
     }).join('') + '</div>' +
     '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(n / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' : 'Belum ada PO dipilih.') + '</div>' +
-    '<div class="xs muted">Kartu jalan PO: kartu yang ikut barangnya dari potong, jahit, hitung, QC sampai gudang; ' + KARTU_JALAN_PER_LEMBAR + ' kartu memanjang per lembar A4' + (n ? ' (' + nf(Math.ceil(n / KARTU_JALAN_PER_LEMBAR)) + ' lembar)' : '') + '.</div>';
-  return sheetHtml('Cetak daftar potong', '<div class="col">' + body + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
+    '<div class="xs muted">Kartu jalan PO: satu kartu untuk satu barang dan satu ukuran; ' + KARTU_JALAN_PER_LEMBAR + ' kartu memanjang per lembar A4' + (n ? ' (' + nf(Math.ceil(kartuJalanData(selected).length / KARTU_JALAN_PER_LEMBAR)) + ' lembar)' : '') + '.</div>';
+  return sheetHtml('Cetak daftar potong', '<div class="col">' + tabs + body + '<div class="small muted">Setelah cetak selesai, tekan Sudah dicetak di pratinjau. PO pindah ke riwayat; tambahan kain atau ukuran baru akan muncul lagi.</div>' + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
 }
-A.potongCetak = function () { openSheet(potongCetakSheet, { live: true, cls: 'wide' }); };
+A.potongCetak = function (el) { return act(el,req('getPrintHistory',{})).then(function(r){S.potongPrintHistory=r.rows||[];S.potongPrintTab='baru';openSheet(potongCetakSheet, { live: true, cls: 'wide' });}).catch(quiet); };
 C.potongCetakCek = function (el) { var tidak = potongCetakTidak(), id = el.getAttribute('data-id'); if (el.checked) delete tidak[id]; else tidak[id] = 1; paintTop(); };
 A.potongCetakSemua = function (el) {
   var v = el.getAttribute('data-v'), tidak = (S.potongCetakPilih = { tidak: {} }).tidak;
@@ -10509,37 +10641,45 @@ A.potongCetakSemua = function (el) {
 A.potongCetakJalan = function (el) {
   var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
   if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
-  return act(el, potongCetakBuka(potongCetakHtml(data))).catch(quiet);
+  return act(el, potongCetakBuka(potongCetakHtml(data),potongCetakSimpan(data,'potong'))).catch(quiet);
 };
 /* Kartu jalan PO (1543d): kartu yang ikut barangnya dari potong, jahit, hitung, QC sampai gudang. Empat kartu memanjang
    per lembar A4, digunting pada garis putus-putus; tiap divisi menulis tanggal, jumlah dan parafnya. Hanya cetakan
-   tambahan: daftar potong tidak berubah dan tidak ada data yang ditulis. */
+   tambahan: tiap barang dan ukuran mendapat kartunya sendiri. */
 var KARTU_JALAN_PER_LEMBAR = 4;
 var KARTU_JALAN_CSS = [
   '@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}',
   'html,body{margin:0;background:#fff;color:#161b22;font-family:"Segoe UI",Roboto,Arial,sans-serif}',
   '.lembar{width:194mm;height:279mm;margin:0 auto;display:grid;grid-template-rows:repeat(4,minmax(0,1fr));overflow:hidden;page-break-after:always;break-after:page}',
   '.lembar:last-child{page-break-after:auto;break-after:auto}',
-  '.kj{display:grid;grid-template-columns:44mm repeat(5,minmax(0,1fr));gap:1.6mm;min-height:0;padding:2.6mm 0;border-bottom:.3mm dashed #8d98a6}.kj:nth-child(4){border-bottom:0}',
+  '.kj{display:grid;grid-template-columns:44mm repeat(5,minmax(0,1fr));gap:1.6mm;min-height:0;padding:2.6mm 0;border-bottom:.3mm dashed #333}.kj:nth-child(4){border-bottom:0}',
   '.id{display:flex;flex-direction:column;gap:.7mm;min-width:0;overflow:hidden}',
-  '.atas{display:flex;align-items:flex-end;gap:1.6mm}.foto{flex:none;width:18mm;height:18mm;border:.3mm solid #cfd6df;border-radius:2mm;object-fit:cover}',
-  'span.foto{display:flex;align-items:center;justify-content:center;font-size:12pt;font-weight:700;color:#9aa4b1}',
-  '.merek{font-size:5.6pt;letter-spacing:.16em;text-transform:uppercase;color:#6b7684}.no{font-size:12.5pt;font-weight:800;letter-spacing:.02em;line-height:1.1}',
+  '.atas{display:flex;align-items:flex-end;gap:1.6mm}.foto{flex:none;width:18mm;height:18mm;border:.3mm solid #333;border-radius:2mm;object-fit:cover}',
+  'span.foto{display:flex;align-items:center;justify-content:center;font-size:12pt;font-weight:700;color:#111}',
+  '.merek{font-size:5.6pt;letter-spacing:.16em;text-transform:uppercase;color:#111}.no{font-size:12.5pt;font-weight:800;letter-spacing:.02em;line-height:1.1}',
   '.kj h2{margin:0;font-size:9.6pt;line-height:1.15;text-transform:uppercase;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}',
-  '.seri{font-size:6.8pt;letter-spacing:.1em;text-transform:uppercase;color:#6b7684}',
+  '.seri{font-size:6.8pt;letter-spacing:.1em;text-transform:uppercase;color:#111}',
   '.pil{display:flex;flex-wrap:wrap;gap:.8mm}.pil span{padding:0 1.6mm;border:.3mm solid #161b22;border-radius:1.2mm;font-size:9.5pt;font-weight:800}',
-  '.bhn{font-size:7pt;line-height:1.25;color:#4a5563;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}',
+  '.bhn{font-size:7pt;line-height:1.25;color:#111;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}',
   '.st{display:flex;flex-direction:column;min-width:0;overflow:hidden;border:.35mm solid #161b22;border-radius:2mm}',
   '.st h3{display:flex;align-items:center;gap:1.2mm;margin:0;padding:.9mm 1.4mm;border-bottom:.35mm solid #161b22;font-size:7.4pt;letter-spacing:.08em;text-transform:uppercase}',
   '.st h3 b{display:inline-flex;align-items:center;justify-content:center;width:3.8mm;height:3.8mm;border:.3mm solid #161b22;border-radius:50%;font-size:6pt}',
-  '.f{flex:1;display:flex;align-items:flex-end;gap:1mm;min-height:0;padding:0 1.4mm .9mm;font-size:6.3pt;color:#4a5563;white-space:nowrap}.f i{flex:1;border-bottom:.25mm solid #8d98a6}',
-  '.uk{display:grid;grid-template-columns:1fr 1fr;gap:.5mm 1.2mm;padding:.8mm 1.4mm 0}.uk span{display:flex;align-items:flex-end;gap:.8mm;font-size:6.5pt}.uk b{min-width:5mm}.uk i{flex:1;height:3.4mm;border-bottom:.25mm solid #8d98a6}',
+  '.f{flex:1;display:flex;align-items:flex-end;gap:1mm;min-height:0;padding:0 1.4mm .9mm;font-size:6.3pt;color:#111;white-space:nowrap}.f i{flex:1;border-bottom:.25mm solid #333}',
+  '.uk{display:grid;grid-template-columns:1fr 1fr;gap:.5mm 1.2mm;padding:.8mm 1.4mm 0}.uk span{display:flex;align-items:flex-end;gap:.8mm;font-size:6.5pt}.uk b{min-width:5mm}.uk i{flex:1;height:3.4mm;border-bottom:.25mm solid #333}',
   '@media screen{body{padding:10px 0;background:#e6eaef}.lembar{box-sizing:content-box;margin:0 auto 12px;padding:8mm;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18)}}'
+  ,'.f,.bhn,.seri,.merek,.uk span{font-size:7pt;color:#000;font-weight:600}.f i,.uk i{border-bottom:.35mm solid #000}.pil span{font-size:16pt;padding:1mm 3mm;border:.5mm solid #000}.uk{grid-template-columns:1fr}.st,.st h3{border-color:#000}.kj h2{-webkit-line-clamp:3}.merek{letter-spacing:.06em}.st h3{letter-spacing:0;font-weight:800}'
 ].join('');
+function kartuJalanData(data){var out=[];(data||[]).forEach(function(x){(x.ukuran||[]).forEach(function(u){out.push(Object.assign({},x,{ukuran:[u]}));});});return out;}
+function kartuJalanBahan(x){
+  var size=x.ukuran[0]&&x.ukuran[0].s, names={}, assigned={};
+  x.rencana.forEach(function(r){coreParseJSON(r.bahanList,[]).forEach(function(b){names[b.nama]=true;});coreParseJSON(r.rincianRol,[]).forEach(function(a){if(a.ukuran!==size)return;var key=a.bahan+'|'+a.satuan;var b=assigned[key]||(assigned[key]={nama:a.bahan,qty:0,satuan:a.satuan});b.qty+=coreNum(a.qty);});});
+  var per=Object.keys(assigned).map(function(k){var b=assigned[k];delete names[b.nama];return b.nama+' '+nfQty(b.qty)+' '+satuanPendek(b.satuan);});
+  var shared=Object.keys(names);return per.join(', ')+(shared.length?(per.length?'; ':'')+shared.join(', ')+' (bersama PO)':'')||x.po.bahan||'';
+}
 function kartuJalanIsi(label) { return '<div class="f"><span>' + label + '</span><i></i></div>'; }
 function kartuJalanKartu(x) {
-  var po = x.po, uk = poUkuranAktif(po), seri = [poSeri(po), po.pelanggan].filter(Boolean).join(' · ');
-  var bahan = x.rencana.map(function (r) { return coreParseJSON(r.bahanList, []).map(function (b) { return b.nama + ' ' + nfQty(b.qty) + ' ' + satuanPendek(b.satuan); }).join(', '); }).filter(Boolean).join('; ') || po.bahan || '';
+  var po = x.po, uk = x.ukuran.map(function(u){return u.s;}), seri = [poSeri(po), po.pelanggan].filter(Boolean).join(' · ');
+  var bahan = kartuJalanBahan(x);
   function stasiun(n, nama, isi) { return '<section class="st"><h3><b>' + n + '</b>' + nama + '</h3>' + isi.map(function (v) { return v.charAt(0) === '<' ? v : kartuJalanIsi(v); }).join('') + '</section>'; }
   var perUkuran = '<div class="uk">' + uk.map(function (s) { return '<span><b>' + esc(s) + '</b><i></i></span>'; }).join('') + '</div>';
   return '<article class="kj"><div class="id"><div class="atas">' + (x.gambar ? '<img class="foto" src="' + esc(x.gambar) + '" alt="">' : '<span class="foto">' + esc(inisial(po.nama)) + '</span>') +
@@ -10549,6 +10689,7 @@ function kartuJalanKartu(x) {
     stasiun(3, 'Hitung', ['Tgl', 'Bagus', 'Reject jahit', 'Paraf']) + stasiun(4, 'QC', ['Tgl', 'OK', 'Perbaikan', 'Reject', 'Paraf']) + stasiun(5, 'Gudang', ['Tgl masuk', 'Jumlah', 'BigSeller', 'Paraf']) + '</article>';
 }
 function kartuJalanHtml(data) {
+  data=kartuJalanData(data);
   var lembar = [];
   for (var i = 0; i < data.length; i += KARTU_JALAN_PER_LEMBAR) lembar.push(data.slice(i, i + KARTU_JALAN_PER_LEMBAR));
   return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kartu jalan PO</title><style>' + KARTU_JALAN_CSS + '</style></head><body>' +
@@ -10557,7 +10698,7 @@ function kartuJalanHtml(data) {
 A.potongKartuJalan = function (el) {
   var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
   if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
-  return act(el, dokumenCetakBuka(kartuJalanHtml(data), { nama: 'kartu jalan PO', tanda: '.lembar' })).catch(quiet);
+  return act(el, dokumenCetakBuka(kartuJalanHtml(data), { nama: 'kartu jalan PO', tanda: '.lembar', selesai:potongCetakSimpan(data,'jalan') })).catch(quiet);
 };
 /* ---------- akhir cetak daftar potong ---------- */
 function slipDocumentActions(enabled) {
@@ -11084,8 +11225,83 @@ function commerceShareModel(orders) {
   m.pembayaran.sort(function (a, b) { return String(a.tanggal).localeCompare(String(b.tanggal)); });
   return m;
 }
+/* Standalone A4 document from the same frozen model as the supplier image.
+   Natural print flow retains long cards and histories across as many pages as needed. */
+function commerceSharePrintHtml(m, foto) {
+  m = m || {}; foto = foto || {};
+  function h(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function number(value) { return value !== null && value !== undefined && isFinite(Number(value)) ? Number(value).toLocaleString('id-ID') : '—'; }
+  function money(value) { return 'Rp ' + number(value); }
+  function date(value) {
+    var s = String(value || ''), d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T00:00:00Z') : null;
+    if (!d || !isFinite(d.getTime()) || d.toISOString().slice(0,10) !== s) return 'Tanggal belum tercatat';
+    var months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    return Number(s.slice(8)) + ' ' + months[Number(s.slice(5,7))-1] + ' ' + s.slice(0,4);
+  }
+  function photo(id) {
+    var image = foto[id], source = typeof image === 'string' ? image : image && (image.currentSrc || image.src) || '';
+    // Only inert raster images or already loaded browser URLs may enter the document.
+    return /^(?:data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$|blob:|https?:\/\/)/i.test(source) ? source : '';
+  }
+  function notice(text) { return '<p class="supplier-warning">' + h(text) + '</p>'; }
+  function lines(text, width) { return String(text || '').split(/\r?\n/).reduce(function(n, s) { return n + Math.max(1, Math.ceil(s.length / width)); }, 0); }
+  var orders = m.orders || [], supplier = m.supplier || {};
+  var paid = !!m.lunas && !m.paymentReview;
+  var status = paid ? 'LUNAS' : m.paymentReview ? 'PEMBAYARAN PERLU DIPERIKSA' : Number(m.dibayar) > 0 ? 'DP / BELUM LUNAS' : 'BELUM DIBAYAR';
+  var statusDetail = paid ? (m.lunasTanggal ? 'Pelunasan ' + date(m.lunasTanggal) : 'Tanggal pelunasan belum tercatat') : m.paymentReview ? 'Periksa rincian pembayaran sebelum memastikan pelunasan.' : 'Sisa bayar ' + money(m.sisa);
+  var cards = orders.map(function(o, i) {
+    var rows = o.baris || [], receipts = o.penerimaan || [], src = photo(o.produkId);
+    var length = 18 + lines(o.nama,32) + rows.reduce(function(n,r) { return n + lines(r.nama,13) + 1; },0) + receipts.reduce(function(n,r) { return n + 3 + lines(r.varian,42) + lines(r.catatan,42); },0);
+    var arrival = o.receiptReview ? 'PENERIMAAN PERLU DIPERIKSA' : o.beres ? 'SUDAH DITERIMA SEMUA' : Number(o.diterima) > 0 ? 'DITERIMA ' + number(o.diterima) + ' DARI ' + number(o.qty) + ' PCS' : 'BELUM ADA YANG DITERIMA';
+    var receiptHtml = receipts.map(function(r) {
+      return '<li class="supplier-receipt' + (lines(r.catatan,42) > 45 ? ' supplier-flow' : '') + '"><div class="supplier-receipt-top"><span>' + h(date(r.tanggal)) + '</span><b>' + h(r.jumlah == null ? 'Periksa jumlah' : number(r.jumlah) + ' pcs') + '</b></div>' +
+        '<div>' + h(r.varian || 'Varian belum terhubung') + '</div>' + (r.catatan ? '<div class="supplier-note">Catatan: ' + h(r.catatan) + '</div>' : '') +
+        (r.review ? notice('Catatan penerimaan ini perlu diperiksa.') : '') + '</li>';
+    }).join('');
+    if (Number(o.penerimaanTanpaRincian) > 0) receiptHtml += '<li>' + notice(number(o.penerimaanTanpaRincian) + ' pcs tercatat diterima pada data lama. Tanggal dan rincian kedatangannya belum tercatat.') + '</li>';
+    else if (!receipts.length) receiptHtml += '<li class="supplier-muted">Belum ada barang diterima.</li>';
+    if (o.penerimaanTidakCocok) receiptHtml += '<li>' + notice('Jumlah riwayat penerimaan berbeda dari ringkasan; perlu diperiksa.') + '</li>';
+    return '<article class="supplier-card' + (length > 58 ? ' supplier-flow' : '') + '"><header class="supplier-product-head">' +
+      (src ? '<img class="supplier-photo" src="' + h(src) + '" alt="' + h(o.nama || 'Produk') + '">' : '<div class="supplier-photo supplier-no-photo">Tanpa foto</div>') +
+      '<div><h2>' + h((i+1) + '. ' + (o.nama || 'Produk')) + '</h2><p class="supplier-muted">Order ' + h(date(o.tanggal)) + '<br>@ ' + h(money(o.harga)) + ' / pcs</p></div></header>' +
+      '<p class="supplier-arrival' + (o.beres && !o.receiptReview ? ' supplier-good' : '') + '">' + h(arrival) + '</p>' +
+      (o.lunas && !paid && !m.paymentReview ? '<p class="supplier-good supplier-item-paid">LUNAS' + (o.lunasTanggal ? ' · ' + h(date(o.lunasTanggal)) : '') + '</p>' : '') +
+      '<table class="supplier-variants"><colgroup><col style="width:29%"><col style="width:12%"><col style="width:14%"><col style="width:11%"><col style="width:34%"></colgroup><thead><tr><th>Varian / ukuran</th><th>Pesan</th><th>Terima</th><th>Sisa</th><th>Subtotal</th></tr></thead><tbody>' +
+      rows.map(function(r) { return '<tr><td>' + h(r.nama || '—') + '</td><td>' + h(number(r.jumlah)) + '</td><td>' + h(number(r.diterima)) + '</td><td>' + h(number(r.sisa)) + '</td><td>' + h(money(r.subtotal)) + '</td></tr>'; }).join('') +
+      '</tbody></table><div class="supplier-product-total"><span>Subtotal (' + h(number(o.qty)) + ' pcs)</span><b>' + h(money(o.total)) + '</b></div>' +
+      '<h3>Riwayat barang diterima</h3><ul class="supplier-receipts">' + receiptHtml + '</ul></article>';
+  }).join('');
+  var payments = (m.pembayaran || []).map(function(p) {
+    return '<tr' + (lines(p.catatan,80) > 45 ? ' class="supplier-flow"' : '') + '><td>' + h(date(p.tanggal)) + '</td><td class="supplier-note">' + h(p.catatan || '—') + '</td><td>' + h(money(p.jumlah)) + '</td></tr>';
+  }).join('');
+  var title = 'Invoice supplier ' + (m.invoiceLabel || 'Pembelian');
+  var css = [
+    '@page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}html,body{margin:0;background:#fff;color:#172638;font-family:Arial,Helvetica,sans-serif;font-size:9pt;line-height:1.35;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+    '.slip-tools{position:sticky;top:0;z-index:1;background:#eef2f6;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}.slip-tools button{padding:10px 18px;font:inherit;cursor:pointer}.slip-tools p{margin:0;flex:1}.supplier-document{width:190mm;margin:0 auto;padding:5mm 0 10mm;overflow-wrap:anywhere}',
+    '.supplier-header{display:flex;gap:6mm;align-items:flex-start;border-bottom:.6mm solid #172638;padding-bottom:3mm;margin-bottom:3mm}.supplier-brand{flex:1;min-width:0}.supplier-brand strong{font-size:15pt;letter-spacing:.03em}.supplier-header h1{margin:0;font-size:15pt;line-height:1.1}.supplier-meta{text-align:right;max-width:90mm}.supplier-meta p,.supplier-brand p{margin:1mm 0 0}.supplier-supplier{margin-bottom:3mm}.supplier-supplier h2{font-size:11pt;margin:0 0 1mm}.supplier-supplier p{margin:0;white-space:pre-wrap}',
+    '.supplier-status{display:flex;align-items:center;gap:4mm;flex-wrap:wrap;border:.5mm solid #9a5c0b;background:#fff8eb;padding:2.5mm 3mm;margin-bottom:4mm;break-inside:avoid;page-break-inside:avoid}.supplier-status strong{font-size:15pt;letter-spacing:.04em}.supplier-status span{flex:1;min-width:45mm}.supplier-status.paid{border-color:#176047;background:#eef8f2;color:#14523d}',
+    '.supplier-products{column-count:2;column-gap:5mm;column-fill:balance}.supplier-card{display:block;border:.3mm solid #bac5d0;border-radius:2mm;padding:3mm;margin:0 0 4mm;break-inside:avoid;page-break-inside:avoid;box-decoration-break:clone;-webkit-box-decoration-break:clone}.supplier-product-head{display:flex;gap:2.5mm;break-inside:avoid;page-break-inside:avoid;break-after:avoid}.supplier-product-head>div:not(.supplier-photo){min-width:0;flex:1}.supplier-photo{flex:0 0 16mm;width:16mm;height:16mm;object-fit:contain;background:#f2f5f7;border:.2mm solid #dde3e9;border-radius:1mm}.supplier-no-photo{display:flex;align-items:center;justify-content:center;text-align:center;font-size:7pt;color:#526170}.supplier-card h2{margin:0 0 1mm;font-size:10pt;line-height:1.25}.supplier-card p{margin:1mm 0}.supplier-arrival{font-size:7.5pt;font-weight:700;color:#89530a;padding:1.5mm 0}.supplier-good{color:#176047}.supplier-item-paid{font-size:8pt;font-weight:700}.supplier-muted{color:#536170}',
+    'table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th{background:#eaf0f5;font-weight:700}th,td{text-align:left;vertical-align:top;padding:1.1mm .8mm;border-bottom:.2mm solid #dce2e8}.supplier-variants{font-size:7.8pt}.supplier-variants th{font-size:7pt}.supplier-variants th:not(:first-child),.supplier-variants td:not(:first-child){text-align:right}.supplier-product-total{display:flex;justify-content:space-between;gap:2mm;padding-top:1.7mm;font-size:8.3pt;break-inside:avoid}.supplier-product-total b{text-align:right}.supplier-card h3{margin:3mm 0 1mm;padding-top:2mm;border-top:.2mm solid #dce2e8;font-size:8pt;break-after:avoid}',
+    '.supplier-receipts{list-style:none;padding:0;margin:0;font-size:8pt}.supplier-receipts li{padding:1.2mm 0;border-bottom:.2mm dotted #dce2e8}.supplier-receipts li:last-child{border:0}.supplier-receipt{break-inside:avoid;page-break-inside:avoid}.supplier-receipt-top{display:flex;justify-content:space-between;gap:2mm}.supplier-receipt-top b{text-align:right}.supplier-note{white-space:pre-wrap}.supplier-receipt .supplier-note{color:#536170;margin-top:.5mm}.supplier-warning{color:#89530a;font-size:8pt;margin:1mm 0}.supplier-flow{break-inside:auto!important;page-break-inside:auto!important}',
+    '.supplier-summary{border-top:.6mm solid #172638;padding-top:3mm;margin-top:1mm;break-inside:avoid;page-break-inside:avoid}.supplier-summary dl{margin:0;display:grid;grid-template-columns:1fr auto;gap:1.7mm 6mm}.supplier-summary dt,.supplier-summary dd{margin:0}.supplier-summary dd{text-align:right;font-weight:700}.supplier-summary .supplier-grand{font-size:12pt}.supplier-summary .supplier-balance{border-top:.3mm solid #bac5d0;padding-top:2mm}.supplier-section{margin-top:4mm}.supplier-section h2{margin:0 0 1.5mm;font-size:10pt;break-after:avoid}.supplier-payments{font-size:8.5pt}.supplier-payments td:last-child,.supplier-payments th:last-child{text-align:right}.supplier-notes{padding-left:5mm;margin:0}.supplier-notes li{white-space:pre-wrap;margin:1mm 0}.supplier-footer{margin:5mm 0 0;border-top:.2mm solid #bac5d0;padding-top:2mm;font-size:7.5pt;color:#536170}',
+    '@media screen{body{background:#e6eaef}.supplier-document{box-sizing:content-box;padding:10mm;background:white;margin:12px auto;box-shadow:0 2px 14px #0002}}@media print{.slip-tools{display:none!important}.supplier-document{width:auto;margin:0;padding:0;box-shadow:none}}'
+  ].join('');
+  return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + h(title) + '</title><style>' + css + '</style></head><body>' +
+    '<div class="slip-tools"><button type="button" id="slip-print-button" disabled>Cetak / Simpan PDF</button><p id="slip-print-status" role="status">Menyiapkan halaman A4…</p></div><main class="supplier-document">' +
+    '<header class="supplier-header"><div class="supplier-brand"><strong>' + h(m.usaha || 'SOLDIER APPAREL') + '</strong><p>Pesanan pembelian</p></div><div class="supplier-meta"><h1>' + h(m.invoiceLabel || 'Invoice supplier') + '</h1><p>' + h(number(orders.length)) + ' model · ' + h(number(m.qty)) + ' pcs</p><p>Dicetak ' + h(date(m.tanggal)) + '</p></div></header>' +
+    '<section class="supplier-supplier"><h2>Supplier: ' + h(supplier.nama || '—') + '</h2>' + (supplier.detail ? '<p>' + h(supplier.detail) + '</p>' : '') + '</section>' +
+    '<div class="supplier-status' + (paid ? ' paid' : '') + '"><strong>' + h(status) + '</strong><span>' + h(statusDetail) + '</span></div>' +
+    '<div class="supplier-products">' + cards + '</div><section class="supplier-summary"><dl>' +
+    '<dt class="supplier-grand">TOTAL (' + h(number(m.qty)) + ' pcs)</dt><dd class="supplier-grand">' + h(money(m.total)) + '</dd>' +
+    '<dt>Barang diterima</dt><dd>' + h(number(m.diterima)) + ' dari ' + h(number(m.qty)) + ' pcs</dd><dt>Total pembayaran</dt><dd>' + h(money(m.dibayar)) + '</dd><dt class="supplier-balance">Sisa bayar</dt><dd class="supplier-balance">' + h(money(m.sisa)) + '</dd></dl>' +
+    (m.receiptReview ? notice('Rincian penerimaan perlu diperiksa.') : '') + '</section>' +
+    '<section class="supplier-section"><h2>Riwayat pembayaran</h2>' + (payments ? '<table class="supplier-payments"><colgroup><col style="width:23%"><col style="width:51%"><col style="width:26%"></colgroup><thead><tr><th>Tanggal</th><th>Keterangan</th><th>Jumlah</th></tr></thead><tbody>' + payments + '</tbody></table>' : '<p class="supplier-muted">Belum ada riwayat pembayaran tercatat.</p>') + '</section>' +
+    ((m.catatan || []).length ? '<section class="supplier-section"><h2>Catatan invoice</h2><ul class="supplier-notes">' + m.catatan.map(function(s) { return '<li>' + h(s) + '</li>'; }).join('') + '</ul></section>' : '') +
+    '<footer class="supplier-footer">Rincian jumlah memakai satuan pcs. Tanggal kedatangan mengikuti riwayat penerimaan yang tercatat.</footer></main></body></html>';
+}
+
 function commerceShareDraw(m, foto) {
-  var W = 640, PAD = 24, ROW = 24, FOTO = 76, c = document.createElement('canvas'), x = c.getContext('2d'), commands = [];
+  var COLS = m.orders.length > 1 ? 2 : 1, W = COLS === 2 ? 1040 : 640, PAD = 24, GAP = 16, FOTO = 64, c = document.createElement('canvas'), x = c.getContext('2d'), commands = [];
   var BG = '#1a1d23', PANEL = '#23272e', AKSEN = '#d4a529', PUTIH = '#e8e8e8', REDUP = '#a4a7ad', GARIS = '#343434', HIJAU = '#4ecdc4', MERAH = '#ff6b6b', JINGGA = '#f0a35e';
   function teks(s, px, y, warna, font, rata, maks) {
     s = String(s === null || s === undefined ? '' : s); x.font = font;
@@ -11114,7 +11330,7 @@ function commerceShareDraw(m, foto) {
     return y;
   }
   function bidang(px,y,w,h,color) { commands.push({type:'rect',px:px,y:y,w:w,h:h,color:color}); }
-  function garis(y, warna, putus) { commands.push({type:'line',y:y,color:warna || GARIS,dashed:!!putus}); }
+  function garis(y, warna, putus, left, right) { commands.push({type:'line',y:y,color:warna || GARIS,dashed:!!putus,left:left === undefined ? PAD : left,right:right === undefined ? W-PAD : right}); }
   function uang(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID'); }
   function angka(n) { return (Number(n) || 0).toLocaleString('id-ID'); }
   function tanggal(s) { return s ? tglSlip(s) : 'Tanggal belum tercatat'; }
@@ -11134,48 +11350,52 @@ function commerceShareDraw(m, foto) {
   teks(status,PAD+12,y+26,statusColor,'bold 21px sans-serif');
   teks(statusDetail,PAD+12,y+48,PUTIH,'12px sans-serif','left',W-PAD*2-24);
   y += 80;
-  var K_ORDER = 320, K_TERIMA = 398, K_SISA = 466;
+  var cardW = (W-PAD*2-GAP*(COLS-1))/COLS, rowTop = y, rowBottom = y;
   m.orders.forEach(function (o, i) {
-    y += 10;
-    var im = (foto || {})[o.produkId], tx = PAD+FOTO+14, top = y;
-    bidang(PAD,y,FOTO,FOTO,PANEL);
-    if (im) commands.push({type:'image',image:im,y:y});
-    else teks('tanpa foto',PAD+FOTO/2,y+FOTO/2+4,REDUP,'10px sans-serif','center');
-    var titleY = paragraf((m.orders.length > 1 ? (i+1)+'. ' : '')+o.nama,tx,y+16,AKSEN,'bold 14px sans-serif',W-PAD-tx,19);
-    titleY = paragraf('Order '+tanggal(o.tanggal)+' · @ '+uang(o.harga),tx,titleY+1,PUTIH,'12px sans-serif',W-PAD-tx,17);
+    if (i && i % COLS === 0) rowTop = rowBottom + GAP;
+    var cardX = PAD+(i%COLS)*(cardW+GAP), left = cardX+14, right = cardX+cardW-14, width = right-left, start = commands.length;
+    var K_ORDER = left+width*.43, K_TERIMA = left+width*.57, K_SISA = left+width*.70;
+    y = rowTop+14;
+    var im = (foto || {})[o.produkId], tx = left+FOTO+12, top = y;
+    bidang(left,y,FOTO,FOTO,PANEL);
+    if (im) commands.push({type:'image',image:im,px:left,y:y});
+    else teks('tanpa foto',left+FOTO/2,y+FOTO/2+4,REDUP,'10px sans-serif','center');
+    var titleY = paragraf((m.orders.length > 1 ? (i+1)+'. ' : '')+o.nama,tx,y+14,AKSEN,'bold 14px sans-serif',right-tx,18);
+    titleY = paragraf('Order '+tanggal(o.tanggal)+' · @ '+uang(o.harga),tx,titleY+1,PUTIH,'12px sans-serif',right-tx,16);
     var arrival = o.receiptReview ? 'PENERIMAAN PERLU DIPERIKSA' : o.beres ? 'SUDAH DITERIMA SEMUA' : o.diterima > 0 ? 'DITERIMA '+angka(o.diterima)+' DARI '+angka(o.qty)+' PCS' : 'BELUM ADA YANG DITERIMA';
-    titleY = paragraf(arrival,tx,titleY+2,o.beres ? HIJAU : JINGGA,'bold 11px sans-serif',W-PAD-tx,17);
-    if (o.lunas && !m.lunas) titleY = paragraf('LUNAS'+(o.lunasTanggal ? ' · '+tanggal(o.lunasTanggal) : ''),tx,titleY+2,HIJAU,'bold 11px sans-serif',W-PAD-tx,17);
-    y = Math.max(top+FOTO,titleY)+20;
-    teks('VARIAN',PAD,y,AKSEN,'bold 10px sans-serif'); teks('ORDER',K_ORDER,y,AKSEN,'bold 10px sans-serif','right'); teks('DITERIMA',K_TERIMA,y,AKSEN,'bold 10px sans-serif','right'); teks('SISA',K_SISA,y,AKSEN,'bold 10px sans-serif','right'); teks('SUBTOTAL',W-PAD,y,AKSEN,'bold 10px sans-serif','right');
-    y += 8; garis(y); y += 4;
+    titleY = paragraf(arrival,tx,titleY+2,o.beres ? HIJAU : JINGGA,'bold 11px sans-serif',right-tx,16);
+    if (o.lunas && !m.lunas) titleY = paragraf('LUNAS'+(o.lunasTanggal ? ' · '+tanggal(o.lunasTanggal) : ''),tx,titleY+2,HIJAU,'bold 11px sans-serif',right-tx,16);
+    y = Math.max(top+FOTO,titleY)+16;
+    teks('VARIAN',left,y,AKSEN,'bold 10px sans-serif'); teks('ORDER',K_ORDER,y,AKSEN,'bold 10px sans-serif','right'); teks('DITERIMA',K_TERIMA,y,AKSEN,'bold 10px sans-serif','right'); teks('SISA',K_SISA,y,AKSEN,'bold 10px sans-serif','right'); teks('SUBTOTAL',right,y,AKSEN,'bold 10px sans-serif','right');
+    y += 7; garis(y,GARIS,false,left,right); y += 17;
     o.baris.forEach(function(b) {
-      y += ROW-6;
-      var next = paragraf(b.nama,PAD+4,y,PUTIH,'13px sans-serif',K_ORDER-PAD-52,17);
+      var next = paragraf(b.nama,left,y,PUTIH,'13px sans-serif',K_ORDER-left-48,17);
       teks(angka(b.jumlah),K_ORDER,y,PUTIH,'13px sans-serif','right');
       teks(b.diterima === null ? '—' : angka(b.diterima),K_TERIMA,y,b.diterima ? HIJAU : REDUP,'13px sans-serif','right');
       teks(b.sisa === null ? '—' : b.sisa ? angka(b.sisa) : 'beres',K_SISA,y,b.sisa === null ? REDUP : b.sisa ? JINGGA : HIJAU,'13px sans-serif','right');
-      teks(uang(b.subtotal),W-PAD,y,PUTIH,'12px sans-serif','right');
-      y = next+6;
+      teks(uang(b.subtotal),right,y,PUTIH,'12px sans-serif','right');
+      y = next+9;
     });
-    y += 10;
-    teks('Subtotal ('+angka(o.qty)+' pcs)',PAD+4,y,REDUP,'11px sans-serif'); teks(uang(o.total),W-PAD,y,PUTIH,'bold 12px sans-serif','right');
-    y += 24;
-    teks('RIWAYAT BARANG DITERIMA',PAD,y,AKSEN,'bold 11px sans-serif'); y += 6;
+    teks('Subtotal ('+angka(o.qty)+' pcs)',left,y,REDUP,'11px sans-serif'); teks(uang(o.total),right,y,PUTIH,'bold 12px sans-serif','right');
+    y += 23;
+    teks('RIWAYAT BARANG DITERIMA',left,y,AKSEN,'bold 11px sans-serif'); y += 6;
     (o.penerimaan || []).forEach(function(r) {
       y += 18;
-      teks(tanggal(r.tanggal),PAD+4,y,PUTIH,'12px sans-serif');
-      teks(r.jumlah === null ? 'Periksa jumlah' : angka(r.jumlah)+' pcs',W-PAD,y,r.review ? JINGGA : HIJAU,'bold 12px sans-serif','right');
-      y = paragraf(r.varian,PAD+4,y+18,PUTIH,'12px sans-serif',W-PAD*2-8,17);
-      if (r.catatan) y = paragraf('Catatan: '+r.catatan,PAD+4,y,REDUP,'11px sans-serif',W-PAD*2-8,16);
-      if (r.review) y = paragraf('Catatan penerimaan ini perlu diperiksa.',PAD+4,y,JINGGA,'11px sans-serif',W-PAD*2-8,16);
-      y += 3; garis(y,GARIS,true);
+      teks(tanggal(r.tanggal),left,y,PUTIH,'12px sans-serif');
+      teks(r.jumlah === null ? 'Periksa jumlah' : angka(r.jumlah)+' pcs',right,y,r.review ? JINGGA : HIJAU,'bold 12px sans-serif','right');
+      y = paragraf(r.varian,left,y+18,PUTIH,'12px sans-serif',width,17);
+      if (r.catatan) y = paragraf('Catatan: '+r.catatan,left,y,REDUP,'11px sans-serif',width,16);
+      if (r.review) y = paragraf('Catatan penerimaan ini perlu diperiksa.',left,y,JINGGA,'11px sans-serif',width,16);
+      y += 3; garis(y,GARIS,true,left,right);
     });
-    if (o.penerimaanTanpaRincian > 0) y = paragraf(angka(o.penerimaanTanpaRincian)+' pcs tercatat diterima pada data lama. Tanggal dan rincian kedatangannya belum tercatat.',PAD+4,y+20,JINGGA,'12px sans-serif',W-PAD*2-8,18);
-    else if (!(o.penerimaan || []).length) y = paragraf('Belum ada barang diterima.',PAD+4,y+20,REDUP,'12px sans-serif',W-PAD*2-8,18);
-    if (o.penerimaanTidakCocok) y = paragraf('Jumlah riwayat penerimaan berbeda dari ringkasan; perlu diperiksa.',PAD+4,y+18,JINGGA,'12px sans-serif',W-PAD*2-8,18);
-    y += 14; garis(y,GARIS,true);
+    if (o.penerimaanTanpaRincian > 0) y = paragraf(angka(o.penerimaanTanpaRincian)+' pcs tercatat diterima pada data lama. Tanggal dan rincian kedatangannya belum tercatat.',left,y+18,JINGGA,'12px sans-serif',width,18);
+    else if (!(o.penerimaan || []).length) y = paragraf('Belum ada barang diterima.',left,y+18,REDUP,'12px sans-serif',width,18);
+    if (o.penerimaanTidakCocok) y = paragraf('Jumlah riwayat penerimaan berbeda dari ringkasan; perlu diperiksa.',left,y+16,JINGGA,'12px sans-serif',width,18);
+    y += 10;
+    commands.splice(start,0,{type:'rect',px:cardX,y:rowTop,w:cardW,h:y-rowTop,color:'#20242a'});
+    rowBottom = Math.max(rowBottom,y);
   });
+  y = rowBottom;
   y += 26;
   [[(m.orders.length > 1 ? 'GRAND TOTAL' : 'Total')+' ('+angka(m.qty)+' pcs)',uang(m.total),PUTIH],['Sudah diterima',angka(m.diterima)+' dari '+angka(m.qty)+' pcs',!m.receiptReview && m.diterima === m.qty && m.qty ? HIJAU : JINGGA],['Total pembayaran',uang(m.dibayar),HIJAU],['Sisa bayar',uang(m.sisa),m.sisa > 0 ? MERAH : HIJAU]].forEach(function(r) {
     teks(r[0],PAD,y,REDUP,'12px sans-serif'); teks(r[1],W-PAD,y,r[2],'bold 14px sans-serif','right'); y += 24;
@@ -11199,8 +11419,8 @@ function commerceShareDraw(m, foto) {
   commands.forEach(function(d) {
     if (d.type === 'text') { x.fillStyle=d.color; x.font=d.font; x.textAlign=d.align; x.fillText(d.s,d.px,d.y); }
     else if (d.type === 'rect') { x.fillStyle=d.color; x.fillRect(d.px,d.y,d.w,d.h); }
-    else if (d.type === 'line') { x.strokeStyle=d.color; x.lineWidth=1; x.setLineDash(d.dashed?[4,4]:[]); x.beginPath(); x.moveTo(PAD,d.y); x.lineTo(W-PAD,d.y); x.stroke(); x.setLineDash([]); }
-    else if (d.type === 'image') { var im=d.image,k=Math.max(FOTO/im.width,FOTO/im.height),w=im.width*k,h=im.height*k; x.save(); x.beginPath(); x.rect(PAD,d.y,FOTO,FOTO); x.clip(); x.drawImage(im,PAD+(FOTO-w)/2,d.y+(FOTO-h)/2,w,h); x.restore(); }
+    else if (d.type === 'line') { x.strokeStyle=d.color; x.lineWidth=1; x.setLineDash(d.dashed?[4,4]:[]); x.beginPath(); x.moveTo(d.left,d.y); x.lineTo(d.right,d.y); x.stroke(); x.setLineDash([]); }
+    else if (d.type === 'image') { var im=d.image,k=Math.max(FOTO/im.width,FOTO/im.height),w=im.width*k,h=im.height*k; x.save(); x.beginPath(); x.rect(d.px,d.y,FOTO,FOTO); x.clip(); x.drawImage(im,d.px+(FOTO-w)/2,d.y+(FOTO-h)/2,w,h); x.restore(); }
   });
   return c;
 }
@@ -11232,8 +11452,8 @@ function commerceShareShow(ids, baru) {
   S.share = { ids: ids.slice(), key:key, scope:commerceScope(), satu: asal ? [asal.id] : null, semua: sama.length > 1 ? sama : null, url: '', blob: null, nama: '', gagal: '', baru: !!baru };
   openSheet(function () {
     var s = S.share || {}, pilih = s.semua ? '<div class="row wrap"><button class="btn sm' + (s.ids.length === 1 ? ' pri' : '') + '" data-a="commerceShareMode" data-mode="satu">Model ini saja</button><button class="btn sm' + (s.ids.length > 1 ? ' pri' : '') + '" data-a="commerceShareMode" data-mode="semua">Semua model invoice ini (' + s.semua.length + ')</button></div>' : '';
-    return sheetHtml(s.baru ? 'Order tersimpan' : 'Gambar untuk supplier', '<div class="col"><p class="small muted">Unduh gambar ini lalu kirim ke supplier lewat WhatsApp. Isinya foto produk, varian, yang sudah diterima dan yang belum, serta pembayaran.</p>' + pilih + '<div data-commerce-share>' + (s.url ? '<img src="' + esc(s.url) + '" alt="Ringkasan order untuk supplier" style="width:100%;border-radius:10px;border:1px solid var(--line)">' : '<div class="note' + (s.gagal ? ' warn' : '') + '" role="status">' + esc(s.gagal || 'Menyiapkan gambar…') + '</div>') + '</div></div>',
-      (s.baru && s.satu && commerceFind('pembelian','orders',s.satu[0]) ? commerceTambahModelBtn(commerceFind('pembelian','orders',s.satu[0]), '', true) : '') + '<button class="btn" data-a="commerceShareSend">Bagikan</button><button class="btn pri" data-a="commerceShareSave">Unduh gambar</button>');
+    return sheetHtml(s.baru ? 'Order tersimpan' : 'Gambar untuk supplier', '<div class="col"><p class="small muted">Model disusun dua kolom. Unduh gambar untuk dikirim ke supplier, atau pilih Cetak A4 / PDF.</p>' + pilih + '<div data-commerce-share>' + (s.url ? '<img src="' + esc(s.url) + '" alt="Ringkasan order untuk supplier" style="width:100%;border-radius:10px;border:1px solid var(--line)">' : '<div class="note' + (s.gagal ? ' warn' : '') + '" role="status">' + esc(s.gagal || 'Menyiapkan gambar…') + '</div>') + '</div></div>',
+      (s.baru && s.satu && commerceFind('pembelian','orders',s.satu[0]) ? commerceTambahModelBtn(commerceFind('pembelian','orders',s.satu[0]), '', true) : '') + '<button class="btn" data-a="commerceSharePrint">Cetak A4 / PDF</button><button class="btn" data-a="commerceShareSend">Bagikan</button><button class="btn pri" data-a="commerceShareSave">Unduh gambar</button>');
   }, { cls: 'wide', live: true });
   commerceShareBuild();
 }
@@ -11252,7 +11472,7 @@ function commerceShareBuild() {
     kanvas.toBlob(function (blob) {
       if (!current() || !blob) return;
       if (s.url) { try { URL.revokeObjectURL(s.url); } catch (e) {} }
-      s.blob = blob; s.url = URL.createObjectURL(blob); s.gagal = ''; refresh();
+      s.blob = blob; s.url = URL.createObjectURL(blob); s.model = model; s.foto = foto; s.gagal = ''; refresh();
     }, 'image/png');
   }).catch(function () { if (current()) { s.gagal = 'Gambar belum dapat dibuat. Coba lagi.'; refresh(); } });
 }
@@ -11262,6 +11482,13 @@ A.commerceShareSave = function () {
   var s = S.share; if (!s || !s.url) return toast('Gambar masih disiapkan.', true);
   if(!commerceShareCurrent(s))return toast('Invoice berubah. Buka kembali gambar dari daftar terbaru.',true);
   var a = document.createElement('a'); a.href = s.url; a.download = s.nama || 'order-supplier.png'; document.body.appendChild(a); a.click(); a.remove(); toast('Gambar diunduh.');
+};
+A.commerceSharePrint = function (el) {
+  var s = S.share;
+  if (!s || !s.url || !s.model) return toast('Gambar masih disiapkan.', true);
+  if (!commerceShareCurrent(s)) return toast('Invoice berubah. Buka kembali gambar dari daftar terbaru.', true);
+  try { return act(el, slipCetak([], commerceSharePrintHtml(s.model, s.foto))).catch(quiet); }
+  catch (e) { toast(e.message || 'Pratinjau cetak belum dapat dibuat.', true); }
 };
 A.commerceShareSend = function () {
   var s = S.share; if (!s || !s.blob) return toast('Gambar masih disiapkan.', true);

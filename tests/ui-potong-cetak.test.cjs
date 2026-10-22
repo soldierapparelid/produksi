@@ -19,7 +19,7 @@ function ui(){
     function rencanaPotongRows(id){return rencana.filter(function(r){return r.poId===id;});}function rencanaPotongById(id){return rencana.filter(function(r){return r.id===id;})[0]||null;}
     function rencanaPotongBlocked(po){return po._blok||'';}
     function poHarusDipotong(){return S.state.po.slice();}function poDaftar(){return {rows:S.state.po.filter(function(p){return !p._sembunyi;})};}
-    function toast(m,e){messages.push([m,!!e]);}function act(el,p){return p;}function quiet(){}
+    function toast(m,e){messages.push([m,!!e]);}function act(el,p){return p;}function quiet(){} function req(){return Promise.resolve({rows:[]});}function newId(){return 'print-id';}
   `,c);
   vm.runInContext(blok,c);
   vm.runInContext("potongCetakBuka=function(html){dicetak.push(html);return Promise.resolve({preview:true});};",c);
@@ -75,17 +75,17 @@ test('one A4 sheet holds six POs; each card shows picture, sizes to cut, fabric 
   assert.match(doc,/<span class="tahap">Perlu diperiksa<\/span>[\s\S]*?<div class="belum">Catatan PO perlu diperiksa owner sebelum dipotong\.<\/div>/);assert.ok(!doc.includes('Tertahan'));
 });
 
-test('the button sits in "Harus dipotong" for owner and admin, prints the POs shown there and sends nothing to the server',async()=>{
+test('the button sits in "Harus dipotong" for owner and admin, prints the POs shown there after loading print history',async()=>{
   assert.match(html,/<div class="po-seri-h alat"><h3>Harus dipotong<\/h3>[^\n]*?' \+ \(admin \? '<button class="btn sm" data-a="potongCetak">' \+ ic\('list', 's'\) \+ 'Cetak daftar potong<\/button>' : ''\) \+ '<\/div>/);
-  assert.ok(!/\breq\(|Api\.call\(/.test(blok),'reads only what is already on the device');
+  assert.match(blok,/req\('getPrintHistory'/,'loads shared print history');
   const c=ui();run(c,seed);run(c,"S.state.po[0]._sembunyi=true;");
-  run(c,'A.potongCetak(null)');assert.equal(run(c,'dicetak.length'),0,'the button opens the list to tick first');assert.deepEqual(plain(run(c,'lembar.opt')),{live:true,cls:'wide'});
+  await run(c,'A.potongCetak(null)');assert.equal(run(c,'dicetak.length'),0,'the button opens the list to tick first');assert.deepEqual(plain(run(c,'lembar.opt')),{live:true,cls:'wide'});
   await run(c,"A.potongCetakJalan(null)");
   const cetak=plain(run(c,'dicetak'));assert.equal(cetak.length,1);assert.equal(cetak[0].split('<article class="kartu').length-1,4);assert.ok(!cetak[0].includes('Polo Tunggu'),'a PO that is not in the list on screen is not printed');
 });
 
 test('1542d: the owner ticks which POs are printed; all are ticked at first and the choice is kept while the app is open',async()=>{
-  const c=ui();run(c,seed);run(c,'A.potongCetak(null)');
+  const c=ui();run(c,seed);await run(c,'A.potongCetak(null)');
   const el=(id,on)=>`{checked:${on},getAttribute:function(){return ${JSON.stringify(id)};}}`,tombol=v=>`{getAttribute:function(){return ${JSON.stringify(v)};}}`;
   let view=run(c,'lembar.render()');
   assert.match(view,/^<h2>Cetak daftar potong<\/h2>/);assert.equal(view.split('data-c="potongCetakCek"').length-1,5);assert.equal(view.split(' checked>').length-1,5,'everything is ticked at first');
@@ -107,8 +107,8 @@ test('1542d: the owner ticks which POs are printed; all are ticked at first and 
   run(c,`A.potongCetakSemua(${tombol('1')})`);assert.match(run(c,'lembar.render()'),/5 PO dipilih/);
   /* eight chosen POs need two sheets; the choice survives closing and opening the list */
   run(c,"for(var i=0;i<3;i++)S.state.po.push({id:'x'+i,nama:'Tambahan '+i,noPO:'PO-1'+i,_potong:['M']});");run(c,`C.potongCetakCek(${el('x0',false)})`);
-  run(c,'lembar=null;A.potongCetak(null)');view=run(c,'lembar.render()');assert.match(view,/7 PO dipilih · 2 lembar A4/);assert.match(view,/data-id="x0">/);
+  await run(c,'lembar=null;A.potongCetak(null)');view=run(c,'lembar.render()');assert.match(view,/7 PO dipilih · 2 lembar A4/);assert.match(view,/data-id="x0">/);
   /* nothing to cut: a plain note, no print button that works */
-  run(c,'S.state.po=[];');view=run(c,'lembar.render()');assert.match(view,/Tidak ada PO yang harus dipotong\./);assert.match(view,/data-a="potongCetakJalan" disabled>/);
+  run(c,'S.state.po=[];');view=run(c,'lembar.render()');assert.match(view,/Tidak ada PO yang belum dicetak\./);assert.match(view,/data-a="potongCetakJalan" disabled>/);
   assert.match(html,/\.cetak-baris \{ align-items: center;/);
 });
