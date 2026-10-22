@@ -63,3 +63,22 @@ test('historical aggregate totals remain distinct from real arrival events',()=>
  const c=h.draw(m),text=c.texts.map(t=>t.text).join(' ');assert.match(text,/5 pcs tercatat diterima pada data lama/);
  const mismatch=h.model([order({totalReceived:280})]);assert.equal(mismatch.orders[0].penerimaanTanpaRincian,0);assert.equal(mismatch.orders[0].penerimaanTidakCocok,true);assert.match(h.draw(mismatch).texts.map(t=>t.text).join(' '),/Jumlah riwayat penerimaan berbeda/);
 });
+
+test('supplier image pairs models in two columns and starts the next pair below the taller history',()=>{
+ const h=harness(),rows=Array.from({length:5},(_,i)=>order({id:'o'+i,productName:'Model-'+(i+1),receipts:i===0?Array.from({length:9},(_,j)=>({id:'r'+j,itemId:'a',tanggal:'2026-10-04',jumlah:10,catatan:'Kedatangan '+j})):[],totalReceived:i===0?90:0,receivedByItem:{a:i===0?90:0,b:0}}));
+ const c=h.draw(h.model(rows)),titles=rows.map((_,i)=>c.texts.find(t=>t.text===(i+1)+'. Model-'+(i+1)));
+ assert.equal(c.width/c.scale,1040);assert.equal(titles[0].y,titles[1].y);assert.ok(titles[1].x>c.width/2);
+ assert.equal(titles[2].y,titles[3].y);assert.ok(titles[2].y>c.texts.find(t=>t.text==='Catatan: Kedatangan 8').y);assert.ok(titles[4].y>titles[2].y);assert.ok(c.texts.find(t=>t.text.startsWith('GRAND TOTAL')).y>titles[4].y);
+ const innerLeft=38*c.scale,innerRight=498*c.scale,rightStart=542*c.scale,rightEnd=1002*c.scale;
+ for(const t of c.texts.filter(t=>t.y>=titles[0].y&&t.y<c.texts.find(t=>t.text.startsWith('GRAND TOTAL')).y)){
+  const size=Number(t.font.match(/(\d+)px/)[1]),w=t.text.length*size*.52*c.scale,lo=t.align==='right'?t.x-w:t.align==='center'?t.x-w/2:t.x,hi=t.align==='right'?t.x:t.align==='center'?t.x+w/2:t.x+w;
+  assert.ok((lo>=innerLeft-.01&&hi<=innerRight+.01)||(lo>=rightStart-.01&&hi<=rightEnd+.01),'text fits its column: '+t.text);
+ }
+});
+
+test('one model stays full width and multi-model canvas retains the final text of long wrapped fields',()=>{
+ const h=harness(),single=h.draw(h.model([order()]));assert.equal(single.width/single.scale,640);
+ const a=order({productName:'NAMA '.repeat(25)+'AKHIR_NAMA',items:[{id:'a',nama:'VARIAN '.repeat(20)+'AKHIR_VARIAN',jumlah:300}],receivedByItem:{a:290}}),b=order({id:'o2',productName:'Model kedua'}),c=h.draw(h.model([a,b])),text=c.texts.map(t=>t.text).join(' ');
+ assert.match(text,/AKHIR_NAMA/);assert.match(text,/AKHIR_VARIAN/);assert.match(text,/Kiriman kedua/);
+ assert.ok(c.texts.every(t=>t.y>0&&t.y<c.height));
+});
