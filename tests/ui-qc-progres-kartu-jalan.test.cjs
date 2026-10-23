@@ -37,13 +37,13 @@ test('the owner sees per PO how much is inspected and which sizes are done, part
 function cetak(){
   const c=vm.createContext({console,Promise,Date,setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);
   vm.runInContext(esc+`
-    var A={},C={},S={img:{},state:{po:[],settings:{ukuran:['M','L','XL','XXL']}}},messages=[],dicetak=[],rencana=[],slipPreviews=[],lembar=null;
+    var A={},C={},S={img:{},state:{po:[],settings:{ukuran:['M','L','XL','XXL']}}},messages=[],dicetak=[],rencana=[],slipPreviews=[],lembar=null,requests=[];
     function openSheet(fn,opt){lembar={render:fn,opt:opt};}function paintTop(){}function sheetHtml(t,b,f){return '<h2>'+t+'</h2>'+b+'<footer>'+(f||'')+'</footer>';}
     function emptyBox(s){return s;}function thumb(o){return '';}function ic(){return '';}function nf(n){return String(n||0);}function nfQty(n){return String(n).replace('.',',');}function satuanPendek(u){return u==='yard'?'yd':(u==='meter'?'m':'kg');}
     function tgl(s){return s;}function inisial(s){return String(s||'?').charAt(0).toUpperCase();}function gambarRef(o){return o.gambar?{id:o.id,ver:o.gambar}:null;}
     function poUkuranPotong(po){return po._potong||[];}function poUkuranAktif(po){return po._aktif||po._potong||[];}function T(po){return po.t||{};}function poSeri(po){return po.series||'';}
     function rencanaPotongRows(id){return rencana.filter(function(r){return r.poId===id;});}function rencanaPotongById(id){return null;}function rencanaPotongBlocked(){return '';}
-    function poHarusDipotong(){return S.state.po.slice();}function poDaftar(){return {rows:S.state.po};}function toast(m,e){messages.push([m,!!e]);}function act(el,p){return p;}function quiet(){} function req(){return Promise.resolve({rows:[]});}function newId(){return 'print-id';}
+    function poHarusDipotong(){return S.state.po.slice();}function poDaftar(){return {rows:S.state.po};}function toast(m,e){messages.push([m,!!e]);}function act(el,p){return p;}function quiet(){} function req(action,payload){requests.push({action:action,payload:JSON.parse(JSON.stringify(payload||{}))});return Promise.resolve({rows:[]});}function newId(){return 'print-id';}
   `,c);
   vm.runInContext(part('/* ---------- cetak daftar potong ---------- */','/* ---------- akhir cetak daftar potong ---------- */'),c);
   vm.runInContext("dokumenCetakBuka=function(html,o){dicetak.push({html:html,o:o});return Promise.resolve({preview:true});};",c);
@@ -78,5 +78,11 @@ test('the travel card of a PO: four long cards on one A4 sheet, each with the it
   assert.equal(daftar.o.nama,'daftar potong');assert.equal(daftar.html.split('<article class="kartu').length-1,4,'the cut list still prints as before');assert.ok(!daftar.html.includes('class="kj"'));
   vm.runInContext("A.potongCetakSemua({getAttribute:function(){return '0';}})",c);view=vm.runInContext('lembar.render()',c);assert.match(view,/data-a="potongKartuJalan" disabled>Kartu jalan PO/);
   vm.runInContext('A.potongKartuJalan(null)',c);assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('messages',c))).at(-1),['Centang dulu PO yang mau dicetak.',true]);
-  assert.match(part('/* Kartu jalan PO (1543d)','/* ---------- akhir cetak daftar potong ---------- */'),/selesai:potongCetakSimpan\(data,'jalan'\)/,'records history only through the completed-print callback');
+  assert.equal(vm.runInContext('requests.filter(function(r){return r.action==="savePrintHistory";}).length',c),0,'opening and printing either preview does not record completed printing');
+  assert.equal(vm.runInContext('typeof dicetak[0].o.selesai',c),'function','travel-card preview receives an explicit completion callback');
+  await vm.runInContext('dicetak[0].o.selesai()',c);
+  const writes=JSON.parse(JSON.stringify(vm.runInContext('requests.filter(function(r){return r.action==="savePrintHistory";})',c)));
+  assert.equal(writes.length,1,'history is saved only when the completion callback runs');
+  assert.equal(writes[0].payload.jenis,'jalan');
+  assert.deepEqual(writes[0].payload.entries.map(x=>x.poId),['a','x0','x1','x2'],'completion records the original checked POs even if the current selection is now empty');
 });

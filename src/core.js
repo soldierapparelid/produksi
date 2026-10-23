@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.58';
+var APP_VERSION = '1.5.59';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -1406,7 +1406,9 @@ function createCore(store, env) {
     if (store.fresh) store.fresh('Pegawai');
     var me = auth(p); mustAdmin(me);
     if (p.jenis !== undefined && ['potong','jalan'].indexOf(p.jenis) < 0) fail('Jenis riwayat cetak tidak dikenal.');
-    if (store.fresh) store.fresh('RiwayatCetak');
+    /* History is append-only through savePrintHistory. The adapter's table
+       version invalidates its cache on every write, including another device;
+       a normal read can reuse it instead of opening Sheets on every visit. */
     return {rows:store.read('RiwayatCetak').filter(function (row) { return !p.jenis || row.jenis === p.jenis; }).slice().sort(function (a,b) {
       return String(b.dibuat).localeCompare(String(a.dibuat)) || String(a.id).localeCompare(String(b.id));
     }).map(publicPrintRow)};

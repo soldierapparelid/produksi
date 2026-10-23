@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.59 - Riwayat cetak cepat dan cetak pilihan
+
+- Riwayat cetak menampilkan foto barang dan centang pilihan. Pilih beberapa PO atau **Pilih semua**, lalu cetak daftar potong atau kartu jalan per ukuran dalam satu pratinjau A4.
+- Menu langsung terbuka. Riwayat yang baru dimuat digunakan kembali selama satu menit; tombol **Muat ulang** tersedia untuk mengambil perubahan dari perangkat lain. Pembacaan server memakai cache yang diperbarui sesuai versi data.
+- Foto dimuat bersama sebelum pratinjau dibuka, termasuk ketika mencetak ulang riwayat. Rincian cetakan lama tetap mengikuti data saat dicetak.
+- Bila hasil sudah dicetak tetapi belum ditandai, centang PO pada **Belum dicetak** lalu tekan **Sudah dicetak · pindahkan**. Penyimpanan ulang tidak menggandakan riwayat. Menutup atau membatalkan dialog cetak tidak dianggap sudah mencetak.
+- Riwayat versi sebelumnya tetap dikenali. Pembaruan tidak mengubah stok atau produksi. Pasang **Core.gs** dan **Index.html** bersama.
 ## Rilis 1.5.58 - Riwayat cetak, kartu per ukuran, dan gambar supplier
 
 - Gambar invoice supplier menyusun model dalam dua kolom agar lebih ringkas. Rincian varian, tanggal penerimaan, pembayaran, dan tanda lunas tetap tersedia.

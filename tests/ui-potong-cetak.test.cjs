@@ -95,7 +95,8 @@ test('1542d: the owner ticks which POs are printed; all are ticked at first and 
   assert.match(view,/data-a="potongCetakSemua" data-v="1">Pilih semua<\/button><button class="btn ghost sm" data-a="potongCetakSemua" data-v="siap">Bahan siap saja<\/button><button class="btn ghost sm" data-a="potongCetakSemua" data-v="0">Kosongkan<\/button>/);
   assert.match(view,/5 PO dipilih · 1 lembar A4 \(6 PO per lembar\)\./);assert.match(view,/<button class="btn pri" data-a="potongCetakJalan">Cetak 5 PO<\/button>/);
   /* untick two: only the rest is printed, and the header of the sheet counts the chosen ones */
-  run(c,`C.potongCetakCek(${el('a',false)});C.potongCetakCek(${el('d',false)})`);assert.equal(run(c,'digambar'),2);
+  const paintsBeforeSelection=run(c,'digambar');
+  run(c,`C.potongCetakCek(${el('a',false)});C.potongCetakCek(${el('d',false)})`);assert.equal(run(c,'digambar')-paintsBeforeSelection,2,'each changed checkbox repaints its selection');
   view=run(c,'lembar.render()');assert.match(view,/data-id="a">/);assert.match(view,/data-id="b" checked>/);assert.match(view,/3 PO dipilih · 1 lembar A4/);assert.match(view,/Cetak 3 PO<\/button>/);
   await run(c,'A.potongCetakJalan(null)');
   let doc=run(c,'dicetak[0]');assert.equal(doc.split('<article class="kartu').length-1,3);assert.ok(!doc.includes('Polo Tunggu')&&!doc.includes('Polo Periksa'));assert.match(doc,/3 PO · 2 bahan siap · 1 belum/);
