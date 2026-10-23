@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261022-supplier-dua-kolom-1558';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261022-riwayat-cetak-cepat-1559';</script>
 <script>
 (function () {
 'use strict';
@@ -501,7 +501,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.58';
+var APP_VERSION = '1.5.59';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -1892,7 +1892,9 @@ function createCore(store, env) {
     if (store.fresh) store.fresh('Pegawai');
     var me = auth(p); mustAdmin(me);
     if (p.jenis !== undefined && ['potong','jalan'].indexOf(p.jenis) < 0) fail('Jenis riwayat cetak tidak dikenal.');
-    if (store.fresh) store.fresh('RiwayatCetak');
+    /* History is append-only through savePrintHistory. The adapter's table
+       version invalidates its cache on every write, including another device;
+       a normal read can reuse it instead of opening Sheets on every visit. */
     return {rows:store.read('RiwayatCetak').filter(function (row) { return !p.jenis || row.jenis === p.jenis; }).slice().sort(function (a,b) {
       return String(b.dibuat).localeCompare(String(a.dibuat)) || String(a.id).localeCompare(String(b.id));
     }).map(publicPrintRow)};
@@ -7452,7 +7454,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.58';
+var UI_VERSION = '1.5.59';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -10591,33 +10593,83 @@ function dokumenCetakBuka(html, o) {
 function potongCetakDaftar() {
   /* persis PO yang tampil di bagian "Harus dipotong" halaman PO */
   var tampil = poDaftar().rows, data=potongCetakData(poHarusDipotong().filter(function (p) { return tampil.indexOf(p) >= 0; }));
-  var history=S.potongPrintHistory||[];
-  return data.filter(function(x){var sig=x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id));return !history.some(function(r){return r.poId===x.po.id&&r.signature===sig;});});
+  var printed={}; (S.potongPrintHistory||[]).forEach(function(r){printed[r.poId+'|'+r.signature]=true;});
+  return data.filter(function(x){var sig=x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id));return !printed[x.po.id+'|'+sig];});
+}
+/* Cache is private to this login. Opening the menu never waits behind a server
+   round trip; a first load stays visibly pending rather than showing old POs. */
+function potongCetakCache() {
+  var user=S.state&&S.state.me&&S.state.me.id||'', token=S.token||'', cache=S.potongPrintCache;
+  if(!cache||cache.token!==token||cache.user!==user){cache=S.potongPrintCache={token:token,user:user,loaded:false,at:0,pending:null,error:''};S.potongPrintHistory=[];S.potongPrintSelected={};}
+  return cache;
+}
+function potongCetakGabung(rows){
+  var by={};(S.potongPrintHistory||[]).concat(rows||[]).forEach(function(r){by[r.id]=r;});
+  S.potongPrintHistory=Object.keys(by).map(function(k){return by[k];}).sort(function(a,b){return String(b.dibuat).localeCompare(String(a.dibuat));});
+}
+function potongCetakMuat(force){
+  var cache=potongCetakCache();if(cache.pending)return cache.pending;
+  if(!force&&cache.loaded&&Date.now()-cache.at<60000)return Promise.resolve();
+  cache.error='';
+  cache.pending=req('getPrintHistory',{}).then(function(r){
+    if(potongCetakCache()!==cache)return;
+    potongCetakGabung(r.rows);cache.loaded=true;cache.at=Date.now();cache.pending=null;paintTop();
+  },function(e){if(potongCetakCache()!==cache)return;cache.pending=null;cache.error=e&&e.message||'Riwayat belum termuat. Coba lagi.';paintTop();});
+  return cache.pending;
+}
+function potongCetakFotoPO(po){
+  var current=(S.state&&S.state.po||[]).filter(function(p){return p.id===po.id;})[0];
+  return current?Object.assign({},po,{gambar:current.gambar||'',produkId:current.produkId||po.produkId}):po;
+}
+function potongCetakFoto(data){
+  var token=S.token, refs={},need=[];
+  data.forEach(function(x){var ref=gambarRef(potongCetakFotoPO(x.po));if(!ref)return;refs[ref.id]=ref;var img=S.img[ref.id];if((!img||img.ver!==ref.ver||!img.data)&&need.indexOf(ref.id)<0)need.push(ref.id);});
+  var chain=Promise.resolve();
+  for(var i=0;i<need.length;i+=30)(function(ids){chain=chain.then(function(){return req('getGambar',{ids:ids});}).then(function(r){
+    if(S.token!==token)throw new Error('Sesi berubah. Buka kembali cetak.');
+    var images=r&&r.gambar||{};ids.forEach(function(id){if(images[id])S.img[id]={ver:refs[id].ver,data:images[id]};});
+  });})(need.slice(i,i+30));
+  return chain.then(function(){if(S.token!==token)throw new Error('Sesi berubah. Buka kembali cetak.');return data.map(function(x){var ref=gambarRef(potongCetakFotoPO(x.po)),img=ref&&S.img[ref.id];return Object.assign({},x,{gambar:img&&img.ver===ref.ver?img.data:''});});});
 }
 function potongCetakSimpan(data, jenis) {
+  var cache=potongCetakCache();
   var request={id:newId(),jenis:jenis,entries:data.map(function(x){
     var snapshot=printWorkSnapshot(x);
     return {poId:x.po.id,signature:x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id)),snapshot:snapshot};
   })};
   return function(){return req('savePrintHistory',request).then(function(result){
-    var rows=result.rows||[], by={}; (S.potongPrintHistory||[]).concat(rows).forEach(function(r){by[r.id]=r;});
-    S.potongPrintHistory=Object.keys(by).map(function(k){return by[k];}).sort(function(a,b){return String(b.dibuat).localeCompare(String(a.dibuat));}); paintTop();
+    if(potongCetakCache()!==cache)throw new Error('Sesi berubah. Buka kembali riwayat cetak.');
+    potongCetakGabung(result.rows);if(cache.loaded)cache.at=Date.now();paintTop();
   });};
 }
+function potongCetakHistoryPilihan(){return (S.potongPrintHistory||[]).filter(function(r){return (S.potongPrintSelected||{})[r.id];});}
 function potongCetakHistorySheet(){
-  var rows=S.potongPrintHistory||[];
-  return '<div class="col">'+(rows.length?rows.map(function(r){var x=r.snapshot||{},p=x.po||{};return '<div class="card col gap-s"><div class="row"><b class="grow">'+esc(p.nama||p.noPO||'PO')+'</b><span class="chip ok">Sudah dicetak</span></div><div class="small muted">'+esc(p.noPO||'')+' · '+esc(tgl(r.dibuat))+' · '+(r.jenis==='jalan'?'Kartu jalan per ukuran':'Daftar potong')+'</div><div class="small">'+(x.ukuran||[]).map(function(u){return esc(u.s);}).join(' · ')+'</div><div class="row wrap gap-s"><button class="btn sm" data-a="potongCetakUlang" data-id="'+esc(r.id)+'" data-v="potong">Cetak daftar potong</button><button class="btn sm" data-a="potongCetakUlang" data-id="'+esc(r.id)+'" data-v="jalan">Kartu jalan per ukuran</button></div></div>';}).join(''):emptyBox('Belum ada riwayat cetak.'))+'</div>';
+  var rows=S.potongPrintHistory||[],pilih=S.potongPrintSelected||{},n=potongCetakHistoryPilihan().length;
+  var toolbar=rows.length?'<div class="row wrap gap-s"><span class="grow small">Centang PO yang ingin dicetak ulang · '+nf(n)+' dipilih</span><button class="btn sm" data-a="potongCetakRiwayatSemua" data-v="1">Pilih semua</button><button class="btn sm" data-a="potongCetakRiwayatSemua" data-v="0">Kosongkan</button></div>':'';
+  return '<div class="col">'+toolbar+(rows.length?rows.map(function(r){var x=r.snapshot||{},p=x.po||{};return '<label class="card row gap-s check"><input type="checkbox" data-c="potongCetakRiwayatCek" data-id="'+esc(r.id)+'" aria-label="Pilih '+esc(p.noPO||p.nama||'PO')+'"'+(pilih[r.id]?' checked':'')+'>'+thumb(potongCetakFotoPO(p),'l')+'<span class="grow col gap-s"><b>'+esc(p.nama||p.noPO||'PO')+'</b><span class="small muted">'+esc(p.noPO||'')+' · '+esc(tgl(r.dibuat))+' · '+(r.jenis==='jalan'?'Kartu jalan per ukuran':'Daftar potong')+'</span><span class="po-ukuran kecil">'+(x.ukuran||[]).map(function(u){return '<span class="sz-aktif potong">'+esc(u.s)+'</span>';}).join('')+'</span></span><span class="chip ok">Sudah dicetak</span></label>';}).join(''):emptyBox('Belum ada riwayat cetak.'))+'</div>';
 }
+C.potongCetakRiwayatCek=function(el){var selected=S.potongPrintSelected||(S.potongPrintSelected={}),id=el.getAttribute('data-id');if(el.checked)selected[id]=true;else delete selected[id];paintTop();};
+A.potongCetakRiwayatSemua=function(el){var selected=S.potongPrintSelected={};if(el.getAttribute('data-v')==='1')(S.potongPrintHistory||[]).forEach(function(r){selected[r.id]=true;});paintTop();};
+A.potongCetakUlangPilihan=function(el){
+  var rows=potongCetakHistoryPilihan(),jenis=el.getAttribute('data-v');if(!rows.length)return toast('Centang PO yang ingin dicetak ulang.',true);
+  var data=rows.map(function(r){return JSON.parse(JSON.stringify(r.snapshot));});
+  return act(el,potongCetakFoto(data).then(function(photos){return jenis==='jalan'?dokumenCetakBuka(kartuJalanHtml(photos),{nama:'kartu jalan PO',tanda:'.lembar'}):potongCetakBuka(potongCetakHtml(photos));})).catch(quiet);
+};
 A.potongCetakUlang=function(el){var row=(S.potongPrintHistory||[]).filter(function(r){return r.id===el.getAttribute('data-id');})[0];if(!row||!row.snapshot)return;
-  var x=JSON.parse(JSON.stringify(row.snapshot)),ref=gambarRef(x.po),img=ref&&S.img[ref.id];x.gambar=img&&img.ver===ref.ver?img.data:'';
-  return act(el,el.getAttribute('data-v')==='jalan'?dokumenCetakBuka(kartuJalanHtml([x]),{nama:'kartu jalan PO',tanda:'.lembar'}):potongCetakBuka(potongCetakHtml([x]))).catch(quiet);
+  var x=JSON.parse(JSON.stringify(row.snapshot)),jenis=el.getAttribute('data-v');
+  return act(el,potongCetakFoto([x]).then(function(data){return jenis==='jalan'?dokumenCetakBuka(kartuJalanHtml(data),{nama:'kartu jalan PO',tanda:'.lembar'}):potongCetakBuka(potongCetakHtml(data));})).catch(quiet);
 };
 A.potongCetakTab=function(el){S.potongPrintTab=el.getAttribute('data-v');paintTop();};
 function potongCetakTidak() { if (!S.potongCetakPilih) S.potongCetakPilih = { tidak: {} }; return S.potongCetakPilih.tidak; }
 function potongCetakSheet() {
-  var data = potongCetakDaftar(), tidak = potongCetakTidak(), selected=data.filter(function (x) { return !tidak[x.po.id]; }), n = selected.length;
+  var cache=potongCetakCache();
   var tab=S.potongPrintTab||'baru', tabs='<div class="row wrap gap-s"><button class="btn '+(tab==='baru'?'pri':'')+'" data-a="potongCetakTab" data-v="baru">Belum dicetak</button><button class="btn '+(tab==='riwayat'?'pri':'')+'" data-a="potongCetakTab" data-v="riwayat">Riwayat cetak</button></div>';
-  if(tab==='riwayat')return sheetHtml('Cetak daftar potong','<div class="col">'+tabs+potongCetakHistorySheet()+'</div>','<button class="btn" data-a="close">Tutup</button>');
+  var status=cache.error?'<div class="note warn">'+esc(cache.error)+' <button class="btn sm" data-a="potongCetakSegarkan">Coba lagi</button></div>':cache.pending?'<div class="small muted" role="status">Memperbarui riwayat…</div>':'';
+  var refresh='<button class="btn sm" data-a="potongCetakSegarkan"'+(cache.pending?' disabled':'')+'>Muat ulang</button>';
+  tabs='<div class="row wrap gap-s"><div class="grow">'+tabs+'</div>'+refresh+'</div>';
+  if(!cache.loaded&&!S.potongPrintHistory.length)return sheetHtml('Cetak daftar potong','<div class="col">'+tabs+(status||'<div role="status">Memuat riwayat cetak…</div>')+'</div>','<button class="btn" data-a="close">Tutup</button>');
+  if(tab==='riwayat'){var count=potongCetakHistoryPilihan().length,disabled=count?'':' disabled';return sheetHtml('Cetak daftar potong','<div class="col">'+tabs+status+potongCetakHistorySheet()+'</div>','<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongCetakUlangPilihan" data-v="jalan"'+disabled+'>Kartu jalan'+(count?' · '+nf(count)+' PO':'')+'</button><button class="btn pri" data-a="potongCetakUlangPilihan" data-v="potong"'+disabled+'>Cetak pilihan'+(count?' · '+nf(count)+' PO':'')+'</button>');}
+  var data = potongCetakDaftar(), tidak = potongCetakTidak(), selected=data.filter(function (x) { return !tidak[x.po.id]; }), n = selected.length;
   var siap = data.filter(function (x) { return x.tahap === 'siap' || x.tahap === 'lanjut'; }).length;
   var body = !data.length ? emptyBox('Tidak ada PO yang belum dicetak. Cetakan sebelumnya ada di Riwayat cetak.') :
     '<div class="row wrap gap-s"><span class="label grow">PO yang dicetak</span><button class="btn ghost sm" data-a="potongCetakSemua" data-v="1">Pilih semua</button>' + (siap && siap < data.length ? '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="siap">Bahan siap saja</button>' : '') + '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="0">Kosongkan</button></div>' +
@@ -10629,9 +10681,18 @@ function potongCetakSheet() {
     }).join('') + '</div>' +
     '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(n / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' : 'Belum ada PO dipilih.') + '</div>' +
     '<div class="xs muted">Kartu jalan PO: satu kartu untuk satu barang dan satu ukuran; ' + KARTU_JALAN_PER_LEMBAR + ' kartu memanjang per lembar A4' + (n ? ' (' + nf(Math.ceil(kartuJalanData(selected).length / KARTU_JALAN_PER_LEMBAR)) + ' lembar)' : '') + '.</div>';
-  return sheetHtml('Cetak daftar potong', '<div class="col">' + tabs + body + '<div class="small muted">Setelah cetak selesai, tekan Sudah dicetak di pratinjau. PO pindah ke riwayat; tambahan kain atau ukuran baru akan muncul lagi.</div>' + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
+  var mark=n?'<div class="note row wrap gap-s"><span class="grow">Sudah mencetak PO yang dicentang?</span><button class="btn pri" data-a="potongCetakTandai"'+(cache.saving?' disabled':'')+'>'+(cache.saving?'Menyimpan…':'Sudah dicetak · pindahkan '+nf(n)+' PO')+'</button></div>':'';
+  return sheetHtml('Cetak daftar potong', '<div class="col">' + tabs + status + mark + body + '<div class="small muted">PO yang sudah ditandai pindah ke riwayat. Tambahan kain atau ukuran baru akan muncul lagi.</div>' + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
 }
-A.potongCetak = function (el) { return act(el,req('getPrintHistory',{})).then(function(r){S.potongPrintHistory=r.rows||[];S.potongPrintTab='baru';openSheet(potongCetakSheet, { live: true, cls: 'wide' });}).catch(quiet); };
+A.potongCetak = function () { potongCetakCache();S.potongPrintTab='baru';openSheet(potongCetakSheet, { live: true, cls: 'wide' });var pending=potongCetakMuat(false);paintTop();return pending; };
+A.potongCetakSegarkan=function(){var pending=potongCetakMuat(true);paintTop();return pending;};
+A.potongCetakTandai=function(){
+  var cache=potongCetakCache();if(cache.saving)return cache.saving;
+  var tidak=potongCetakTidak(),data=potongCetakDaftar().filter(function(x){return !tidak[x.po.id];});if(!data.length)return;
+  var key=data.map(function(x){return x.po.id+'|'+x.po.printSignature;}).join(',');
+  if(!cache.saveIntent||cache.saveIntent.key!==key)cache.saveIntent={key:key,save:potongCetakSimpan(data,'potong')};
+  cache.saving=cache.saveIntent.save().then(function(){if(potongCetakCache()!==cache)return;cache.saving=null;cache.saveIntent=null;S.potongPrintTab='riwayat';paintTop();toast('PO sudah dipindahkan ke Riwayat cetak.');},function(e){if(potongCetakCache()!==cache)return;cache.saving=null;paintTop();toast(e.message||'Belum tersimpan. Coba lagi.',true);});paintTop();return cache.saving;
+};
 C.potongCetakCek = function (el) { var tidak = potongCetakTidak(), id = el.getAttribute('data-id'); if (el.checked) delete tidak[id]; else tidak[id] = 1; paintTop(); };
 A.potongCetakSemua = function (el) {
   var v = el.getAttribute('data-v'), tidak = (S.potongCetakPilih = { tidak: {} }).tidak;
@@ -10641,7 +10702,8 @@ A.potongCetakSemua = function (el) {
 A.potongCetakJalan = function (el) {
   var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
   if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
-  return act(el, potongCetakBuka(potongCetakHtml(data),potongCetakSimpan(data,'potong'))).catch(quiet);
+  var selesai=potongCetakSimpan(data,'potong');
+  return act(el,potongCetakFoto(data).then(function(withPhotos){return potongCetakBuka(potongCetakHtml(withPhotos),selesai);})).catch(quiet);
 };
 /* Kartu jalan PO (1543d): kartu yang ikut barangnya dari potong, jahit, hitung, QC sampai gudang. Empat kartu memanjang
    per lembar A4, digunting pada garis putus-putus; tiap divisi menulis tanggal, jumlah dan parafnya. Hanya cetakan
@@ -10698,7 +10760,8 @@ function kartuJalanHtml(data) {
 A.potongKartuJalan = function (el) {
   var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
   if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
-  return act(el, dokumenCetakBuka(kartuJalanHtml(data), { nama: 'kartu jalan PO', tanda: '.lembar', selesai:potongCetakSimpan(data,'jalan') })).catch(quiet);
+  var selesai=potongCetakSimpan(data,'jalan');
+  return act(el,potongCetakFoto(data).then(function(withPhotos){return dokumenCetakBuka(kartuJalanHtml(withPhotos),{nama:'kartu jalan PO',tanda:'.lembar',selesai:selesai});})).catch(quiet);
 };
 /* ---------- akhir cetak daftar potong ---------- */
 function slipDocumentActions(enabled) {

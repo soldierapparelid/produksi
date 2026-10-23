@@ -141,6 +141,50 @@ test('unrelated changes and derived display fields do not invalidate a printable
   assert.equal(f.call('savePrintHistory', { id: 'print-current-batch', jenis: 'potong', entries, expectedVersion: 0 }).saved, 1);
 });
 
+test('history reads reuse the versioned cache and immediately see another device printing', () => {
+  const f = fixture(), entries = f.entries();
+  f.call('savePrintHistory', { id: 'print-cache-first', jenis: 'jalan', entries: [entries[0]] });
+  const sheet = f.h.sheets.RiwayatCetak, original = sheet.getDataRange.bind(sheet);
+  let reads = 0;
+  sheet.getDataRange = function () { reads++; return original(); };
+  assert.equal(f.call('getPrintHistory').rows.length, 1);
+  assert.equal(f.call('getPrintHistory').rows.length, 1);
+  assert.equal(reads, 0, 'warm history should not open its spreadsheet table');
+
+  // Simulate a second device: an independent cold API request commits another
+  // batch and advances v_RiwayatCetak before the first device opens history.
+  f.call('savePrintHistory', { id: 'print-cache-second', jenis: 'potong', entries: [entries[1]], token: f.adminToken });
+  reads = 0;
+  const refreshed = f.call('getPrintHistory');
+  assert.equal(refreshed.rows.length, 2);
+  assert.ok(refreshed.rows.some(row => row.id === 'print-cache-second_000'));
+  assert.equal(reads, 0, 'read uses the cache published with the latest table version');
+
+  // A cache miss still reads durable rows and fills the cache for the next open.
+  Object.keys(f.h.cached).forEach(key => { if (key.includes('|RiwayatCetak|')) delete f.h.cached[key]; });
+  assert.equal(f.call('getPrintHistory').rows.length, 2);
+  assert.equal(reads, 1);
+  assert.equal(f.call('getPrintHistory').rows.length, 2);
+  assert.equal(reads, 1);
+});
+
+test('partial cutting does not invalidate saved signatures; only new prepared fabric does', () => {
+  const f = fixture(), entries = f.entries();
+  f.call('savePrintHistory', { id: 'print-before-cut', jenis: 'jalan', entries });
+  f.call('createPotong', { token: f.workerToken, potong: {
+    id: 'print-after-cut', rencanaId: f.plan.id, expectedRencanaRevision: f.plan.revision,
+    tanggal: '2026-10-22', ukuran: { XL: 20 }
+  } });
+  assert.deepEqual(f.entries().map(row => row.signature), entries.map(row => row.signature));
+  assert.deepEqual(f.call('getPrintHistory').rows.map(row => row.signature).sort(), entries.map(row => row.signature).sort());
+  f.call('saveRencanaPotong', { rencana: {
+    id: 'print-add-material', poId: f.po.id, alokasiBahan: [{ stokId: f.stock.rows[1].id, qty: 100, ukuran: 'M' }]
+  } });
+  const current = f.entries();
+  assert.notEqual(current[0].signature, entries[0].signature);
+  assert.equal(current[1].signature, entries[1].signature, 'printing another PO remains valid');
+});
+
 test('missing source, duplicate PO, invalid snapshot and oversized snapshots fail before writing history', () => {
   const f = fixture(), base = { id: 'print-invalid-batch', jenis: 'potong', entries: f.entries() };
   const bad = [];
