@@ -2,14 +2,15 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 24 Oktober 2026 oleh Claude, setelah rilis 1.5.60.
+Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah merge catatan kerja dan validasi rilis 1.5.60.
 
 ## 1. Keadaan sekarang
 
 - Versi aplikasi: **1.5.60**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`.
 - Rakitan halaman: `20261024-retur-paket-1560`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
-- `main`: commit `beae3f7` (merge PR #86).
-- Server Apps Script: deployment **Versi 73** (24 Okt 2026, 13.09). Isi editor sama dengan `main`:
+- Commit rilis aplikasi: `beae3f7` (merge PR #86). Catatan kerja sudah masuk `main` lewat PR #87, commit `35110db`.
+- Validasi ChatGPT/Codex (24 Okt 2026): build, pemeriksaan hasil build, dan seluruh **1.317 uji lulus**. Pekerjaan ini hanya memperbarui dokumentasi; versi aplikasi dan rakitan halaman tetap.
+- Server Apps Script: menurut catatan Claude, deployment **Versi 73** (24 Okt 2026, 13.09), dengan sidik editor berikut. ChatGPT/Codex belum memeriksa ulang editor atau memasang ulang server pada pekerjaan dokumentasi ini:
 
 | Berkas di editor | Sumber di repo | Sidik (panjang + 16 huruf awal sha256, akhir baris LF) |
 |---|---|---|
@@ -92,6 +93,7 @@ Diperbarui: 24 Oktober 2026 oleh Claude, setelah rilis 1.5.60.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
 
+- 2026-10-24 · ChatGPT/Codex · 1.5.60 · Membaca dan menggabungkan catatan kerja PR #87 atas permintaan pemilik; build dan seluruh 1.317 uji lulus; memperbarui keadaan sekarang serta riwayat. Kode aplikasi, server, dan data produksi tidak diubah.
 - 2026-10-24 · Claude · 1.5.60 · Retur paket (owner) di dalam aplikasi, bukti di Google Drive; server Versi 73; PR #86 di-merge.
 - 2026-10-16 s.d. 23 · ChatGPT/Codex · 1.5.45–1.5.59 · lihat README.
 - 2026-10-12 s.d. 16 · Claude · 1.5.40–1.5.44 · lihat README.
