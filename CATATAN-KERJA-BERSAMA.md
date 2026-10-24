@@ -6,7 +6,7 @@ Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah pemasangan server 1.5.61
 
 ## 1. Keadaan sekarang
 
-- Server **1.5.61** sudah dipasang dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; PR belum dibuka. Tampilan GitHub Pages masih **1.5.60** sampai cabang ini digabung. Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
+- Server **1.5.61** sudah dipasang dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
 - Versi server dan cabang rilis: **1.5.61**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`.
 - Rakitan halaman cabang rilis: `20261024-pulihkan-ukuran-1561`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
@@ -94,7 +94,7 @@ Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah pemasangan server 1.5.61
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
 
-- 2026-10-24 · ChatGPT/Codex · 1.5.61 · Koreksi owner untuk ukuran PO lama yang tertinggal: riwayat pembuka terpisah, antrean hitung, pemulihan penyimpanan, hitung sebagian/ulang, perlindungan stok/upah/HPP. Build dan 1.366 tes lulus; alur tampilan diuji dengan data contoh. Server Versi 74 dipasang pukul 15.35 WIB atas izin pemilik; sidik sebelum/sesudah pemasangan dan jawaban bootstrap sudah diverifikasi. PR belum dibuka; GitHub Pages masih 1.5.60 sampai merge.
+- 2026-10-24 · ChatGPT/Codex · 1.5.61 · Koreksi owner untuk ukuran PO lama yang tertinggal: riwayat pembuka terpisah, antrean hitung, pemulihan penyimpanan, hitung sebagian/ulang, perlindungan stok/upah/HPP. Build dan 1.366 tes lulus; alur tampilan diuji dengan data contoh. Server Versi 74 dipasang pukul 15.35 WIB atas izin pemilik; sidik sebelum/sesudah pemasangan dan jawaban bootstrap sudah diverifikasi. Peluncuran tampilan GitHub Pages melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89).
 
 - 2026-10-24 · Claude · 1.5.60 · Retur paket (owner) di dalam aplikasi, bukti di Google Drive; server Versi 73; PR #86 di-merge.
 - 2026-10-16 s.d. 23 · ChatGPT/Codex · 1.5.45–1.5.59 · lihat README.
