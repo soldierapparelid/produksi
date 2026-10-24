@@ -491,9 +491,32 @@ function pkEnv_() {
     },
     now: function () { return new Date(); },
     id: function () { return Utilities.getUuid().replace(/-/g, '').slice(0, 16); },
-    makePdf: function (html, name) { return Utilities.base64Encode(Utilities.newBlob(html, 'text/html', name).getAs('application/pdf').getBytes()); }
+    makePdf: function (html, name) { return Utilities.base64Encode(Utilities.newBlob(html, 'text/html', name).getAs('application/pdf').getBytes()); },
+    /* Retur paket (1.5.60): bukti disimpan di Google Drive pemilik skrip, folder "Soldier Retur - Bukti", satu sub-folder per paket.
+       Berkas tidak dibagikan; hanya pemilik akun Google ini yang bisa membukanya. */
+    simpanBukti: function (o) {
+      var folder = null;
+      if (o.folderId) { try { folder = DriveApp.getFolderById(o.folderId); if (folder.isTrashed()) folder = null; } catch (e) { folder = null; } }
+      if (!folder) folder = pkFolderRetur_().createFolder(String(o.folder || 'Paket retur').replace(/[\\/]/g, '-').slice(0, 120));
+      var file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(o.base64), o.mime, o.name));
+      return { fileId: file.getId(), folderId: folder.getId() };
+    },
+    ambilBukti: function (fileId) { return Utilities.base64Encode(DriveApp.getFileById(fileId).getBlob().getBytes()); },
+    buangBukti: function (fileId) { DriveApp.getFileById(fileId).setTrashed(true); },
+    alamatBukti: function (fileId) { return 'https://drive.google.com/file/d/' + encodeURIComponent(fileId) + '/view'; },
+    alamatFolder: function (folderId) { return 'https://drive.google.com/drive/folders/' + encodeURIComponent(folderId); }
   };
 }
+/* Folder induk bukti retur di Drive pemilik; ID-nya disimpan di properti skrip. Dibuat ulang bila terhapus. */
+function pkFolderRetur_() {
+  var props = PropertiesService.getScriptProperties(), id = props.getProperty('returFolder');
+  if (id) { try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  var baru = DriveApp.createFolder('Soldier Retur - Bukti');
+  props.setProperty('returFolder', baru.getId());
+  return baru;
+}
+/* Jalankan sekali dari editor (Run) supaya Google meminta izin Drive sebelum versi baru dipasang. Tidak mengubah data. */
+function siapkanFolderRetur() { return pkFolderRetur_().getName(); }
 function pkSetup_() {
   var want = pkSchema_();
   if (pkLayoutMatches_(pkProps_().schema, want)) return;
