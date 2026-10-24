@@ -6,9 +6,9 @@ const html=fs.readFileSync(path.resolve(__dirname,'../index.html'),'utf8');
 function part(a,b){const p=html.indexOf(a),q=html.indexOf(b,p+a.length);assert.ok(p>=0&&q>p,a);return html.slice(p,q);}
 function harness(admin){
   const c=vm.createContext({console,Promise});
+  for(const file of ['core.js','history-corrections.js'])vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../src',file),'utf8'),c);
   vm.runInContext(`var A={},S={state:{setor:[],kirim:[],upah:[],potong:[],qc:[],payroll:[]}},calls=[],toasts=[],confirms=[],ADMIN=${admin?'true':'false'};
     function isAdmin(){return ADMIN;}function esc(s){return String(s);}function ic(n){return '['+n+']';}function nf(n){return String(n);}function namaUser(id){return 'Nama '+id;}function poNama(id){return 'PO '+id;}
-    function coreParseJSON(s,f){if(s===null||s===undefined||s==='')return f;if(typeof s==='object')return s;try{return JSON.parse(s);}catch(e){return f;}}function coreNum(v){var n=Number(v);return isFinite(n)?n:0;}
     function sourcePayroll(id){var paid=(S.state.payroll||[]).some(function(r){return r.sourceId===id&&r.paidQty>0;});return {hasPayment:paid};}
     function sourcePaid(r){return !!r.upahId||sourcePayroll(r.id).hasPayment;}
     function toast(m,e){toasts.push([m,!!e]);}function req(a,p){calls.push({action:a,payload:p});return Promise.resolve({ok:true});}function act(b,p){return p;}
@@ -49,4 +49,15 @@ test('the slip sheet shows its buttons above the preview and the PO history row 
   assert.ok(slip.indexOf("h = (h ? '<div class=\"row wrap\" data-slip-aksi>' + h + '</div>' : '') + '<div class=\"slip-pratinjau\">'")>slip.indexOf('bisaHapus'),'buttons are put before the preview');
   assert.match(html,/batal: setorBisaBatal\(r\) \? r\.id : null/);
   assert.match(html,/e\.batal \? '<button class="btn sm" data-a="setorBatalHitung"/);
+});
+
+test('an owner-restored count can return to pending count without deleting its opening evidence',async()=>{
+  const c=harness(true);run(c,"S.state.setor=[Object.assign("+REC+",{asal:'koreksi-ukuran',dibuatOleh:'owner',imporSumber:JSON.stringify({ownerSizeCorrection:{id:'fixture-correction'}})})]");
+  assert.equal(run(c,"setorBisaBatal(S.state.setor[0])"),true);
+  await run(c,"A.setorBatalHitung({getAttribute:function(){return 'set01';}})");
+  assert.deepEqual(JSON.parse(JSON.stringify(run(c,'calls'))),[{action:'batalHitungSetor',payload:{id:'set01',expectedRevision:'rev-5'}}]);
+  assert.match(run(c,'confirms[0].text'),/Laporan penjahit tidak dihapus/);
+  assert.equal(run(c,"setorBisaBatal(Object.assign({},S.state.setor[0],{imporSumber:''}))"),false,'marker alone does not turn arbitrary imported rows into owner-restored reports');
+  assert.equal(run(c,"S.state.qc=[{setorId:'set01'}];setorBisaBatal(S.state.setor[0])"),false);
+  assert.equal(run(c,"S.state.qc=[];S.state.payroll=[{sourceId:'set01',paidQty:1}];setorBisaBatal(S.state.setor[0])"),false);
 });

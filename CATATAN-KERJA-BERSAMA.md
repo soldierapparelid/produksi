@@ -2,20 +2,22 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 24 Oktober 2026 oleh Claude, setelah rilis 1.5.60.
+Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah pemasangan server 1.5.61.
 
 ## 1. Keadaan sekarang
 
-- Versi aplikasi: **1.5.60**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`.
-- Rakitan halaman: `20261024-retur-paket-1560`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
-- `main`: commit `beae3f7` (merge PR #86).
-- Server Apps Script: deployment **Versi 73** (24 Okt 2026, 13.09). Isi editor sama dengan `main`:
+- Server **1.5.61** sudah dipasang dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
+
+- Versi server dan cabang rilis: **1.5.61**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`.
+- Rakitan halaman cabang rilis: `20261024-pulihkan-ukuran-1561`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- `main` saat pemasangan: commit `35110db` (merge catatan kerja PR #87); rilis aplikasi sebelumnya `beae3f7` (merge PR #86).
+- Server Apps Script: deployment **Versi 74** (24 Okt 2026, 15.35 WIB). Sidik editor awal sudah cocok dengan `main` sebelum perubahan; Core dan Index yang disimpan kembali sudah diperiksa dan cocok dengan cabang rilis di atas. Pemeriksaan `bootstrap` menjawab HTTP 200, `ok: true`, `appVersion: 1.5.61`.
 
 | Berkas di editor | Sumber di repo | Sidik (panjang + 16 huruf awal sha256, akhir baris LF) |
 |---|---|---|
 | Kode.gs | `apps-script/Server.gs` | 38162 d72ab735e5f1a288 |
-| Core.gs | `apps-script/Core.gs` | 699392 56923dbb9ba30d15 |
-| Index.html | `apps-script/Index.html` | 1696953 f72901236399954f |
+| Core.gs | `apps-script/Core.gs` | 715693 d00bb3e435e0dc59 |
+| Index.html | `apps-script/Index.html` | 1721244 a83d9641a6d352b1 |
 | Maintenance.gs | tidak ada di repo, jangan diubah | 136 373dd791f45fca0e |
 
 - Tampilan: GitHub Pages `https://soldierapparelid.github.io/produksi/`. **Repo ini publik.**
@@ -30,7 +32,7 @@ Diperbarui: 24 Oktober 2026 oleh Claude, setelah rilis 1.5.60.
    - Rilis yang mengubah server: naikkan `APP_VERSION` dan `UI_VERSION` bersama (1.5.61, dan seterusnya). **Pasang server dulu, baru buka PR.** Server menolak penyimpanan bila versi tampilan berbeda dengan versi server, dan pemilik biasanya merge dalam hitungan detik.
    - Perubahan tampilan saja (warna, teks, tata letak): versi **tetap**. Ganti hanya `PK_BUILD` dan `RAKITAN` dengan nilai yang sama. Server tidak perlu dipasang.
 5. **Jangan edit `apps-script/Core.gs` atau `apps-script/Index.html` langsung.** Ubah `src/*.js` dan `index.html`, lalu jalankan `node scripts/build-core.cjs`. Pemeriksaannya: `node scripts/build-core.cjs --check`.
-6. **Uji sebelum PR:** jalankan `node --test`. Semua harus lulus; saat ini ada 1.317 uji. Pakai Node 22 atau lebih baru.
+6. **Uji sebelum PR:** jalankan `node --test`. Semua harus lulus; saat ini ada 1.366 uji. Pakai Node 22 atau lebih baru.
 7. **Akhir baris:** tiap berkas di repo memakai LF atau CRLF (ada yang campuran). Pertahankan akhir baris aslinya supaya diff PR hanya berisi baris yang diubah. Hati-hati dengan salinan dari `git archive` atau autocrlf.
 8. **Setelah selesai**, tambahkan satu baris di "Riwayat pekerjaan" (tanggal, alat, versi, ringkasan, PR) dan perbarui "Keadaan sekarang" bila server dipasang.
 
@@ -91,6 +93,8 @@ Diperbarui: 24 Oktober 2026 oleh Claude, setelah rilis 1.5.60.
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-24 · ChatGPT/Codex · 1.5.61 · Koreksi owner untuk ukuran PO lama yang tertinggal: riwayat pembuka terpisah, antrean hitung, pemulihan penyimpanan, hitung sebagian/ulang, perlindungan stok/upah/HPP. Build dan 1.366 tes lulus; alur tampilan diuji dengan data contoh. Server Versi 74 dipasang pukul 15.35 WIB atas izin pemilik; sidik sebelum/sesudah pemasangan dan jawaban bootstrap sudah diverifikasi. Peluncuran tampilan GitHub Pages melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89).
 
 - 2026-10-24 · Claude · 1.5.60 · Retur paket (owner) di dalam aplikasi, bukti di Google Drive; server Versi 73; PR #86 di-merge.
 - 2026-10-16 s.d. 23 · ChatGPT/Codex · 1.5.45–1.5.59 · lihat README.

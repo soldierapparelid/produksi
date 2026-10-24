@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const root=path.resolve(__dirname,'..'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 function part(start,end){const a=html.indexOf(start),b=html.indexOf(end,a+start.length);assert.ok(a>=0&&b>a,start);return html.slice(a,b);}
 function ui(admin=false){
- const c=vm.createContext({console});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);
+ const c=vm.createContext({console});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);vm.runInContext(fs.readFileSync(path.join(root,'src/history-corrections.js'),'utf8'),c);
  vm.runInContext(`var A={},R={},admin=${admin},rendered='',requests=[],messages=[],closed=0;
  var S={state:{settings:{ukuran:['L','XL','XXL','3XL']}}},D={po:{p1:{id:'p1',nama:'Polo <Contoh>',ukuran:{L:50,XL:60,XXL:80},workflow:{ukuran:{
  L:{maklon:{sewer1:{kirim:50,diterima:50,reject:0,diajukan:0}}},XL:{maklon:{sewer1:{kirim:60,diterima:58,reject:2,diajukan:0}}},XXL:{maklon:{sewer1:{kirim:80,diterima:0,reject:0,diajukan:72}}},'3XL':{maklon:{other:{kirim:90,diterima:0,reject:0,diajukan:90}}}}}}}};
@@ -64,4 +64,19 @@ test('fractional or oversized input and an unreported legacy size are rejected w
 test('native report corrections and already processed report behavior remain unchanged',()=>{
  const h=ui();h.run("rec.asal='';rec.imporSumber={};openTerima('pending01');value('XXL',60);value('L',1);A.terimaSave({})");assert.deepEqual(h.json('requests[0].payload.ukuran'),{XXL:60,L:1});assert.doesNotMatch(h.run('rendered'),/data-lapor=/);assert.match(h.run('rendered'),/Angka sudah diisi sesuai laporan maklon/);
  h.run("rec.status='diterima';openTerima('pending01')");assert.match(h.run('rendered'),/sudah diproses/);assert.doesNotMatch(h.run('rendered'),/data-form="terima"|data-size=/);
+});
+
+test('restored opening report permits partial actual counts, keeps residual pending and does not borrow another size wage',async()=>{
+ const h=ui(true);h.run("rec.asal='koreksi-ukuran';rec.imporSumber={ownerSizeCorrection:{id:'fixture-correction'}};rec.ukuran={XXL:12};rec.total=12;rec.upah='';hargaKiriman=function(){return 9900;};tarifBawaan=function(){return 8800;};openTerima('pending01')");
+ assert.equal(h.run('form.values.upah'),'');assert.match(h.run('rendered'),/Tarif jahit yang belum diketahui tidak diambil dari ukuran lain/);assert.match(h.run('rendered'),/data-lapor="\{&quot;XXL&quot;:12\}"/);
+ h.run("value('XXL',8);value('XXL',1,true);R.terima(form)");assert.match(h.run('ringkas.textContent'),/laporan 12 · dihitung 8 · reject 1 · sisa menunggu 3/);
+ h.run('A.terimaSave({})');assert.deepEqual(h.json('requests[0].payload'),{id:'pending01',expectedRevision:'original-revision',keputusan:'terima',ukuran:{XXL:8},reject:1,rejectUkuran:{XXL:1},upah:'',catatan:'Bukti impor <asal> tetap utuh',tanggal:'2026-10-11'});
+ h.run("requests[0].resolve({noSlip:'SS-EXAMPLE'})");await tick();assert.match(h.json('messages').join(' '),/Sisa 3 pcs tetap menunggu/);assert.equal(h.run('rec.ukuran.XXL'),12);assert.equal(h.run('rec.upah'),'');
+});
+
+test('restored report never widens a count beyond its opening scope, and QC still cannot enter wages',()=>{
+ const h=ui();h.run("rec.asal='koreksi-ukuran';rec.imporSumber={ownerSizeCorrection:{id:'fixture-correction'}};rec.ukuran={XXL:12};rec.total=12;rec.upah='';openTerima('pending01');value('XXL',13);A.terimaSave({})");
+ assert.equal(h.run('requests.length'),0);assert.doesNotMatch(h.run('rendered'),/name="upah"/);
+ h.run("value('XXL',10);value('L',1);A.terimaSave({})");assert.equal(h.run('requests.length'),0);assert.match(h.json('messages').at(-1),/Hitungan L/);
+ const owner=ui(true);owner.run("rec.asal='koreksi-ukuran';rec.imporSumber={ownerSizeCorrection:{id:'fixture-correction'}};rec.upah=900;openTerima('pending01')");assert.equal(owner.run('form.values.upah'),'900','an explicitly recorded wage remains available');
 });

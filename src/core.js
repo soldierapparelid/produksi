@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.60';
+var APP_VERSION = '1.5.61';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -558,7 +558,7 @@ function coreActiveSizes(po) {
 function coreKirimAvailability(po, flow, defaultSizes) {
   var out = { total: 0, ukuran: {} };
   if (!po || po.status !== 'aktif' || !flow || !flow.ukuran || (flow.blockingIssues || flow.issues || []).length) return out;
-  var evidence = coreLegacyCuttingEvidence(po), active = evidence ? null : coreActiveSizes(po);
+  var evidence = typeof coreEffectiveCuttingEvidence === 'function' ? coreEffectiveCuttingEvidence(po) : coreLegacyCuttingEvidence(po), active = evidence ? null : coreActiveSizes(po);
   /* Worker responses omit source provenance. This size-only projection is
      computed by coreWorkflow; write actions also recompute it from stored rows. */
   if (!evidence && !active && flow.cutting && flow.cutting.verified === true && flow.cutting.ukuran instanceof Array) evidence = { valid: true, ukuran: flow.cutting.ukuran };
@@ -578,10 +578,11 @@ function coreCuttingProjection(poRows, physicalCuts, lepas) {
   var totals = {}, out = {};
   (physicalCuts || []).forEach(function (r) { var map = coreMap(r.ukuran), po = totals[r.poId] || (totals[r.poId] = {}); Object.keys(map).forEach(function (size) { if (coreNum(map[size]) > 0) po[size] = coreNum(po[size]) + coreNum(map[size]); }); });
   (poRows || []).forEach(function (p) {
-    var native = coreActiveSizes(p), legacy = coreLegacyCuttingEvidence(p), evidence = legacy || native; if (!evidence) return;
+    var native = coreActiveSizes(p), legacy = coreLegacyCuttingEvidence(p), evidence = typeof coreEffectiveCuttingEvidence === 'function' ? coreEffectiveCuttingEvidence(p) : legacy || native; if (!evidence) return;
     /* ukuran yang dilepas owner ("tidak jadi dipotong di PO ini") tidak lagi menunggu tukang potong dan tidak menahan PO */
     var dilepas = lepas[p.id] instanceof Array ? lepas[p.id] : [], belum = evidence.valid && p.status === 'aktif' ? evidence.ukuran.filter(function (size) { return !(coreNum((totals[p.id] || {})[size]) > 0); }) : [];
     var projection = out[p.id] = { verified: evidence.valid, ukuran: evidence.ukuran, pendingUkuran: belum.filter(function (size) { return dilepas.indexOf(size) < 0; }), lepasUkuran: belum.filter(function (size) { return dilepas.indexOf(size) >= 0; }), needsReview: !evidence.valid };
+    if (evidence.recoveryPending) projection.recoveryPending = true;
     if (evidence.valid && legacy) {
       var plans = coreMap(p.imporSumber).legacyCutting.plans;
       var review = plans.filter(function (r) { return r && r.status === 'ready' && (!r.rencanaId || r.reviewCode); }).map(function (r) {
@@ -741,6 +742,7 @@ function coreWorkflow(poRows, potong, kirim, setor, qc, gudang, extras) {
     /* yang menghentikan pekerjaan baru: semua masalah pada PO baru, tidak ada pada PO bawaan aplikasi lama */
     p.blockingIssues = keras ? p.issues.slice() : [];
     if (p.pendingCutSizes && p.pendingCutSizes.length) p.complete = false;
+    if (p.cutting && p.cutting.recoveryPending) { p.complete = false; p.readyQC = false; p.blockingIssues.push('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.'); }
   });
   return out;
 }
@@ -1092,7 +1094,7 @@ function createCore(store, env) {
     return (w.blockingIssues || w.issues).length > 0 || upahSumberLama(r);
   }
   function strictSizes(raw, po, allowEmpty) {
-    var map = coreMap(raw), out = {}, evidence = coreLegacyCuttingEvidence(po), active = evidence ? null : coreActiveSizes(po), planned = active && active.valid ? active.ukuran.slice() : Object.keys(coreMap(po.ukuran));
+    var map = coreMap(raw), out = {}, evidence = typeof coreEffectiveCuttingEvidence === 'function' ? coreEffectiveCuttingEvidence(po) : coreLegacyCuttingEvidence(po), active = evidence ? null : coreActiveSizes(po), planned = active && active.valid ? active.ukuran.slice() : Object.keys(coreMap(po.ukuran));
     if (active && !active.valid) fail('Ukuran aktif PO perlu diperiksa owner.');
     if (evidence && evidence.valid) evidence.ukuran.forEach(function (size) { if (planned.indexOf(size) < 0) planned.push(size); });
     var allowed = planned.length ? planned : settings().ukuran;
@@ -1860,6 +1862,7 @@ function createCore(store, env) {
     var me = auth(p); mustAdmin(me);
     ['PO','Potong','RencanaPotong'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
     var po = findRow('PO', String(p.poId || '')); if (!po) fail('PO tidak ditemukan.');
+    if (typeof coreMissingSizePending === 'function' && coreMissingSizePending(po)) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
     var st = settings(), peta = {}, minta = p.ukuran instanceof Array ? p.ukuran.map(function (s) { return String(s); }) : [];
     Object.keys(st.poUkuranLepas).forEach(function (k) { if (st.poUkuranLepas[k] instanceof Array && st.poUkuranLepas[k].length) peta[k] = st.poUkuranLepas[k].slice(); });
     var kini = peta[po.id] || [];
@@ -1884,6 +1887,7 @@ function createCore(store, env) {
   }
   function openPO(id) {
     var po = findRow('PO', String(id || '')); if (!po) fail('PO tidak ditemukan.');
+    if (typeof coreMissingSizePending === 'function' && coreMissingSizePending(po)) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
     if (po.status === 'batal') fail('PO ini sudah dibatalkan.');
     if (po.status === 'selesai') fail('PO sudah selesai. Buka kembali PO sebelum menambah atau mengubah produksi.');
     return po;
@@ -1944,6 +1948,7 @@ function createCore(store, env) {
     if (consumed) fail('Persiapan ini sudah dipakai. Buat persiapan baru untuk potongan berikutnya.');
     if (old && old.status === 'batal' && status === 'siap') fail('Persiapan yang dibatalkan tidak dapat dibuka kembali. Buat persiapan baru.');
     var poId = String(canceled ? old.poId : input.poId || '');
+    if (typeof coreMissingSizePending === 'function' && coreMissingSizePending(findRow('PO',poId))) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
     if (old && old.poDraft && status !== 'batal' && !findRow('PO',old.poId)) fail('Selesaikan pembuatan PO yang sedang menyiapkan melalui formulir PO atau batalkan persiapan.');
     var next = prepareRow(input,id,poId,status,old);
     if (old && coreCutPlanIntent(old) === coreCutPlanIntent(next) && (String(p.expectedRevision || '') === String(old.revision || '') || old.dibuatOleh === me.id)) return preparedResult(old);
@@ -2651,6 +2656,7 @@ function createCore(store, env) {
     var me = auth(p); mustAdmin(me);
     if (store.fresh) store.fresh('SlipKirim');
     var po = findRow('PO', String(p.poId || '')); if (!po) fail('PO tidak ditemukan.');
+    if (typeof coreMissingSizePending === 'function' && coreMissingSizePending(po)) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
     var maklonId = String(p.maklonId || ''), kosong = p.target === '' || p.target === undefined || p.target === null, target = kosong ? '' : coreTglOk(p.target);
     if (!kosong && !target) fail('Tanggal target tidak sah.');
     var rows = store.read('SlipKirim').filter(function (r) { return r.poId === po.id && r.maklonId === maklonId; });
@@ -2669,7 +2675,7 @@ function createCore(store, env) {
 
   function upahJahitTerakhir(po, maklonId, st) {
     var best = null;
-    store.read('SlipKirim').forEach(function (r) { if (r.poId === po.id && r.maklonId === maklonId && (!best || String(r.dibuat) >= String(best.dibuat))) best = r; });
+    store.read('SlipKirim').forEach(function (r) { if (r.asal !== 'koreksi-ukuran' && r.poId === po.id && r.maklonId === maklonId && (!best || String(r.dibuat) >= String(best.dibuat))) best = r; });
     return best && coreNum(best.upah) > 0 ? best.upah : tarifProduk(po, 'tarifJahit', st.upahJahit);
   }
 
@@ -2736,11 +2742,11 @@ function createCore(store, env) {
          sisanya tetap menunggu sebagai baris tersendiri dengan asal dan ikatan pembayaran yang sama.
          Jumlah laporan per ukuran tetap utuh: diterima + reject + sisa yang menunggu = laporan semula. */
       var sumberLama = coreMap(rec.imporSumber), sisaLama = null;
-      var anakId = idOk(rec.id + 's'), anak = anakId ? findRow('SlipSetor', anakId) : null;
+      var anakId = idOk(typeof coreOwnerReportedSetor === 'function' && coreOwnerReportedSetor(rec) ? 'msr_' + coreHash(rec.id + '|' + coreNum(sumberLama.recountVersion)) : rec.id + 's'), anak = anakId ? findRow('SlipSetor', anakId) : null;
       /* Baris sisa hanya lahir saat laporan asalnya diterima. Kalau laporan asal masih menunggu tetapi baris sisanya
          sudah ada, itu bekas penyimpanan yang terputus: dibuang dulu, lalu ditulis ulang di bawah bila masih ada sisa. */
       if (anak && anak.status === 'diajukan' && !anak.diprosesOleh && coreMap(anak.imporSumber).sisaDari === (sumberLama.sisaDari || rec.id)) { store.remove('SlipSetor', anakId); anak = null; }
-      if (frozenPending || (rec.asal === 'lama' && sumberLama.baseline === true && sumberLama.field === 'jahit')) {
+      if (frozenPending || (typeof coreOwnerReportedSetor === 'function' && coreOwnerReportedSetor(rec)) || (rec.asal === 'lama' && sumberLama.baseline === true && sumberLama.field === 'jahit')) {
         var originalQty = sumMaps([coreMap(rec.ukuran), coreMap(rec.rejectUkuran)]), proposedQty = sumMaps([uk, bad]), sisa = {};
         Object.keys(sumMaps([originalQty, proposedQty])).forEach(function (size) {
           var selisih = coreNum(originalQty[size]) - coreNum(proposedQty[size]);
@@ -2758,7 +2764,7 @@ function createCore(store, env) {
       /* slip terbit di sini: nomor diberikan, harga diambil dari yang diatur owner (kiriman terakhir, lalu produk, lalu bawaan) */
       var poRec = findRow('PO', rec.poId) || { id: rec.poId, produkId: '' };
       if (admin && p.upah !== undefined && p.upah !== '') patch.upah = Math.max(0, coreNum(p.upah));
-      else if (!(rec.upah > 0)) patch.upah = upahJahitTerakhir(poRec, rec.maklonId, settings());
+      else if (!(rec.upah > 0) && !(typeof coreOwnerReportedSetor === 'function' && coreOwnerReportedSetor(rec))) patch.upah = upahJahitTerakhir(poRec, rec.maklonId, settings());
       if (!rec.noSlip) patch.noSlip = nextNo('SS', store.read('SlipSetor'), 'noSlip', today());
       /* Sisa ditulis lebih dulu, baru laporan asalnya diterima. Kalau penyimpanan terputus di antaranya, laporan
          asal masih menunggu dan kiriman ulang membuang baris sisa itu dulu (lihat di atas): tidak ada pcs yang hilang. */
@@ -2785,8 +2791,9 @@ function createCore(store, env) {
     var proof = mutationProof('batalHitungSetor', p, { id: rec.id }, me);
     if (checkRevision('SlipSetor', rec, p.expectedRevision, proof)) return findRow('SlipSetor', rec.id);
     if (rec.status !== 'diterima') fail('Setoran ini belum dihitung, jadi tidak ada hitungan yang dibatalkan.');
-    if (rec.asal || Object.keys(coreMap(rec.imporSumber)).length) fail('Hitungan dari data lama tidak dapat dibatalkan.');
-    if (rec.dibuatOleh !== rec.maklonId) fail('Setoran ini dicatat langsung oleh QC/owner, bukan laporan penjahit. Hapus slipnya lalu catat ulang.');
+    var ownerReport = typeof coreOwnerReportedSetor === 'function' && coreOwnerReportedSetor(rec);
+    if (!ownerReport && (rec.asal || Object.keys(coreMap(rec.imporSumber)).length)) fail('Hitungan dari data lama tidak dapat dibatalkan.');
+    if (!ownerReport && rec.dibuatOleh !== rec.maklonId) fail('Setoran ini dicatat langsung oleh QC/owner, bukan laporan penjahit. Hapus slipnya lalu catat ulang.');
     if (rec.upahId || sourcePaid(rec.id) || sourceInLegacySettlement(rec.id)) fail('Hitungan ini sudah masuk pembayaran upah, tidak bisa dibatalkan.');
     if (correctedSource('SlipSetor', rec.id)) fail('Hitungan ini punya riwayat koreksi fisik dan harus tetap utuh.');
     if (store.read('QC').some(function (q) { return q.setorId === rec.id; })) fail('Hitungan ini sudah di-QC. Hapus catatan QC-nya dahulu.');
@@ -2794,7 +2801,17 @@ function createCore(store, env) {
     var tanda = 'Hitungan ' + (rec.noSlip || '') + ' dibatalkan ' + (me.nama || 'owner') + ' ' + today();
     var lama = String(rec.catatan || '');
     var catatan = lama ? teks(lama, Math.max(0, 300 - tanda.length - 3)) + ' Â· ' + tanda : tanda;
-    store.update('SlipSetor', rec.id, Object.assign({ status: 'diajukan', diprosesOleh: '', diprosesPada: '', catatan: teks(catatan, 300) }, proof));
+    var undo = { status: 'diajukan', diprosesOleh: '', diprosesPada: '', catatan: teks(catatan, 300) };
+    if (ownerReport) {
+      /* Reopen only this counted portion. Earlier residual reports retain their
+         quantities; a new counting generation cannot erase those real rows as
+         if they were leftovers from an interrupted first acceptance. */
+      var source = Object.assign({},coreMap(rec.imporSumber)), restored = sumMaps([coreMap(rec.ukuran),coreMap(rec.rejectUkuran)]);
+      source.recountVersion = coreNum(source.recountVersion) + 1;
+      undo.imporSumber = JSON.stringify(source); undo.ukuran = JSON.stringify(restored); undo.total = coreSumSizes(restored);
+      undo.reject = 0; undo.rejectUkuran = '{}'; undo.tanggal = '';
+    }
+    store.update('SlipSetor', rec.id, Object.assign(undo, proof));
     return findRow('SlipSetor', rec.id);
   };
 
@@ -2805,6 +2822,8 @@ function createCore(store, env) {
     if (sheet !== 'SlipSetor' && sheet !== 'Potong') fail('Tidak bisa diubah.');
     if (store.fresh) store.fresh(sheet);
     var rec = findRow(sheet, String(p.id || '')); if (!rec) fail('Data tidak ditemukan.');
+    if (typeof coreMissingSizePending === 'function' && coreMissingSizePending(findRow('PO',rec.poId))) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
+    if (sheet === 'Potong' && rec.asal === 'koreksi-ukuran') fail('Biaya pemulihan riwayat belum diketahui. Bukti jumlah awal tidak boleh diubah menjadi biaya potong.');
     var proof = mutationProof('ubahHarga',p,{sheet:sheet,id:rec.id,harga:harga},me);
     if (checkRevision(sheet,rec,p.expectedRevision,proof)) { if (coreNum(sheet === 'SlipSetor' ? rec.upah : rec.tarif) !== harga) fail('Tarif sudah berubah. Muat ulang data.'); return {ok:true}; }
     if (correctedSource(sheet, rec.id)) fail('Sumber memiliki riwayat koreksi fisik dan harus tetap utuh.');
@@ -3117,6 +3136,7 @@ function createCore(store, env) {
     }
     if (sheet === 'RencanaPotong') fail('Persiapan potong tidak dapat dihapus. Batalkan persiapan yang belum dipakai.');
     if (sheet === 'KoreksiRiwayat' || correctedSource(sheet, id)) fail('Sumber dan riwayat koreksi fisik tidak dapat dihapus.');
+    if (rec.asal === 'koreksi-ukuran') fail('Bukti pemulihan ukuran tidak dapat dihapus. Periksa hasil hitung bersama owner.');
     if (['Potong', 'SlipKirim', 'SlipSetor', 'QC'].indexOf(sheet) >= 0) openPO(rec.poId);
     if (sheet === 'Potong') {
       if (rec.rencanaId) fail('Hasil potong dari persiapan owner tidak dapat dihapus karena pemakaian bahannya sudah tercatat.');
@@ -3202,6 +3222,7 @@ function createCore(store, env) {
       if (!r || !idOk(r.id) || existing[r.id]) return;
       if (sheet === 'PO' && r.ukuranAktif !== undefined && r.ukuranAktif !== null && r.ukuranAktif !== '') fail('Ukuran aktif PO baru hanya dibuat bersama persiapan bahan, bukan melalui impor lama.');
       if (sheet === 'PO' && coreMap(r.imporSumber).legacyCutting) fail('Bukti ukuran potong asal hanya boleh dibuat melalui migrasi terverifikasi.');
+      if (r.asal === 'koreksi-ukuran' || coreMap(r.imporSumber).ownerSizeCorrections || coreMap(r.imporSumber).ownerSizeCorrection) fail('Bukti pemulihan ukuran hanya boleh dibuat oleh owner melalui pemulihan ukuran.');
       if (sheet === 'Potong' && (r.rencanaId || coreParseJSON(r.alokasiBahan,[]).length)) fail('Hubungan persiapan potong hanya boleh dibuat saat menyimpan hasil potong.');
       if (sheet === 'StokBahan' && (r.stockMode || r.sourceStockId || r.jenis === 'harga' || r.alasan === 'hapus_stok')) fail('Identitas atau koreksi rol baru harus berasal dari pencatatan rol, bukan impor.');
       var o = {};
@@ -3261,6 +3282,7 @@ function createCore(store, env) {
       var masuk = []; var seen = {};
       data[sheet].forEach(function (r) {
         if (!r || !idOk(r.id) || idAsli[r.id] || seen[r.id]) return;
+        if (r.asal === 'koreksi-ukuran' || coreMap(r.imporSumber).ownerSizeCorrection) fail('Bukti pemulihan ukuran tidak boleh ditambahkan melalui impor.');
         if (sheet === 'PO' && r.ukuranAktif !== undefined && r.ukuranAktif !== null && r.ukuranAktif !== '') fail('Ukuran aktif PO tidak boleh ditambahkan atau diganti melalui impor lama.');
         if (sheet === 'Potong' && (r.rencanaId || coreParseJSON(r.alokasiBahan,[]).length)) fail('Hubungan persiapan potong tidak boleh ditambahkan melalui impor.');
         if (sheet === 'StokBahan' && (r.stockMode || r.sourceStockId || r.jenis === 'harga' || r.alasan === 'hapus_stok')) fail('Identitas atau koreksi rol tidak boleh ditambahkan atau diganti melalui impor.');
@@ -3277,6 +3299,8 @@ function createCore(store, env) {
           var source = coreMap(o.imporSumber), priorSource = coreMap(dulu && dulu.imporSumber), incomingEvidence = source.legacyCutting, priorEvidence = priorSource.legacyCutting;
           if (incomingEvidence && (!priorEvidence || typeof coreLegacyHash !== 'function' || coreLegacyHash(incomingEvidence) !== coreLegacyHash(priorEvidence))) fail('Bukti ukuran potong asal tidak boleh ditambahkan atau diubah melalui impor.');
           if (priorEvidence) { source.legacyCutting = priorEvidence; o.imporSumber = JSON.stringify(source); }
+          if (source.ownerSizeCorrections && coreDomainCanonical(source.ownerSizeCorrections) !== coreDomainCanonical(priorSource.ownerSizeCorrections)) fail('Bukti pemulihan ukuran tidak boleh diubah melalui impor.');
+          if (priorSource.ownerSizeCorrections) { source.ownerSizeCorrections = priorSource.ownerSizeCorrections; o.imporSumber = JSON.stringify(source); }
           o.gambar = dulu ? dulu.gambar : ''; o.tuntasPada = '';
         }
         /* pembayaran yang sudah dicatat di aplikasi ini tetap menempel pada itemnya */
@@ -3288,7 +3312,7 @@ function createCore(store, env) {
       hasil[sheet] = { dibuang: lama.length - asli.length, masuk: masuk.length, tetap: asli.length };
     });
     function isi(sheet) { return next[sheet] || store.read(sheet); }
-    if (next.PO) store.read('PO').forEach(function (p) { if (coreMap(p.imporSumber).legacyCutting && !next.PO.some(function (r) { return r.id === p.id; })) fail('PO dengan bukti ukuran potong asal tidak boleh dihapus melalui impor.'); });
+    if (next.PO) store.read('PO').forEach(function (p) { if ((coreMap(p.imporSumber).legacyCutting || coreMap(p.imporSumber).ownerSizeCorrections) && !next.PO.some(function (r) { return r.id === p.id; })) fail('PO dengan bukti ukuran potong asal atau pemulihan ukuran tidak boleh dihapus melalui impor.'); });
     if (next.StokBahan) {
       var afterStock = {}; next.StokBahan.forEach(function (r) { afterStock[r.id] = r; });
       var pricedSources = {}; store.read('StokBahan').forEach(function (r) { if (r.jenis === 'harga') pricedSources[r.sourceStockId]=true; });
@@ -3503,7 +3527,7 @@ function createCore(store, env) {
 
   /* aksi yang mengubah data dijalankan satu per satu di dalam kunci, lalu mengembalikan data terbaru */
   if (typeof coreInstallMigrationActions === 'function') coreInstallMigrationActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
-  if (typeof coreInstallHistoryCorrections === 'function') coreInstallHistoryCorrections(actions, { store: store, env: env, auth: auth, fail: fail });
+  if (typeof coreInstallHistoryCorrections === 'function') coreInstallHistoryCorrections(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   if (typeof coreInstallReturActions === 'function') coreInstallReturActions(actions, { store: store, env: env, auth: auth, fail: fail });
   if (typeof coreInstallStockDeleteActions === 'function') coreInstallStockDeleteActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
@@ -3513,6 +3537,7 @@ function createCore(store, env) {
     saveStok: 1, saveInvoiceBahan: 1, rinciStokRol: 1, ubahRinciRol: 1, arsipPO: 1, buangPO: 1, cocokkanStok: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, mulaiDariNol: 1, saveKaryawan: 1, saveGaji: 1, lunasGaji: 1, hapusGaji: 1, createKasbon: 1, createCicilan: 1, ubahKasbon: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, saveHistoryCorrection: 1 };
   WRITE.hapusStokBahan = 1;
   WRITE.savePrintHistory = 1;
+  WRITE.saveMissingSizeCorrection = 1;
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
@@ -3528,7 +3553,7 @@ function createCore(store, env) {
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
     var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
-    if ((contractAction[action] || COMMERCE_WRITE[action] || action === 'getHapusStokBahan' || action === 'hapusStokBahan' || action === 'getPrintHistory' || action === 'savePrintHistory') && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
+    if ((contractAction[action] || COMMERCE_WRITE[action] || action === 'getMissingSizeCorrection' || action === 'saveMissingSizeCorrection' || action === 'getHapusStokBahan' || action === 'hapusStokBahan' || action === 'getPrintHistory' || action === 'savePrintHistory') && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {
       var updateError = new Error('Versi aplikasi sudah berubah. Muat ulang aplikasi versi terbaru sebelum menyimpan.');
@@ -3544,6 +3569,13 @@ function createCore(store, env) {
            needs no production/settings reads. Its subsequent getState still
            checks durable recovery status and all production writes keep it. */
         if (!(action === 'login' && payload.deferState === true) && durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
+        /* A failed multi-table owner correction keeps its durable intent. Pause
+           conflicting history/PO maintenance until that same request resumes. */
+        if (typeof coreMissingSizePending === 'function' && ['savePO','setStatusPO','arsipPO','buangPO','importRows','gantiImpor','mulaiDariNol','applyLegacyMigration','recoverLegacyMigration','saveHistoryCorrection','saveUser'].indexOf(action) >= 0) {
+          if (store.fresh) store.fresh('PO');
+          var targetPo = action === 'savePO' ? payload.po && payload.po.id : ['setStatusPO','arsipPO','buangPO'].indexOf(action) >= 0 ? payload.id : action === 'saveHistoryCorrection' ? payload.poId : '';
+          if (store.read('PO').some(function (row) { return (!targetPo || row.id === targetPo) && coreMissingSizePending(row); })) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
+        }
         if (GLOBAL_VERSION_WRITE[action]) {
           auth(payload);
           var expectedVersion = payload.expectedVersion, observedVersion = store.version();
