@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.61 - Pulihkan ukuran riwayat yang tertinggal
+
+- Owner dapat menambahkan ukuran yang belum tercatat pada PO lama aktif melalui **Tambahkan ukuran yang tertinggal**. Catat ukuran, jumlah awal, penjahit, dan alasan; barang masuk antrean **Hitung fisik**.
+- Bukti lama tetap tersimpan. Koreksi membuat riwayat pembuka terpisah tanpa mengarang tanggal produksi, pemakaian kain, atau upah. Hasil bagus, reject, dan QC menunggu pemeriksaan.
+- Penyimpanan dapat dilanjutkan setelah koneksi terputus tanpa menggandakan catatan. Hitung bertahap dan pembatalan hitungan menjaga sisa yang belum dihitung.
+- Acuan HPP yang sudah lengkap tetap memakai produksi dengan biaya diketahui; riwayat pembuka tanpa biaya tidak menurunkan rata-rata.
+
 ## Rilis 1.5.60 - Retur paket (owner)
 
 - Menu baru Lainnya > Admin > **Retur paket**, khusus owner. Dipindahkan dari paket "Soldier Retur" (24 Okt 2026) ke aplikasi ini, memakai login PIN dan Google Sheet yang sama; fitur lain tidak berubah.

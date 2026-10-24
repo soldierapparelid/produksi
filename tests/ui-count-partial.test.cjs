@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const root=path.resolve(__dirname,'..'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 function part(a,b){const p=html.indexOf(a),q=html.indexOf(b,p+a.length);assert.ok(p>=0&&q>p,a);return html.slice(p,q);}
-function fixture(opt){opt=opt||{};const c=vm.createContext({console});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);vm.runInContext(`
+function fixture(opt){opt=opt||{};const c=vm.createContext({console});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);vm.runInContext(fs.readFileSync(path.join(root,'src/history-corrections.js'),'utf8'),c);vm.runInContext(`
 var A={},R={},S={state:{settings:{ukuran:['M','L','XL']}}},rendered='',requests=[],messages=[],closed=0,admin=${opt.admin?'true':'false'};
 var D={po:{po1:{id:'po1',nama:'Polo',status:'aktif',ukuran:{},workflow:{ukuran:{M:{maklon:{maklon1:{kirim:332,diterima:0,reject:0,diajukan:332,sisa:332}}},L:{maklon:{maklon1:{kirim:120,diterima:70,reject:2,diajukan:0,sisa:48}}},XL:{maklon:{other:{kirim:50,diterima:0,reject:0,diajukan:0,sisa:50}}}}}}}};
 function workflowFor(po){return po.workflow||{ukuran:{}};}function poSizes(){return ['M','L','XL'];}var ringkas={hidden:true,className:'',textContent:''};function $(sel){return sel==='[data-terima-ringkas]'?ringkas:null;}

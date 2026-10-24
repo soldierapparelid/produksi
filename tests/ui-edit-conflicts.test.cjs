@@ -5,6 +5,7 @@ function part(a,b){const p=html.indexOf(a),q=html.indexOf(b,p+a.length);assert.o
 function harness(){
  const calls=[],c=vm.createContext({console,transport(action,payload){return new Promise((resolve,reject)=>calls.push({action,payload:JSON.parse(JSON.stringify(payload)),resolve,reject}));}});
  vm.runInContext(core,c);
+ vm.runInContext(fs.readFileSync(path.join(root,'src/history-corrections.js'),'utf8'),c);
  vm.runInContext(`
  var A={},C={},R={},sheets=[],messages=[],S={token:'owner-session',busy:0,displayVersion:10,state:{ver:10,workflowVersion:2,me:{id:'owner01',divisi:'owner'},settings:{ukuran:['M'],poSembunyi:[]},stok:[],kirim:[],setor:[],potong:[],payroll:[]}},D={po:{},produk:{},user:{}};
  var modal={appendChild:function(node){node.parentNode=this;},removeChild:function(node){node.parentNode=null;}},document={body:{classList:{toggle:function(){}}},createElement:function(){return {innerHTML:''};}};

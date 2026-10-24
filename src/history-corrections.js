@@ -64,6 +64,36 @@ function coreHistoryPhysicalRows(sheet, rows, ledger) {
     return copy;
   });
 }
+/* Owner attestations are separate from the immutable imported cutting proof.
+   They restore a missing physical trail, never prices, dates or QC results. */
+function coreMissingSizeEntries(po) {
+  var raw = coreMap(po && po.imporSumber).ownerSizeCorrections;
+  if (raw === undefined) return [];
+  if (!(raw instanceof Array) || raw.length > 40) throw new Error('Bukti pemulihan ukuran tidak sah.');
+  var ids = {}, sizes = {};
+  raw.forEach(function (entry) {
+    var body = {}; Object.keys(entry || {}).forEach(function (key) { if (key !== 'proofHash' && key !== 'status') body[key] = entry[key]; });
+    if (!entry || entry.version !== 1 || !/^[A-Za-z0-9_-]{6,32}$/.test(entry.id || '') || ids[entry.id] || sizes[entry.size] ||
+        typeof entry.size !== 'string' || !entry.size.trim() || entry.size !== entry.size.trim() || entry.size.length > 40 || /^(?:__proto__|constructor|prototype)$/.test(entry.size) ||
+        !(entry.initialQty > 0) || entry.initialQty !== Math.floor(entry.initialQty) || entry.initialQty > 1000000000 || !entry.maklonId || !entry.reason || !entry.createdBy || !entry.createdAt ||
+        !entry.rows || entry.rows.Potong !== entry.id+'_cut' || entry.rows.SlipKirim !== entry.id+'_send' || entry.rows.SlipSetor !== entry.id+'_report' || !/^[a-f0-9]{64}$/.test(entry.expectedSourceHash || '') ||
+        ['preparing','complete'].indexOf(entry.status) < 0 || entry.proofHash !== coreLegacyHash(body)) throw new Error('Bukti pemulihan ukuran tidak cocok.');
+    ids[entry.id] = true; sizes[entry.size] = true;
+  });
+  return raw;
+}
+function coreMissingSizePending(po) { return coreMissingSizeEntries(po).some(function (entry) { return entry.status !== 'complete'; }); }
+function coreOwnerReportedSetor(row) { return !!(row && row.asal === 'koreksi-ukuran' && coreMap(row.imporSumber).ownerSizeCorrection); }
+function coreEffectiveCuttingEvidence(po) {
+  var legacy = coreLegacyCuttingEvidence(po), native = legacy ? null : coreActiveSizes(po), base = legacy || native;
+  if (base && !base.valid) return base;
+  var entries;
+  try { entries = coreMissingSizeEntries(po); } catch (e) { return {valid:false,ukuran:[]}; }
+  if (!entries.length) return base;
+  var sizes = base ? base.ukuran.slice() : Object.keys(coreMap(po && po.ukuran));
+  entries.filter(function (entry) { return entry.status === 'complete'; }).forEach(function (entry) { if (sizes.indexOf(entry.size) < 0) sizes.push(entry.size); });
+  return {valid:true,ukuran:coreSizeOrder(sizes),recoveryPending:entries.some(function (entry) { return entry.status !== 'complete'; })};
+}
 function coreInstallHistoryCorrections(actions, ctx) {
   var store = ctx.store;
   function owner(p) { var me = ctx.auth(p); if (me.divisi !== 'owner') ctx.fail('Hanya owner yang boleh mengoreksi riwayat fisik.'); return me; }
@@ -96,5 +126,91 @@ function coreInstallHistoryCorrections(actions, ctx) {
     store.append('KoreksiRiwayat', entry);
     fresh(['KoreksiRiwayat']);
     return read(p);
+  };
+
+  var openingTables = ['Potong','SlipKirim','SlipSetor'], scopeTables = ['Potong','SlipKirim','SlipSetor','QC','Gudang','GudangLama','RencanaPotong','LegacySettlement','KoreksiRiwayat'];
+  function missingContext(p) {
+    fresh(['PO','Pegawai','Pengaturan'].concat(scopeTables));
+    if ((store.getSettings() || {}).legacyMigrationStatus) ctx.fail('Pemulihan riwayat belum selesai.');
+    var po = store.read('PO').filter(function (row) { return row.id === String(p.poId || ''); })[0];
+    if (!po || po.status !== 'aktif' || !coreLegacyPO(po)) ctx.fail('Pemulihan ukuran hanya tersedia untuk PO lama yang masih aktif.');
+    var evidence = coreLegacyCuttingEvidence(po);
+    if (evidence && !evidence.valid) ctx.fail('Bukti ukuran potong asal perlu diperiksa dahulu.');
+    var entries = coreMissingSizeEntries(po), sizes = Object.keys(coreMap(po.ukuran));
+    if (evidence) sizes = sizes.concat(evidence.ukuran);
+    entries.forEach(function (entry) { sizes.push(entry.size); });
+    scopeTables.forEach(function (table) { store.read(table).filter(function (row) { return row.poId === po.id; }).forEach(function (row) {
+      ['ukuran','rejectUkuran','offlineUkuran','perbaikanUkuran'].forEach(function (key) { sizes = sizes.concat(Object.keys(coreMap(row[key]))); });
+      var allocations = coreParseJSON(row.alokasiBahan,[]);
+      if (allocations instanceof Array) allocations.forEach(function (allocation) { if (allocation && typeof allocation.ukuran === 'string' && allocation.ukuran) sizes.push(allocation.ukuran); });
+    }); });
+    sizes = coreSizeOrder(sizes.filter(function (size,index,list) { return list.indexOf(size) === index; }));
+    return {po:po,entries:entries,existingSizes:sizes};
+  }
+  function missingHash(context, omitEntry) {
+    var po = {}, source = Object.assign({},coreMap(context.po.imporSumber)); delete source.ownerSizeCorrections;
+    Object.keys(context.po).forEach(function (key) { if (key !== 'tuntasPada') po[key] = context.po[key]; }); po.imporSumber = JSON.stringify(source);
+    var data = {po:po};
+    scopeTables.forEach(function (table) { data[table] = store.read(table).filter(function (row) { return row.poId === po.id && (!omitEntry || row.id !== omitEntry.rows[table]); }).slice().sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); }); });
+    return coreLegacyHash(data);
+  }
+  function missingView(context) {
+    var configured = ctx.settings ? ctx.settings().ukuran : (store.getSettings() || {}).ukuran || DEFAULT_SETTINGS.ukuran;
+    return {poId:context.po.id,eligible:true,existingSizes:context.existingSizes,availableSizes:configured.filter(function (size) { return context.existingSizes.indexOf(size) < 0; }),
+      sourceHash:missingHash(context),corrections:context.entries,pending:context.entries.filter(function (entry) { return entry.status !== 'complete'; })};
+  }
+  actions.getMissingSizeCorrection = function (p) { owner(p); return missingView(missingContext(p)); };
+  actions.saveMissingSizeCorrection = function (p) {
+    var me = owner(p), context = missingContext(p), id = String(p.id || ''), size = String(p.size || ''), reason = String(p.reason || '').trim(), qty = Number(p.initialQty), maklonId = String(p.maklonId || '');
+    if (!/^[A-Za-z0-9_-]{6,32}$/.test(id)) ctx.fail('Identitas pemulihan tidak sah. Buka kembali formulir.');
+    if (p.initialQty === '' || p.initialQty === null || typeof p.initialQty === 'boolean' || !isFinite(qty) || qty <= 0 || qty !== Math.floor(qty) || qty > 1000000000) ctx.fail('Jumlah awal harus bilangan bulat 1 sampai 1.000.000.000 pcs.');
+    if (!reason || reason.length > 300) ctx.fail('Isi alasan pemulihan, maksimal 300 karakter.');
+    var entry = context.entries.filter(function (old) { return old.id === id; })[0], replayed = !!entry;
+    if (entry) {
+      if (entry.createdBy !== me.id || entry.size !== size || entry.initialQty !== qty || entry.maklonId !== maklonId || entry.reason !== reason || entry.expectedSourceHash !== p.expectedSourceHash) ctx.fail('Identitas pemulihan sudah dipakai untuk perubahan lain.');
+      if (entry.status === 'complete') { var done = missingView(context); done.replayed = true; return done; }
+      if (missingHash(context,entry) !== entry.expectedSourceHash) ctx.fail('Riwayat lain berubah selama pemulihan. Periksa bersama owner sebelum melanjutkan.');
+    } else {
+      if (context.entries.some(function (old) { return old.status !== 'complete'; })) ctx.fail('Selesaikan pemulihan ukuran yang tertunda dahulu.');
+      if (missingView(context).availableSizes.indexOf(size) < 0) ctx.fail('Pilih ukuran yang benar-benar belum tercatat pada PO ini.');
+      if (!p.expectedSourceHash || p.expectedSourceHash !== missingHash(context)) ctx.fail('Data berubah sejak formulir dibuka. Muat ulang sebelum menyimpan.');
+      var worker = store.read('Pegawai').filter(function (row) { return row.id === maklonId; })[0];
+      if (!worker || !worker.aktif || worker.divisi !== 'jahit') ctx.fail('Pilih penjahit aktif yang menangani ukuran ini.');
+      entry = {version:1,id:id,size:size,initialQty:qty,maklonId:maklonId,reason:reason,expectedSourceHash:p.expectedSourceHash,createdBy:me.id,createdAt:ctx.env.now().toISOString(),rows:{Potong:id+'_cut',SlipKirim:id+'_send',SlipSetor:id+'_report'}};
+      entry.proofHash = coreLegacyHash(entry); entry.status = 'preparing';
+    }
+    var ukuran = {}; ukuran[size] = qty;
+    var note = 'Pemulihan ukuran oleh owner. Jumlah awal; barang kembali belum dihitung. Tanggal produksi dan biaya lama belum diketahui. ' + reason;
+    var common = {poId:context.po.id,tanggal:'',ukuran:JSON.stringify(ukuran),total:qty,catatan:note.slice(0,300),dibuat:entry.createdAt,asal:'koreksi-ukuran',requestHash:entry.proofHash,requestActor:entry.createdBy};
+    var rows = {
+      Potong:Object.assign({},common,{id:entry.rows.Potong,userId:'',bahan:'',kg:0,rol:0,tarif:0,upahId:'',bahanList:'[]',alokasiBahan:'[]',rencanaId:''}),
+      SlipKirim:Object.assign({},common,{id:entry.rows.SlipKirim,noSlip:'',maklonId:maklonId,target:'',upah:0,dibuatOleh:me.id}),
+      SlipSetor:Object.assign({},common,{id:entry.rows.SlipSetor,noSlip:'',maklonId:maklonId,reject:0,rejectUkuran:'{}',upah:0,status:'diajukan',dibuatOleh:me.id,diprosesOleh:'',diprosesPada:'',upahId:'',workflowVersion:WORKFLOW_VERSION,imporSumber:JSON.stringify({ownerSizeCorrection:entry.id,reportedFromInitial:true})})
+    };
+    openingTables.forEach(function (table) {
+      var old = store.read(table).filter(function (row) { return row.id === rows[table].id; })[0];
+      if (old && Object.keys(rows[table]).some(function (key) { return String(old[key] == null ? '' : old[key]) !== String(rows[table][key]); })) ctx.fail('Catatan pemulihan sudah berubah. Jangan mengirimnya sebagai transaksi baru.');
+      if (store.validateRows) store.validateRows(table,[rows[table]]);
+    });
+    function saveEntry(status) {
+      entry.status = status;
+      var source = Object.assign({},coreMap(context.po.imporSumber)); source.ownerSizeCorrections = context.entries.filter(function (old) { return old.id !== entry.id; }).concat([entry]);
+      var patch = {imporSumber:JSON.stringify(source)};
+      coreMissingSizeEntries(Object.assign({},context.po,patch));
+      if (store.validateRows) store.validateRows('PO',[Object.assign({},context.po,patch)]);
+      store.update('PO',context.po.id,patch);
+      fresh(['PO']); context.po = store.read('PO').filter(function (row) { return row.id === context.po.id; })[0];
+    }
+    /* Durable intent precedes physical rows. Deterministic child IDs resume a
+       failed Sheets write without duplicates; other writes to this PO pause. */
+    if (!replayed) saveEntry('preparing');
+    openingTables.forEach(function (table) {
+      if (!store.read(table).some(function (row) { return row.id === rows[table].id; })) store.append(table,rows[table]);
+      fresh([table]);
+      var saved = store.read(table).filter(function (row) { return row.id === rows[table].id; })[0];
+      if (!saved || Object.keys(rows[table]).some(function (key) { return String(saved[key] == null ? '' : saved[key]) !== String(rows[table][key]); })) ctx.fail('Penyimpanan pemulihan belum pasti. Lanjutkan permintaan yang sama.');
+    });
+    saveEntry('complete');
+    var result = missingView(missingContext(p)); result.replayed = replayed; return result;
   };
 }
