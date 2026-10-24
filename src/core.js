@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.59';
+var APP_VERSION = '1.5.60';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -49,7 +49,12 @@ var SCHEMA = {
   CommerceRecord:['id','module','kind','parentId','data','revision','dibuat','dibuatOleh','diubah','sourceHash'],
   CommerceEvent:['id','module','parentId','kind','data','dibuat','dibuatOleh','sourceHash'],
   CommerceSource:['id','module','kind','parentId','data','sourceHash'],
-  CommerceImport:['id','sourceHash','planHash','status','data','dibuat','dibuatOleh','diubah']
+  CommerceImport:['id','sourceHash','planHash','status','data','dibuat','dibuatOleh','diubah'],
+  /* Retur paket (owner, 1.5.60): satu baris per paket, isi rinci di kolom data (JSON); berkas bukti di Google Drive */
+  ReturKasus:['id','caseKey','data','revision','dibuat','diubah'],
+  ReturImpor:['id','importKey','filename','dibuat','added','updated'],
+  ReturEvent:['id','caseId','type','actor','detail','dibuat'],
+  ReturBukti:['id','caseId','fileId','name','type','size','category','dibuat','requestId']
 };
 
 var TYPES = {
@@ -3177,7 +3182,7 @@ function createCore(store, env) {
   /* ---------- impor data lama ---------- */
   actions.importRows = function (p) {
     var me = adminAtauPemasangan(p);
-    var sheet = String(p.sheet || ''); if (!SCHEMA[sheet] || ['Pengaturan','Gambar','LegacySettlement','MigrasiJournal','GudangLama','KoreksiRiwayat','RiwayatCetak','RencanaPotong','CommerceRecord','CommerceEvent','CommerceSource','CommerceImport'].indexOf(sheet) >= 0) fail('Sheet tidak dikenal.');
+    var sheet = String(p.sheet || ''); if (!SCHEMA[sheet] || ['Pengaturan','Gambar','LegacySettlement','MigrasiJournal','GudangLama','KoreksiRiwayat','RiwayatCetak','RencanaPotong','CommerceRecord','CommerceEvent','CommerceSource','CommerceImport','ReturKasus','ReturImpor','ReturEvent','ReturBukti'].indexOf(sheet) >= 0) fail('Sheet tidak dikenal.');
     if (sheet === 'StokBahan') ['StokBahan','Potong','RencanaPotong'].forEach(function (name) { if (store.fresh) store.fresh(name); });
     var rows = p.rows instanceof Array ? p.rows : [];
     var existing = {}; store.read(sheet).forEach(function (r) { existing[r.id] = 1; });
@@ -3500,6 +3505,7 @@ function createCore(store, env) {
   if (typeof coreInstallMigrationActions === 'function') coreInstallMigrationActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   if (typeof coreInstallHistoryCorrections === 'function') coreInstallHistoryCorrections(actions, { store: store, env: env, auth: auth, fail: fail });
   if (typeof coreInstallCommerceActions === 'function') coreInstallCommerceActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
+  if (typeof coreInstallReturActions === 'function') coreInstallReturActions(actions, { store: store, env: env, auth: auth, fail: fail });
   if (typeof coreInstallStockDeleteActions === 'function') coreInstallStockDeleteActions(actions, { store: store, env: env, auth: auth, fail: fail, settings: settings });
   var WRITE = { setupOwner: 1, login: 1, logout: 1, changePin: 1, saveSettings: 1, saveUser: 1, saveProduk: 1, saveStokJualLink: 1, saveGambar: 1, importGambar: 1,
     savePO: 1, savePOWithRencana: 1, setStatusPO: 1, lepasUkuranPotong: 1, saveRencanaPotong: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1,
@@ -3513,6 +3519,9 @@ function createCore(store, env) {
   NO_STATE.savePrintHistory = 1;
   var COMMERCE_WRITE = { saveCommerceSupplier:1, saveCommerceProduct:1, deleteCommerceProduct:1, mergeCommerceInvoices:1, setCommerceHistoryVisibility:1, saveCommerceOrder:1, saveCommerceOrderBatch:1, saveCommerceNota:1, appendCommercePayment:1, appendCommerceGroupPayment:1, appendCommerceReceipt:1, voidCommerceEvent:1, gantiCommerceEvent:1, gantiCommerceGroupPayment:1, salinCommerceOrderLama:1, cancelCommerceRecord:1, restoreCommerceRecord:1, arsipCommerceNota:1, saveCommerceHpp:1, saveCommerceHppSettings:1, applyCommerceImport:1 };
   Object.keys(COMMERCE_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
+  /* Retur paket (1.5.60): jawabannya berisi data retur sendiri, tanpa memuat ulang data produksi */
+  var RETUR_WRITE = { importRetur:1, saveRetur:1, catatReturTanpaResi:1, cocokkanRetur:1, unggahReturBukti:1 };
+  Object.keys(RETUR_WRITE).forEach(function (name) { WRITE[name]=1; NO_STATE[name]=1; });
 
   function handle(action, payload) {
     var fn = actions[action];
