@@ -2,6 +2,17 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.60 - Retur paket (owner)
+
+- Menu baru Lainnya > Admin > **Retur paket**, khusus owner. Dipindahkan dari paket "Soldier Retur" (24 Okt 2026) ke aplikasi ini, memakai login PIN dan Google Sheet yang sama; fitur lain tidak berubah.
+- Impor ekspor pesanan TikTok Shop (CSV) dan Shopee (Excel .xlsx, pilih lembar), pemetaan kolom, pratinjau kandidat retur. File dibaca di perangkat; yang dikirim hanya kolom operasional paket yang dipilih (nama, telepon, alamat pembeli tidak disimpan). ID panjang tetap teks; impor ulang tidak menggandakan paket dan tidak menimpa penerimaan/bukti (`importRetur`, kunci impor per tahap 200 paket).
+- Status operasional: perlu dicek, dalam perjalanan, diterima baik/rusak/kurang, diduga hilang, hilang, tanpa retur fisik, selesai. Status diterima wajib tanggal, penerima, jumlah, dan minimal satu bukti (`saveRetur`, versi per paket).
+- Paket tanpa resi (`catatReturTanpaResi`) dan pencocokan manual ke pesanan (`cocokkanRetur`): bukti dan kronologi ikut pindah, catatan asal diarsipkan.
+- Bukti JPG/PNG/WebP/MP4/PDF maks. 20 MB (`unggahReturBukti`) disimpan di Google Drive pemilik, folder "Soldier Retur - Bukti", satu sub-folder per paket; foto di atas 4 MB dikecilkan di perangkat. Lihat bukti lewat `getReturBukti`. Folder Drive paket dapat diunduh sekaligus (ZIP) dari Google Drive.
+- Laporan cetak A4 / Simpan PDF untuk paket terpilih (data, bukti foto, kronologi) dan ekspor CSV daftar yang tampil.
+- Tab Sheet baru: ReturKasus, ReturImpor, ReturEvent, ReturBukti (ikut cadangan owner, tidak bisa dihapus lewat hapus catatan umum).
+- Pemasangan server pertama kali meminta izin Google Drive: jalankan `siapkanFolderRetur` sekali dari editor Apps Script sebelum memasang versi baru.
+
 ## Rilis 1.5.59 - Riwayat cetak cepat dan cetak pilihan
 
 - Riwayat cetak menampilkan foto barang dan centang pilihan. Pilih beberapa PO atau **Pilih semua**, lalu cetak daftar potong atau kartu jalan per ukuran dalam satu pratinjau A4.
