@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261024-pulihkan-ukuran-1561';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261029-ringkasan-hpp-1561';</script>
 <script>
 (function () {
 'use strict';
@@ -13124,7 +13124,198 @@ function commerceHppEvidence(m){
     (obs.provisional?'<p class="small warn">Acuan sementara: masih ada harga atau pemakaian yang perlu dilengkapi.</p>':'')+'</div>';
   return summary+'<details class="card"><summary>Rincian acuan biaya</summary><div class="col gap-s"><p class="small">'+nf(basis.includedPcs||0)+' pcs menjadi acuan'+(basis.ukuran?', dihitung dari potongan ukuran '+esc(basis.ukuran)+' saja (mewakili semua ukuran barang ini)':'')+(basis.excludedPcs?' · '+nf(basis.excludedPcs)+' pcs lama tidak memiliki rincian lengkap':'')+'. Ongkos potong mengikuti acuan yang sama.</p>'+details.map(function(d){return '<div class="row"><span class="grow">'+esc(d.jenis||d.nama)+' · '+nfQty(d.qty==null?d.kg:d.qty)+' '+esc(satuanPendek(d.unit||'kg'))+'<br><span class="small muted">'+(d.avgHarga>0?rp(d.avgHarga)+' / '+esc(satuanPendek(d.unit||'kg'))+' · ':'')+esc(d.priceSource||'')+'</span></span><b>'+(d.avgHarga==null||d.avgHarga<=0?'Belum diketahui':rp(d.totalCost))+'</b></div>';}).join('')+(obs.rolls||[]).map(function(r){return '<div class="card col gap-s"><b>'+esc(r.label||'Rol bahan')+'</b><span class="small">Berat awal '+nfQty(r.originalQty)+' '+esc(satuanPendek(r.unit))+' · dipakai '+nfQty(r.usedQty)+' '+esc(satuanPendek(r.unit))+'</span><span class="small">'+(r.harga>0?nfQty(r.usedQty)+' '+esc(satuanPendek(r.unit))+' × '+rp(r.harga)+' = '+rp(r.totalCost):'Harga belum lengkap')+(r.full?' · Rol penuh':' · Sebagian rol')+'</span></div>';}).join('')+(obs.notes||[]).map(function(s){return '<p class="small muted">'+esc(s)+'</p>';}).join('')+(basis.excluded||[]).map(function(r){return '<p class="small muted">'+tgl(r.tanggal)+' · '+esc(r.size)+' '+nf(r.jumlah)+' pcs: '+esc(r.reason)+'</p>';}).join('')+'</div></details>';
 }
-VIEWS.hpp=function(){return commerceLoadView('hpp','HPP produk','Biaya model per pcs, acuan produksi, dan simulasi harga jual.',function(data){return '<div class="tools">'+searchBox('q','Cari model atau series')+'<button class="btn" data-a="commerceHppSettings">Biaya marketplace</button></div>'+(data.warnings||[]).map(function(s){return '<div class="note warn">'+esc(s)+'</div>';}).join('')+(function(){var semua=data.models||[],tampil=S.sub.hppSemua==='1'?semua:commerceHppTampil(semua),hilang=semua.length-commerceHppTampil(semua).length;return hilang?'<p class="small muted">'+nf(hilang)+' model dari PO yang sudah dihapus atau diarsipkan tidak ditampilkan. <button class="btn ghost sm" data-a="sub" data-k="hppSemua" data-v="'+(S.sub.hppSemua==='1'?'':'1')+'">'+(S.sub.hppSemua==='1'?'Sembunyikan lagi':'Tampilkan')+'</button></p>':'';})()+commerceList('hpp',S.sub.hppSemua==='1'?(data.models||[]):commerceHppTampil(data.models||[]),function(m){return '<button class="item" data-a="commerceHppOpen" data-id="'+esc(m.id)+'">'+commerceHppThumb(m)+'<span class="grow"><b>'+esc(m.nama)+'</b><br><span class="small muted">'+esc(m.series)+' · '+esc((m.sizes||[]).join(', '))+'</span><br><span class="small muted">'+commerceHppRingkas(m)+'</span></span><span class="right">'+commerceHppStatus(m)+'</span>'+ic('chev')+'</button>';},function(m){return[m.nama,m.series];})+commerceEmptyActions('hpp');});};
+VIEWS.hpp=function(){return commerceLoadView('hpp','HPP produk','Biaya model per pcs, acuan produksi, dan simulasi harga jual.',function(data){return '<div class="tools">'+searchBox('q','Cari model atau series')+'<button class="btn" data-a="commerceHppSettings">Biaya marketplace</button><button class="btn pri" data-a="commerceHppExportOpen">'+ic('download')+'Unduh ringkasan</button></div>'+(data.warnings||[]).map(function(s){return '<div class="note warn">'+esc(s)+'</div>';}).join('')+(function(){var semua=data.models||[],tampil=S.sub.hppSemua==='1'?semua:commerceHppTampil(semua),hilang=semua.length-commerceHppTampil(semua).length;return hilang?'<p class="small muted">'+nf(hilang)+' model dari PO yang sudah dihapus atau diarsipkan tidak ditampilkan. <button class="btn ghost sm" data-a="sub" data-k="hppSemua" data-v="'+(S.sub.hppSemua==='1'?'':'1')+'">'+(S.sub.hppSemua==='1'?'Sembunyikan lagi':'Tampilkan')+'</button></p>':'';})()+commerceList('hpp',S.sub.hppSemua==='1'?(data.models||[]):commerceHppTampil(data.models||[]),function(m){return '<button class="item" data-a="commerceHppOpen" data-id="'+esc(m.id)+'">'+commerceHppThumb(m)+'<span class="grow"><b>'+esc(m.nama)+'</b><br><span class="small muted">'+esc(m.series)+' · '+esc((m.sizes||[]).join(', '))+'</span><br><span class="small muted">'+commerceHppRingkas(m)+'</span></span><span class="right">'+commerceHppStatus(m)+'</span>'+ic('chev')+'</button>';},function(m){return[m.nama,m.series];})+commerceEmptyActions('hpp');});};
+/* HPP XLSX START */
+function commerceHppXlsx(rows, meta) {
+  if (!Array.isArray(rows) || rows.length > 1048571) throw new Error('Jumlah model melebihi batas Excel.');
+  meta = meta || {};
+  var encoder = new TextEncoder(), mainNs = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  function xml(value) {
+    var s = value === null || value === undefined ? '' : String(value), clean = '';
+    for (var i = 0; i < s.length; i++) {
+      var n = s.charCodeAt(i);
+      if (n >= 0xd800 && n <= 0xdbff) {
+        var next = s.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) clean += s[i] + s[++i];
+      } else if (!(n >= 0xdc00 && n <= 0xdfff) && (n === 9 || n === 10 || n === 13 || n >= 32 && n !== 0xfffe && n !== 0xffff)) clean += s[i];
+    }
+    return clean.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  }
+  function textCell(ref, value, style) {
+    if (String(value == null ? '' : value).length > 32767) throw new Error('Teks terlalu panjang untuk satu sel Excel.');
+    return '<c r="' + ref + '" s="' + style + '" t="inlineStr"><is><t xml:space="preserve">' + xml(value) + '</t></is></c>';
+  }
+  function numberCell(ref, value, style) {
+    return typeof value === 'number' && Number.isFinite(value) ? '<c r="' + ref + '" s="' + style + '"><v>' + value + '</v></c>' : '<c r="' + ref + '" s="' + style + '"/>';
+  }
+  var columns = [
+    ['nama', 'Model', 42], ['series', 'Series', 22], ['ukuran', 'Ukuran', 18],
+    ['kain', 'Kain / pcs (Rp)', 19, true], ['potong', 'Potong / pcs (Rp)', 19, true], ['jahit', 'Jahit / pcs (Rp)', 19, true],
+    ['lain', 'Biaya lain / pcs (Rp)', 21, true], ['total', 'HPP / pcs (Rp)', 21, true],
+    ['status', 'Status biaya', 34], ['acuan', 'Acuan', 24], ['hasil', 'Hasil acuan (pcs)', 20, true], ['catatan', 'Catatan', 65]
+  ];
+  var last = Math.max(5, rows.length + 5), sheetRows = [
+    '<row r="1" ht="29" customHeight="1">' + textCell('A1', 'RINGKASAN HPP PRODUK', 1) + '</row>',
+    '<row r="2" ht="22" customHeight="1">' + textCell('A2', 'Tanggal: ' + (meta.tanggal || ''), 2) + '</row>',
+    '<row r="3" ht="32" customHeight="1">' + textCell('A3', 'Lingkup: ' + (meta.lingkup || ''), 2) + '</row>',
+    '<row r="4" ht="42" customHeight="1">' + textCell('A4', meta.catatan || '', 2) + '</row>',
+    '<row r="5" ht="34" customHeight="1">' + columns.map(function (c, i) { return textCell(String.fromCharCode(65 + i) + '5', c[1], 3); }).join('') + '</row>'
+  ];
+  rows.forEach(function (row, index) {
+    var line = index + 6;
+    sheetRows.push('<row r="' + line + '">' + columns.map(function (c, i) {
+      var ref = String.fromCharCode(65 + i) + line;
+      return c[3] ? numberCell(ref, row[c[0]], c[0] === 'hasil' ? 5 : 4) : textCell(ref, row[c[0]], 6);
+    }).join('') + '</row>');
+  });
+  var declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  var sheet = declaration + '<worksheet xmlns="' + mainNs + '"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:L' + last + '"/>' +
+    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="5" topLeftCell="A6" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A6" sqref="A6"/></sheetView></sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="30"/><cols>' + columns.map(function (c, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + c[2] + '" customWidth="1"/>'; }).join('') + '</cols>' +
+    '<sheetData>' + sheetRows.join('') + '</sheetData><autoFilter ref="A5:L' + last + '"/><mergeCells count="4"><mergeCell ref="A1:L1"/><mergeCell ref="A2:L2"/><mergeCell ref="A3:L3"/><mergeCell ref="A4:L4"/></mergeCells>' +
+    '<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>';
+  var styles = declaration + '<styleSheet xmlns="' + mainNs + '">' +
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>' +
+    '<fonts count="3"><font><sz val="11"/><color rgb="FF17211B"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="16"/><color rgb="FF214E34"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF214E34"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFDDE5DF"/></bottom><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>' +
+    '<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="top"/></xf>' +
+    '<xf numFmtId="3" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="top"/></xf>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  var parts = [
+    ['[Content_Types].xml', declaration + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+    ['_rels/.rels', declaration + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', declaration + '<workbook xmlns="' + mainNs + '" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="Ringkasan HPP" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', declaration + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/styles.xml', styles], ['xl/worksheets/sheet1.xml', sheet]
+  ];
+  var crcTable = new Uint32Array(256);
+  for (var a = 0; a < 256; a++) { var crc = a; for (var b = 0; b < 8; b++) crc = crc & 1 ? 0xedb88320 ^ crc >>> 1 : crc >>> 1; crcTable[a] = crc >>> 0; }
+  function checksum(bytes) { var result = 0xffffffff; for (var i = 0; i < bytes.length; i++) result = crcTable[(result ^ bytes[i]) & 255] ^ result >>> 8; return (result ^ 0xffffffff) >>> 0; }
+  function header(size) { var bytes = new Uint8Array(size); return { bytes: bytes, view: new DataView(bytes.buffer) }; }
+  var chunks = [], directory = [], offset = 0, directorySize = 0;
+  parts.forEach(function (part) {
+    var name = encoder.encode(part[0]), bytes = encoder.encode(part[1]), sum = checksum(bytes), local = header(30), central = header(46), l = local.view, d = central.view;
+    l.setUint32(0, 0x04034b50, true); l.setUint16(4, 20, true); l.setUint16(6, 0x0800, true); l.setUint16(12, 33, true);
+    l.setUint32(14, sum, true); l.setUint32(18, bytes.length, true); l.setUint32(22, bytes.length, true); l.setUint16(26, name.length, true);
+    d.setUint32(0, 0x02014b50, true); d.setUint16(4, 20, true); d.setUint16(6, 20, true); d.setUint16(8, 0x0800, true); d.setUint16(14, 33, true);
+    d.setUint32(16, sum, true); d.setUint32(20, bytes.length, true); d.setUint32(24, bytes.length, true); d.setUint16(28, name.length, true); d.setUint32(42, offset, true);
+    chunks.push(local.bytes, name, bytes); directory.push(central.bytes, name); offset += 30 + name.length + bytes.length; directorySize += 46 + name.length;
+  });
+  var end = header(22); end.view.setUint32(0, 0x06054b50, true); end.view.setUint16(8, parts.length, true); end.view.setUint16(10, parts.length, true); end.view.setUint32(12, directorySize, true); end.view.setUint32(16, offset, true);
+  var output = new Uint8Array(offset + directorySize + 22), pos = 0;
+  chunks.concat(directory, [end.bytes]).forEach(function (bytes) { output.set(bytes, pos); pos += bytes.length; });
+  return output;
+}
+/* HPP XLSX END */
+
+/* HPP EXPORT START — saved, filtered snapshot; downloads never change production data. */
+var HPP_EXPORT_PER_PAGE = 6;
+function commerceHppExportRows(data) {
+  var models=S.sub.hppSemua==='1'?(data.models||[]):commerceHppTampil(data.models||[]);
+  function number(v){return v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v);}
+  return models.filter(function(m){var status=S.f['commerceStatus-hpp'];return (!status||!m.status||m.status===status)&&cocok(S.f.q,[m.nama,m.series]);}).map(function(m){
+    var k=m.kain||{},p=m.potong||{},b=m.basis||k.basis||{},o=k.observasi||{};
+    var temporary=!m.configured||!!b.provisional||!!o.provisional||!b.ukuran;
+    var total=number(m.configured?m.hppTotal:commerceHppKira(m));
+    var status=m.configured?'Biaya diperiksa':commerceHppSaved(m)?'Pengaturan tersimpan · menunggu acuan lengkap':'Periksa biaya';
+    var notes=(m.warnings||[]).concat(o.notes||[]);
+    if(m.config&&m.config.value&&m.config.value.ketLain)notes.push('Biaya lain: '+m.config.value.ketLain);
+    if(temporary)notes.push('Acuan atau pemeriksaan biaya belum final.');
+    return {nama:m.nama||'',series:m.series||'',ukuran:(m.sizes||[]).join(', '),
+      kain:number(k.complete?k.perPcs:null),potong:number(p.complete?p.perPcs:null),jahit:number(m.hargaJahit),lain:number(m.biayaLain),
+      total:total,status:(temporary&&total!==null?'Perkiraan · ':'')+status,
+      acuan:b.ukuran?'Ukuran '+b.ukuran+(temporary?' · sementara':''):'Seluruh hasil · sementara',
+      hasil:number(b.includedPcs===undefined?k.totalPcs:b.includedPcs),catatan:notes.filter(function(s,i,a){return s&&a.indexOf(s)===i;}).join(' '),perkiraan:temporary};
+  });
+}
+function commerceHppExportCurrent(s) {
+  if(!s||!commerceScope()||s.scope!==commerceScope())return false;
+  var e=commerceEntry('hpp');return s.source===e.data&&s.version===e.version&&!e.stale&&!e.loading&&!e.error;
+}
+/* Wrap by measured width, including words with no spaces. PNG abbreviations are explicit; Excel keeps the full text. */
+function commerceHppExportWrap(ctx,text,width,maxLines) {
+  var lines=[],line='',words=String(text||'').replace(/\s+/g,' ').trim().split(' ');
+  words.forEach(function(word){
+    if(!word)return;
+    var candidate=line?line+' '+word:word;
+    if(ctx.measureText(candidate).width<=width){line=candidate;return;}
+    if(line){lines.push(line);line='';}
+    Array.from(word).forEach(function(ch){if(line&&ctx.measureText(line+ch).width>width){lines.push(line);line='';}line+=ch;});
+  });
+  if(line)lines.push(line);
+  if(maxLines&&lines.length>maxLines){lines=lines.slice(0,maxLines);var tail=lines[maxLines-1],suffix='… (lihat Excel)';while(tail&&ctx.measureText(tail+suffix).width>width)tail=tail.slice(0,-1);lines[maxLines-1]=tail+suffix;}
+  return lines;
+}
+function commerceHppExportCanvas(s,page) {
+  var canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+  if(!ctx)throw new Error('Gambar belum bisa dibuat di perangkat ini. Gunakan Excel.');
+  var pages=Math.ceil(s.rows.length/HPP_EXPORT_PER_PAGE),start=page*HPP_EXPORT_PER_PAGE,rows=s.rows.slice(start,start+HPP_EXPORT_PER_PAGE);
+  canvas.width=1440;
+  function lines(text,width,font,max){ctx.font=font;return commerceHppExportWrap(ctx,text,width,max);}
+  var scope=lines(s.meta.lingkup,1336,'22px Arial',3),warning=lines(s.meta.catatan,1336,'20px Arial',3);
+  var top=180+scope.length*29+(warning.length?18+warning.length*27:0),cards=rows.map(function(r){
+    return {r:r,name:lines(r.nama,608,'bold 27px Arial',3),series:lines(r.series+' · '+(r.ukuran||'Ukuran belum tercatat'),608,'20px Arial',2),status:lines(r.status,608,'bold 21px Arial',2),note:lines(r.catatan,608,'19px Arial',3)};
+  }),rowHeights=[];
+  cards.forEach(function(c,i){c.height=312+c.name.length*33+c.series.length*26+c.status.length*27+c.note.length*25;if(i%2===0)rowHeights.push(c.height);else rowHeights[rowHeights.length-1]=Math.max(rowHeights[rowHeights.length-1],c.height);});
+  canvas.height=top+rowHeights.reduce(function(n,h){return n+h+24;},0)+70;
+  ctx.fillStyle='#f1f4ee';ctx.fillRect(0,0,canvas.width,canvas.height);
+  function text(value,x,y,font,color){ctx.font=font;ctx.fillStyle=color||'#18251c';ctx.textAlign='left';ctx.fillText(value,x,y);}
+  function block(ls,x,y,font,lineHeight,color){ls.forEach(function(v,i){text(v,x,y+i*lineHeight,font,color);});return y+ls.length*lineHeight;}
+  text('SOLDIER PRODUKSI',52,54,'bold 22px Arial','#435637');
+  text('Ringkasan HPP produk',52,105,'bold 38px Arial');
+  text(s.meta.tanggal+' · '+s.rows.length+' model · Halaman '+(page+1)+' / '+pages,52,143,'21px Arial');
+  var sy=block(scope,52,179,'22px Arial',29);if(warning.length)block(warning,52,sy+13,'20px Arial',27,'#8a3d00');
+  var y=top;
+  cards.forEach(function(c,i){
+    var x=52+(i%2)*680,h=rowHeights[Math.floor(i/2)],r=c.r;
+    ctx.fillStyle='#fff';ctx.fillRect(x,y,656,h);ctx.strokeStyle='#c3cebd';ctx.lineWidth=2;ctx.strokeRect(x,y,656,h);
+    var cy=block(c.name,x+24,y+39,'bold 27px Arial',33);
+    cy=block(c.series,x+24,cy+4,'20px Arial',26,'#42513f')+17;
+    [['Kain / pcs',r.kain],['Potong / pcs',r.potong],['Jahit / pcs',r.jahit],['Biaya lain / pcs',r.lain]].forEach(function(pair){
+      text(pair[0],x+24,cy,'22px Arial');ctx.textAlign='right';ctx.font='bold 22px Arial';ctx.fillStyle='#18251c';ctx.fillText(pair[1]===null?'Belum lengkap':rp(pair[1]),x+632,cy);cy+=33;
+    });
+    cy+=7;ctx.fillStyle='#eaf0e5';ctx.fillRect(x+16,cy-24,624,47);
+    text('HPP / pcs',x+24,cy+7,'bold 24px Arial');ctx.textAlign='right';ctx.font='bold 27px Arial';ctx.fillText(r.total===null?'Belum lengkap':(r.perkiraan?'± ':'')+rp(r.total),x+632,cy+7);
+    cy=block(c.status,x+24,cy+60,'bold 21px Arial',27,r.perkiraan?'#8a3d00':'#285730');
+    text(r.acuan+(r.hasil!==null?' · '+nf(r.hasil)+' pcs':''),x+24,cy+12,'20px Arial');
+    if(c.note.length)block(c.note,x+24,cy+48,'19px Arial',25,'#42513f');
+    if(i%2===1||i===cards.length-1)y+=h+24;
+  });
+  text('Semua biaya dalam rupiah per pcs. ± = perkiraan. Rincian lengkap tersedia di Excel.',52,canvas.height-29,'20px Arial');
+  return canvas;
+}
+function commerceHppExportSheet() {
+  var s=S.hppExport;
+  if(!commerceHppExportCurrent(s))return sheetHtml('Unduh ringkasan HPP','<div class="note warn">Data HPP berubah. Tutup dan buka kembali Unduh ringkasan.</div>','<button class="btn" data-a="close">Tutup</button>');
+  var pages=Math.ceil(s.rows.length/HPP_EXPORT_PER_PAGE);
+  if(!s.preview&&!s.imageError){try{s.preview=commerceHppExportCanvas(s,s.page).toDataURL('image/png');}catch(e){s.imageError='Pratinjau PNG belum dapat dibuat. Ringkasan Excel tetap bisa diunduh.';}}
+  var pager=pages>1?'<div class="row wrap gap-s"><button class="btn sm" data-a="commerceHppExportPage" data-step="-1"'+(s.page?'':' disabled')+'>Sebelumnya</button><span class="grow center">Gambar '+(s.page+1)+' / '+pages+'</span><button class="btn sm" data-a="commerceHppExportPage" data-step="1"'+(s.page+1<pages?'':' disabled')+'>Berikutnya</button></div>':'';
+  return sheetHtml('Unduh ringkasan HPP','<div class="col"><b>'+nf(s.rows.length)+' model · '+esc(s.meta.tanggal)+'</b><p class="small">'+esc(s.meta.lingkup)+'</p><p class="small muted">Excel memuat semua model dalam ringkasan. PNG dibagi per '+HPP_EXPORT_PER_PAGE+' model agar tetap terbaca. Biaya yang belum lengkap diberi keterangan.</p>'+pager+(s.imageError?'<div class="note warn">'+esc(s.imageError)+'</div>':'<img src="'+s.preview+'" alt="Pratinjau ringkasan HPP halaman '+(s.page+1)+'" style="width:100%;border:1px solid var(--line);border-radius:10px">')+'</div>',
+    '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="commerceHppExportPng"'+(s.preview?'':' disabled')+'>Unduh PNG'+(pages>1?' · '+(s.page+1)+'/'+pages:'')+'</button><button class="btn pri" data-a="commerceHppExportExcel">Unduh Excel (.xlsx)</button>');
+}
+A.commerceHppExportOpen=function(el) {
+  var scope=commerceScope();if(!scope)return;
+  return act(el,commerceFetch('hpp',!!commerceEntry('hpp').error).then(function(data){
+    if(scope!==commerceScope())throw new Error('Sesi berubah. Buka kembali HPP.');
+    var entry=commerceEntry('hpp');if(entry.stale)throw new Error('HPP sedang diperbarui. Muat ulang lalu coba lagi.');
+    var rows=commerceHppExportRows(data);if(!rows.length)return toast('Tidak ada model yang cocok untuk diunduh.',true);
+    var lingkup=(S.sub.hppSemua==='1'?'Semua model, termasuk PO dihapus / arsip':'Model yang tampil di halaman HPP')+(S.f.q?' · Pencarian: '+S.f.q:' · Tanpa pencarian');
+    S.hppExport={scope:scope,source:data,version:entry.version,rows:rows,page:0,preview:'',imageError:'',fileDate:todayYmd(),meta:{tanggal:new Date().toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})+' WIB',lingkup:lingkup,catatan:(data.warnings||[]).join(' ')}};
+    openSheet(commerceHppExportSheet,{cls:'wide',live:true});
+  })).catch(quiet);
+};
+A.commerceHppExportPage=function(el){var s=S.hppExport;if(!commerceHppExportCurrent(s))return toast('Buka kembali ringkasan dari HPP terbaru.',true);s.page=Math.max(0,Math.min(Math.ceil(s.rows.length/HPP_EXPORT_PER_PAGE)-1,s.page+Number(el.getAttribute('data-step')||0)));s.preview='';s.imageError='';paintTop();};
+A.commerceHppExportExcel=function(){var s=S.hppExport;if(!commerceHppExportCurrent(s))return toast('Buka kembali ringkasan dari HPP terbaru.',true);try{unduhBerkas('ringkasan-hpp-'+s.fileDate+'.xlsx',commerceHppXlsx(s.rows,s.meta),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');toast('Ringkasan Excel diunduh.');}catch(e){toast('Excel belum bisa dibuat. Coba lagi.',true);}};
+A.commerceHppExportPng=function(){var s=S.hppExport;if(!commerceHppExportCurrent(s)||!s.preview)return toast('Buka kembali pratinjau ringkasan.',true);var a=document.createElement('a');a.href=s.preview;a.download='ringkasan-hpp-'+s.fileDate+'-'+(s.page+1)+'.png';document.body.appendChild(a);a.click();a.remove();toast('Gambar ringkasan diunduh.');};
+/* HPP EXPORT END */
+
 A.commerceHppOpen=function(el){var id=el.getAttribute('data-id'),m=commerceHppModel(id);if(!m)return;var data=commerceData('hpp'),cfg=(m.config||{}).value||{},body=hid('modelId',id)+hid('revision',data.revision||'')+'<h3>'+esc(m.nama)+'</h3><p class="small muted">'+esc(m.series)+' · seluruh ukuran model ini</p>'+'<div data-commerce-hpp-cost>'+commerceHppCost(m)+'</div>'+commerceHppWarnings(m)+commerceHppEvidence(m)+
   '<div class="grid g-2">'+fSelect('Ongkos jahit','jahitMode',[['auto','Tarif jahit dari data'],['manual','Isi biaya per pcs']],cfg.jahitMode||'auto')+fNum('Biaya jahit manual / pcs (Rp)','hargaJahit',cfg.hargaJahit==null?(m.hargaJahit==null?'':m.hargaJahit):cfg.hargaJahit,'step="0.01"')+'</div><div class="grid g-2">'+fNum('Biaya lain / pcs (Rp)','biayaLain',cfg.biayaLain||0,'step="0.01"')+fNum('Target margin (%)','targetMargin',cfg.targetMargin==null?30:cfg.targetMargin,'max="99.99" step="0.01"')+'</div>'+fText('Rincian biaya lain','ketLain',cfg.ketLain,'maxlength="300"','Jangan masukkan ulang kain, potong, atau jahit yang sudah dihitung di atas.')+'<label class="row"><input type="checkbox" name="reviewed"'+(commerceHppSaved(m)?' checked':'')+'>Saya sudah memeriksa isian biaya dan acuan yang tersedia.</label><p class="small warn" data-commerce-hpp-review hidden role="alert">Centang pemeriksaan biaya di atas, lalu tekan Simpan biaya model.</p>'+(commerceHppSaved(m)?'<p class="xs muted">Biaya model ini sudah pernah disimpan. Salah isi? Ubah angkanya lalu tekan Simpan biaya model.</p>':'')+'<div class="note" data-commerce-hpp-live aria-live="polite"></div>'+
   (m.configured?'<p class="small muted">HPP terakhir tersimpan '+rp(m.hppTotal)+' / pcs.</p><button class="btn" data-a="commerceHppSim" data-id="'+esc(id)+'">Simulasi harga jual</button><p class="xs muted">Simulasi memakai biaya yang sudah tersimpan.</p>':'<div class="note">Rekomendasi harga muncul setelah biaya lengkap dan sudah diperiksa.</div>');
