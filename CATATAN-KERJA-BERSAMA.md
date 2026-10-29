@@ -2,9 +2,11 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah pemasangan server 1.5.61.
+Diperbarui: 29 Oktober 2026 oleh ChatGPT/Codex, ringkasan HPP pada cabang tampilan; server tetap 1.5.61.
 
 ## 1. Keadaan sekarang
+
+- [PR #90](https://github.com/soldierapparelid/produksi/pull/90), cabang `codex/unduh-ringkasan-hpp`, menambahkan **Unduh ringkasan** pada HPP: Excel (.xlsx) seluruh hasil pencarian dan PNG per 6 model. Biaya kosong, perkiraan, acuan XL, dan status pemeriksaan dipertahankan. Rakitan tampilan `20261029-ringkasan-hpp-1561`; versi aplikasi tetap **1.5.61**, tanpa perubahan server atau data. Build dan **1.377 tes lulus**; pemeriksaan GitHub lulus. Pemilik menyetujui penggabungan dan pengaktifan melalui PR #90 pada 29 Oktober 2026. Sidik server di tabel berikut tetap merujuk pemasangan 24 Oktober.
 
 - Server **1.5.61** sudah dipasang dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
@@ -32,7 +34,7 @@ Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah pemasangan server 1.5.61
    - Rilis yang mengubah server: naikkan `APP_VERSION` dan `UI_VERSION` bersama (1.5.61, dan seterusnya). **Pasang server dulu, baru buka PR.** Server menolak penyimpanan bila versi tampilan berbeda dengan versi server, dan pemilik biasanya merge dalam hitungan detik.
    - Perubahan tampilan saja (warna, teks, tata letak): versi **tetap**. Ganti hanya `PK_BUILD` dan `RAKITAN` dengan nilai yang sama. Server tidak perlu dipasang.
 5. **Jangan edit `apps-script/Core.gs` atau `apps-script/Index.html` langsung.** Ubah `src/*.js` dan `index.html`, lalu jalankan `node scripts/build-core.cjs`. Pemeriksaannya: `node scripts/build-core.cjs --check`.
-6. **Uji sebelum PR:** jalankan `node --test`. Semua harus lulus; saat ini ada 1.366 uji. Pakai Node 22 atau lebih baru.
+6. **Uji sebelum PR:** jalankan `node --test`. Semua harus lulus; pada cabang ringkasan HPP ada 1.377 uji. Pakai Node 22 atau lebih baru.
 7. **Akhir baris:** tiap berkas di repo memakai LF atau CRLF (ada yang campuran). Pertahankan akhir baris aslinya supaya diff PR hanya berisi baris yang diubah. Hati-hati dengan salinan dari `git archive` atau autocrlf.
 8. **Setelah selesai**, tambahkan satu baris di "Riwayat pekerjaan" (tanggal, alat, versi, ringkasan, PR) dan perbarui "Keadaan sekarang" bila server dipasang.
 
@@ -93,6 +95,8 @@ Diperbarui: 24 Oktober 2026 oleh ChatGPT/Codex, setelah pemasangan server 1.5.61
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-29 · ChatGPT/Codex · 1.5.61 (tampilan) · Unduh ringkasan HPP ke Excel (.xlsx) dan PNG dengan pencarian/cakupan yang sama, status biaya dan acuan produksi, serta pemeriksaan sesi/data sebelum unduh. Berkas Excel dibaca kembali dengan pembaca independen; unduhan dan PNG diuji di browser dengan data contoh. Build dan **1.377 tes lulus** (11 tes baru). [PR #90](https://github.com/soldierapparelid/produksi/pull/90), cabang `codex/unduh-ringkasan-hpp`, disetujui pemilik untuk digabung dan diaktifkan pada 29 Oktober 2026; pemeriksaan GitHub lulus. Tidak memerlukan pemasangan server.
 
 - 2026-10-24 · ChatGPT/Codex · 1.5.61 · Koreksi owner untuk ukuran PO lama yang tertinggal: riwayat pembuka terpisah, antrean hitung, pemulihan penyimpanan, hitung sebagian/ulang, perlindungan stok/upah/HPP. Build dan 1.366 tes lulus; alur tampilan diuji dengan data contoh. Server Versi 74 dipasang pukul 15.35 WIB atas izin pemilik; sidik sebelum/sesudah pemasangan dan jawaban bootstrap sudah diverifikasi. Peluncuran tampilan GitHub Pages melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89).
 
