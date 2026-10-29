@@ -6,7 +6,7 @@ Diperbarui: 29 Oktober 2026 oleh ChatGPT/Codex, ringkasan HPP pada cabang tampil
 
 ## 1. Keadaan sekarang
 
-- Cabang `codex/unduh-ringkasan-hpp` menambahkan **Unduh ringkasan** pada HPP: Excel (.xlsx) seluruh hasil pencarian dan PNG per 6 model. Biaya kosong, perkiraan, acuan XL, dan status pemeriksaan dipertahankan. Rakitan tampilan `20261029-ringkasan-hpp-1561`; versi aplikasi tetap **1.5.61**, tanpa perubahan server atau data. Build dan **1.377 tes lulus**; perubahan diunggah ke cabang terpisah untuk PR, belum di-merge atau tayang. Sidik server di tabel berikut tetap merujuk pemasangan 24 Oktober.
+- [PR #90](https://github.com/soldierapparelid/produksi/pull/90), cabang `codex/unduh-ringkasan-hpp`, menambahkan **Unduh ringkasan** pada HPP: Excel (.xlsx) seluruh hasil pencarian dan PNG per 6 model. Biaya kosong, perkiraan, acuan XL, dan status pemeriksaan dipertahankan. Rakitan tampilan `20261029-ringkasan-hpp-1561`; versi aplikasi tetap **1.5.61**, tanpa perubahan server atau data. Build dan **1.377 tes lulus**; PR siap ditinjau, belum di-merge atau tayang. Sidik server di tabel berikut tetap merujuk pemasangan 24 Oktober.
 
 - Server **1.5.61** sudah dipasang dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
@@ -96,7 +96,7 @@ Diperbarui: 29 Oktober 2026 oleh ChatGPT/Codex, ringkasan HPP pada cabang tampil
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
 
-- 2026-10-29 · ChatGPT/Codex · 1.5.61 (tampilan) · Unduh ringkasan HPP ke Excel (.xlsx) dan PNG dengan pencarian/cakupan yang sama, status biaya dan acuan produksi, serta pemeriksaan sesi/data sebelum unduh. Berkas Excel dibaca kembali dengan pembaca independen; unduhan dan PNG diuji di browser dengan data contoh. Build dan **1.377 tes lulus** (11 tes baru). Cabang `codex/unduh-ringkasan-hpp` diunggah untuk PR melalui GitHub setelah pemilik masuk; belum di-merge. Tidak memerlukan pemasangan server. Jangan menganggap perubahan sudah tayang.
+- 2026-10-29 · ChatGPT/Codex · 1.5.61 (tampilan) · Unduh ringkasan HPP ke Excel (.xlsx) dan PNG dengan pencarian/cakupan yang sama, status biaya dan acuan produksi, serta pemeriksaan sesi/data sebelum unduh. Berkas Excel dibaca kembali dengan pembaca independen; unduhan dan PNG diuji di browser dengan data contoh. Build dan **1.377 tes lulus** (11 tes baru). [PR #90](https://github.com/soldierapparelid/produksi/pull/90), cabang `codex/unduh-ringkasan-hpp`, siap ditinjau; belum di-merge. Tidak memerlukan pemasangan server. Jangan menganggap perubahan sudah tayang.
 
 - 2026-10-24 · ChatGPT/Codex · 1.5.61 · Koreksi owner untuk ukuran PO lama yang tertinggal: riwayat pembuka terpisah, antrean hitung, pemulihan penyimpanan, hitung sebagian/ulang, perlindungan stok/upah/HPP. Build dan 1.366 tes lulus; alur tampilan diuji dengan data contoh. Server Versi 74 dipasang pukul 15.35 WIB atas izin pemilik; sidik sebelum/sesudah pemasangan dan jawaban bootstrap sudah diverifikasi. Peluncuran tampilan GitHub Pages melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89).
 
