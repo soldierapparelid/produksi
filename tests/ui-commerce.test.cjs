@@ -621,3 +621,88 @@ test('1.5.43: "Hapus PO" is a plain button in the purchase invoice, outside "Kel
   h.run("A.commerceCancelOpen({getAttribute:function(k){return k==='data-m'?'pembelian':k==='data-mode'?'inactive':'o9';}})");assert.match(h.run('lastSheet'),/<textarea name="catatan"><\/textarea>/,'pausing a PO still asks for its own reason');
   h.run("S.state.me={id:'adm',divisi:'admin'};");assert.equal(h.run("commerceOrderLifecycle({id:'o9',status:'dp'})"),'','an admin gets neither button');
 });
+
+function hppExportModel(id, extra={}) {
+  return {id,nama:'Model '+id,series:'Fixture',sizes:['M','XL'],poIds:['po-'+id],kain:{complete:true,perPcs:4000,totalPcs:100},potong:{complete:true,perPcs:500},hargaJahit:2000,biayaLain:100,hppTotal:6600,configured:true,configSaved:true,basis:{ukuran:'XL',includedPcs:100},...extra};
+}
+
+function hppExportBrowser(h) {
+  h.context.TextEncoder=TextEncoder;
+  h.run(`var exportDownloads=[],exportCanvases=[];
+  var document={body:{appendChild:function(){}},createElement:function(tag){
+    if(tag==='a')return {href:'',download:'',click:function(){exportDownloads.push({name:this.download,url:this.href});},remove:function(){}};
+    if(tag!=='canvas')throw new Error('Unexpected element '+tag);
+    var canvas={width:0,height:0,draws:[],toDataURL:function(){return 'data:image/png;base64,AA==';}},ctx={font:'20px Arial',textAlign:'left',fillRect:function(){},strokeRect:function(){},measureText:function(t){var px=Number((this.font.match(/([0-9]+)px/)||[])[1])||20;return {width:Array.from(String(t)).length*px*.53};},fillText:function(t,x,y){canvas.draws.push({text:String(t),x:x,y:y,width:this.measureText(t).width,align:this.textAlign});}};
+    canvas.getContext=function(){return ctx;};exportCanvases.push(canvas);return canvas;
+  }};
+  function unduhBerkas(name,bytes,mime){exportDownloads.push({name:name,bytes:Array.from(bytes),mime:mime});}
+  function paintTop(){lastSheet=commerceHppExportSheet();}`);
+}
+
+test('HPP export follows search and archive visibility while including all matches beyond 50 displayed rows',()=>{
+  const h=harness(),models=Array.from({length:61},(_,i)=>hppExportModel('active-'+i));
+  models.push(hppExportModel('unmatched',{nama:'Different product'}),hppExportModel('deleted'),hppExportModel('archive-empty',{kain:{complete:false,totalPcs:0}}),hppExportModel('archive-worked'),hppExportModel('no-po',{poIds:[]}));
+  h.seed('hpp',{models});h.run("S.state.settings={poBuang:['po-deleted'],poSembunyi:['po-archive-empty','po-archive-worked']};S.f.q='Model';S.f['commerceLimit-hpp']=50;");
+  const before=h.run("JSON.stringify(commerceData('hpp'))"),visible=h.json("commerceHppExportRows(commerceData('hpp'))");
+  assert.equal(visible.length,62);assert.equal(visible.at(-1).nama,'Model archive-worked');assert.ok(visible.some(r=>r.nama==='Model active-60'));
+  assert.ok(!visible.some(r=>/deleted|archive-empty|no-po/.test(r.nama)));
+  assert.match(h.run('VIEWS.hpp()'),/Tampilkan 50 lagi/);
+  h.run("S.sub.hppSemua='1'");assert.equal(h.run("commerceHppExportRows(commerceData('hpp')).length"),65);
+  h.run("S.f.q='Different'");assert.deepEqual(h.json("commerceHppExportRows(commerceData('hpp')).map(function(r){return r.nama;})"),['Different product']);
+  assert.equal(h.run("JSON.stringify(commerceData('hpp'))"),before);assert.equal(h.requests.length,0);
+});
+
+test('HPP export distinguishes incomplete costs, actual zeros and provisional reviewed or saved models',()=>{
+  const h=harness();h.seed('hpp',{models:[
+    hppExportModel('missing',{configured:false,kain:{complete:false,perPcs:999,totalPcs:100},potong:{complete:false,perPcs:500},hargaJahit:null,hppTotal:null}),
+    hppExportModel('zero',{kain:{complete:true,perPcs:0,totalPcs:100},potong:{complete:true,perPcs:0},hargaJahit:0,biayaLain:0,hppTotal:0}),
+    hppExportModel('temporary',{basis:{ukuran:'XL',includedPcs:100,provisional:true},warnings:['Periksa bahan'],config:{value:{ketLain:'Kemasan'}}}),
+    hppExportModel('saved',{configured:false,configSaved:true,basis:{includedPcs:100},kain:{complete:true,perPcs:4000,totalPcs:100,observasi:{provisional:true,notes:['Bahan belum selesai']}}})
+  ]});
+  const rows=h.json("commerceHppExportRows(commerceData('hpp'))"),[missing,zero,temporary,saved]=rows;
+  assert.equal(missing.kain,null);assert.equal(missing.potong,null);assert.equal(missing.jahit,null);assert.equal(missing.total,null);
+  for(const k of ['kain','potong','jahit','lain','total'])assert.equal(zero[k],0);
+  assert.equal(zero.perkiraan,false);assert.equal(zero.status,'Biaya diperiksa');
+  assert.equal(temporary.total,6600);assert.match(temporary.status,/Perkiraan/);assert.match(temporary.acuan,/XL.*sementara/);assert.match(temporary.catatan,/Periksa bahan.*Kemasan/);
+  assert.equal(saved.total,6600);assert.match(saved.status,/Perkiraan.*Pengaturan tersimpan/);assert.match(saved.acuan,/Seluruh hasil.*sementara/);assert.match(saved.catatan,/Bahan belum selesai/);
+});
+
+test('opening and downloading HPP summaries is read-only and carries scope and global warnings',async()=>{
+  const h=harness();hppExportBrowser(h);h.seed('hpp',{models:[hppExportModel('one')],warnings:['Acuan bahan perlu diperiksa.']});
+  h.run("S.f.q='Model';S.sub.hppSemua='1'");const before=h.run("JSON.stringify(commerceData('hpp'))");
+  await h.run('A.commerceHppExportOpen(null)');
+  assert.match(h.run('lastSheet'),/Unduh Excel \(\.xlsx\)/);assert.match(h.run('S.hppExport.meta.tanggal'),/WIB/);
+  assert.match(h.run('S.hppExport.meta.lingkup'),/Semua model.*Pencarian: Model/);assert.match(h.run('S.hppExport.meta.catatan'),/Acuan bahan/);
+  h.run('A.commerceHppExportExcel();A.commerceHppExportPng()');const downloads=h.json('exportDownloads');
+  assert.equal(downloads.length,2);assert.match(downloads[0].name,/\.xlsx$/);assert.deepEqual(downloads[0].bytes.slice(0,4),[80,75,3,4]);assert.match(downloads[1].name,/-1\.png$/);
+  assert.equal(h.run("JSON.stringify(commerceData('hpp'))"),before);assert.equal(h.run('idbWrites.length'),0);assert.equal(h.requests.length,0);
+});
+
+test('HPP export waits for stale data to refresh and refuses an obsolete snapshot or changed session',async()=>{
+  const h=harness();hppExportBrowser(h);h.seed('hpp',{models:[hppExportModel('old')]});h.run("commerceEntry('hpp').stale=true");
+  const pending=h.run('A.commerceHppExportOpen(null)');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'getCommerceState');assert.equal(h.run('S.hppExport'),undefined);
+  h.requests[0].resolve(reply('hpp',{models:[hppExportModel('fresh')]},11));await pending;assert.equal(h.run('S.hppExport.rows[0].nama'),'Model fresh');
+  for(const change of ["commerceEntry('hpp').stale=true","commerceEntry('hpp').loading={}","commerceEntry('hpp').error='offline'","commerceEntry('hpp').version++","commerceEntry('hpp').data={models:[]}","S.token='new-session'","S.state.me.divisi='potong'"]){
+    const x=harness();hppExportBrowser(x);x.seed('hpp',{models:[hppExportModel('one')]});await x.run('A.commerceHppExportOpen(null)');x.run(change+';A.commerceHppExportExcel();A.commerceHppExportPng()');
+    assert.equal(x.run('exportDownloads.length'),0,change);assert.match(x.json('messages').at(-1).text,/Buka kembali/);assert.equal(x.requests.length,0);
+  }
+});
+
+test('HPP PNG pages keep a bounded number of cards, wrap long words and mark shortened notes explicitly',async()=>{
+  const h=harness();hppExportBrowser(h);const long='Namaproduk'.repeat(18),note='Periksa pemakaian kain dan hasil potong. '.repeat(30);
+  h.seed('hpp',{models:Array.from({length:7},(_,i)=>hppExportModel(String(i),{nama:i?'Model '+i:long,warnings:[note]}))});await h.run('A.commerceHppExportOpen(null)');
+  const first=h.json('exportCanvases[0]');assert.equal(first.width,1440);assert.ok(first.height<2500);assert.ok(first.draws.some(d=>d.text.includes('lihat Excel')));assert.ok(!first.draws.some(d=>d.text==='Model 6'));
+  assert.ok(first.draws.every(d=>d.y>0&&d.y<first.height),'all drawn text stays within the page height');
+  assert.ok(first.draws.every(d=>d.align==='right'?d.x-d.width>=0:d.x+d.width<=first.width),'all drawn text stays within the page width');
+  const wrapped=h.json("commerceHppExportWrap({measureText:function(s){return {width:Array.from(s).length*10};}},'ABCDEFGHIJKLMN panjang sekali',60)");
+  assert.ok(wrapped.length>3);assert.ok(wrapped.every(line=>line.length<=6));
+  h.run("A.commerceHppExportPage({getAttribute:function(){return '1';}})");assert.equal(h.run('S.hppExport.page'),1);assert.match(h.run('lastSheet'),/Gambar 2 \/ 2/);
+  const second=h.json('exportCanvases[1]');assert.ok(second.draws.some(d=>d.text==='Model 6'));assert.ok(!second.draws.some(d=>d.text==='Model 1'));
+  h.run('A.commerceHppExportPng()');assert.match(h.json('exportDownloads')[0].name,/-2\.png$/);assert.equal(h.requests.length,0);
+});
+
+test('HPP export keeps Excel available when canvas is unavailable and does not open an empty export',async()=>{
+  const h=harness();hppExportBrowser(h);h.seed('hpp',{models:[hppExportModel('one')]});h.run("document.createElement=function(){throw new Error('Canvas unsupported');}");await h.run('A.commerceHppExportOpen(null)');
+  assert.match(h.run('lastSheet'),/Pratinjau PNG belum dapat dibuat/);assert.match(h.run('lastSheet'),/data-a="commerceHppExportPng" disabled/);h.run('A.commerceHppExportExcel()');assert.equal(h.run('exportDownloads.length'),1);
+  const empty=harness();empty.seed('hpp',{models:[]});await empty.run('A.commerceHppExportOpen(null)');assert.equal(empty.run('S.hppExport'),undefined);assert.match(empty.json('messages').at(-1).text,/Tidak ada model/);assert.equal(empty.requests.length,0);
+});

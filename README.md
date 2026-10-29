@@ -2,6 +2,13 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Pembaruan tampilan 29 Oktober 2026 — Unduh ringkasan HPP
+
+- Di **HPP produk**, pilih **Unduh ringkasan** untuk mengunduh **Excel (.xlsx)** atau **PNG**. Ringkasan mengikuti pencarian dan pilihan menampilkan model arsip; Excel memuat seluruh hasil yang cocok, termasuk yang belum terlihat karena batas 50 baris.
+- Berkas memuat nama model, series, ukuran, kain/potong/jahit/biaya lain per pcs, total HPP, status pemeriksaan, acuan ukuran, hasil acuan, dan catatan. Nilai belum lengkap tetap kosong di Excel atau berlabel di PNG; angka nol yang sah tetap nol, dan perkiraan diberi tanda.
+- PNG memakai dua kolom, maksimal enam model per gambar, dengan tombol halaman. Excel menyimpan seluruh rincian dalam satu berkas, header tetap terlihat saat menggulir dan kolom dapat disaring.
+- Hanya perubahan tampilan: versi tetap **1.5.61**, rakitan `20261029-ringkasan-hpp-1561`. Tidak perlu memasang server Apps Script.
+
 ## Rilis 1.5.61 - Pulihkan ukuran riwayat yang tertinggal
 
 - Owner dapat menambahkan ukuran yang belum tercatat pada PO lama aktif melalui **Tambahkan ukuran yang tertinggal**. Catat ukuran, jumlah awal, penjahit, dan alasan; barang masuk antrean **Hitung fisik**.
