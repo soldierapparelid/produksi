@@ -9,7 +9,7 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - Ongkos jahit, biaya lain, dan margin disimpan sekali melalui **Simpan biaya bersama**. Acuan yang belum lengkap tetap ditandai perkiraan. Mengubah anggota meminta pemeriksaan biaya ulang. Admin dapat membaca kelompok; perubahan kelompok dan biaya bersama khusus owner.
 - Pencarian nama anggota menemukan kelompoknya. **Unduh ringkasan** Excel/PNG mengikuti pengelompokan dan memuat nama anggota, tanpa menggandakan model.
 - **Bubarkan kelompok** mengembalikan tampilan dan pengaturan biaya individual yang tetap tersimpan. Pengelompokan tidak mengubah PO, stok, hasil potong, upah, atau pembayaran.
-- Versi **1.5.62**, rakitan `20261030-kelompok-hpp-1562`. Server sudah dipasang ke deployment **Versi 75** pada **30 Oktober 2026 pukul 20.29 WIB**; sumber tersimpan dan jawaban server versi 1.5.62 sudah diverifikasi. Tampilan pada cabang `codex/kelompok-hpp` siap diajukan melalui PR dan belum digabung ke GitHub Pages. Build dan **1.424 tes lulus**. Rincian pemasangan ada di `CATATAN-KERJA-BERSAMA.md`.
+- Versi **1.5.62**, rakitan `20261030-kelompok-hpp-1562`. Server sudah dipasang ke deployment **Versi 75** pada **30 Oktober 2026 pukul 20.29 WIB**; sumber tersimpan dan jawaban server versi 1.5.62 sudah diverifikasi. Peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92) atas izin pemilik. Build dan **1.424 tes lulus**. Rincian pemasangan ada di `CATATAN-KERJA-BERSAMA.md`.
 
 ## Pembaruan tampilan 30 Oktober 2026 — Invoice DP dan pelunasan
 
