@@ -108,3 +108,69 @@ test('opening from an unready snapshot waits for current server data and failure
 test('a late refresh belonging to a previous login cannot open a DP invoice in the new session', async () => {
   const h=harness();h.seed([nota()]);h.run("commerceEntry('nota').stale=true");const pending=h.run('A.commerceNotaDpOpen('+element+')');h.run("S.token='new-login'");h.requests[0].resolve(reply([nota()]));await pending;await turn();assert.equal(h.run('lastSheet'),'');assert.equal(h.run('prints.length'),0);
 });
+
+const finalValues = {jumlah:'900000', tanggal:'2026-10-30', catatan:'Pelunasan pesanan contoh', jenis:'pelunasan'};
+async function openFinal(h, row = nota()) { h.seed([row]); await h.run('A.commerceNotaPelunasanOpen(' + element + ')'); }
+
+test('settlement invoice requests only the outstanding balance, without exposing full order or prior payment amounts', () => {
+  const h=harness(), row=nota(), before=JSON.stringify(row), doc=documentHtml(h,row,finalValues);
+  assert.match(doc,/INVOICE PELUNASAN/);assert.match(doc,/TAGIHAN PELUNASAN/);assert.match(doc,/SA-CONTOH-001\/PELUNASAN/);assert.match(doc,/900\.000/);
+  assert.match(doc,/Kemeja Contoh/);assert.match(doc,/12 pcs/);assert.match(doc,/M[^<]*5/);assert.match(doc,/L[^<]*7/);
+  for(const forbidden of ['1.200.000','300.000','100.000','PRIVATE_ORDER_NOTE','PRIVATE_PAYMENT_NOTE','Riwayat pembayaran','Sudah dibayar'])assert.ok(!doc.includes(forbidden),forbidden);
+  assert.doesNotMatch(doc,/>LUNAS<|TAGIHAN DP|INVOICE DP|Pembayaran sudah diterima/);
+  assert.match(doc,/@page\{[^}]*A4/);assert.equal(JSON.stringify(row),before);assert.equal(h.requests.length,0);
+  const full=h.run('coreNotaInvoiceHtml(record,S.state.settings)');assert.match(full,/1\.200\.000/);assert.match(full,/900\.000/);
+});
+
+test('settlement charge is exactly the current remaining balance and retains date and separate escaped note validation', () => {
+  const h=harness();h.context.record=nota();
+  for(const jumlah of ['','0','-1','200000','899999','900001','900000.5']){
+    h.context.options={...finalValues,jumlah};assert.throws(()=>h.run('commerceNotaDpValues(record,options)'),undefined,jumlah);
+  }
+  h.context.options={...finalValues,tanggal:'2026-02-30'};assert.throws(()=>h.run('commerceNotaDpValues(record,options)'));
+  h.context.options={...finalValues,catatan:'x'.repeat(501)};assert.throws(()=>h.run('commerceNotaDpValues(record,options)'));
+  const doc=documentHtml(h,nota(),{...finalValues,catatan:'<script>alert(1)</script> & catatan khusus'});
+  assert.match(doc,/&lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; catatan khusus/);assert.doesNotMatch(doc,/<script|PRIVATE_ORDER_NOTE/);
+  h.context.options=finalValues;assert.equal(h.json('commerceNotaDpValues(record,options)').jumlah,900000);
+});
+
+test('settlement form prefills a read-only balance and printing creates neither a payment nor a paid status', async () => {
+  const h=harness();await openFinal(h);const sheet=h.run('lastSheet'), input=sheet.match(/<input\b[^>]*name="jumlah"[^>]*>/);
+  assert.match(sheet,/Invoice pelunasan/i);assert.ok(input,'settlement amount input');assert.match(input[0],/value="900000"/);assert.match(input[0],/readonly/);
+  assert.match(sheet,/name="tanggal"[^>]*value="2026-10-30"/);assert.doesNotMatch(sheet,/PRIVATE_ORDER_NOTE/);assert.equal(h.run('currentForm._commerceNotaDp.jenis'),'pelunasan');
+  const before=h.json('commerceData("nota")');h.values(finalValues);await h.run('A.commerceNotaDpCetak(null)');
+  assert.equal(h.run('prints.length'),1);assert.match(h.run('prints[0].html'),/TAGIHAN PELUNASAN/);assert.deepEqual(h.json('commerceData("nota")'),before);assert.equal(h.requests.length,0);
+  const detail=h.run('commerceNotaRincian("note")');assert.match(detail,/data-a="commerceNotaPelunasanOpen"/);assert.match(detail,/data-a="commerceNotaDpOpen"/);assert.match(detail,/DP \/ BELUM LUNAS/);
+});
+
+test('settlement printing rejects a tampered amount even when form values attempt to switch back to DP mode', async () => {
+  const h=harness();await openFinal(h);h.values({...finalValues,jumlah:'200000',jenis:'dp'});await h.run('A.commerceNotaDpCetak(null)');
+  assert.equal(h.run('prints.length'),0);assert.ok(h.json('messages').length);assert.equal(h.requests.length,0);
+  h.values(finalValues);await h.run('A.commerceNotaDpCetak(null)');assert.equal(h.run('prints.length'),1);assert.match(h.run('prints[0].html'),/TAGIHAN PELUNASAN/);
+});
+
+test('paid, hidden, cancelled and uncertain notes cannot create settlement requests', async () => {
+  for(const extra of [{cancelled:true},{status:'batal'},{historyHidden:true},{totalPaid:1200000,balance:0,status:'lunas'},{paymentReview:true},{needsReview:true},{balance:null},{totalPaid:300001}]){
+    const h=harness(), row=nota(extra);h.context.record=row;h.context.options=finalValues;
+    assert.throws(()=>h.run('commerceNotaDpValues(record,options)'),undefined,JSON.stringify(extra));
+    await openFinal(h,row);assert.equal(h.run('lastSheet'),'');assert.equal(h.run('prints.length'),0);assert.equal(h.requests.length,0);
+  }
+});
+
+test('a settlement draft cannot print after payment, session, source or freshness changes', async () => {
+  const changes=["S.token='another-login'", "S.state.me.divisi='potong'", "commerceEntry('nota').version=11", "commerceEntry('nota').stale=true", "commerceEntry('nota').loading=Promise.resolve()", "commerceEntry('nota').error='offline'", "S.state.ver=11", "commerceData('nota').notes[0].revision='payment-corrected'", "commerceData('nota').notes[0].totalPaid=500000;commerceData('nota').notes[0].balance=700000", "S.state.settings.kopSlip='Different seller'"];
+  for(const change of changes){
+    const h=harness();await openFinal(h);h.values(finalValues);h.run(change);await h.run('A.commerceNotaDpCetak(null)');
+    assert.equal(h.run('prints.length'),0,change);assert.ok(h.json('messages').length,change);assert.equal(h.requests.length,0,change);
+  }
+});
+
+test('opening a settlement invoice refreshes an old snapshot and uses the latest payment balance', async () => {
+  const h=harness();h.seed([nota()]);h.run("commerceEntry('nota').stale=true");const pending=h.run('A.commerceNotaPelunasanOpen('+element+')');
+  assert.equal(h.run('lastSheet'),'');assert.equal(h.requests.length,1);assert.equal(h.requests[0].action,'getCommerceState');
+  const latest=nota({revision:'payment-two',totalPaid:500000,balance:700000,payments:[...nota().payments,{id:'payment-two',tanggal:'2026-10-30',jumlah:200000}]});
+  h.requests[0].resolve(reply([latest],11));await pending;
+  assert.match(h.run('lastSheet'),/name="jumlah"[^>]*value="700000"/);assert.equal(h.run('currentForm._commerceNotaDp.revision'),'payment-two');
+  h.values({...finalValues,jumlah:'700000'});await h.run('A.commerceNotaDpCetak(null)');assert.equal(h.run('prints.length'),1);assert.match(h.run('prints[0].html'),/700\.000/);assert.doesNotMatch(h.run('prints[0].html'),/900\.000|1\.200\.000/);
+  assert.equal(h.requests.length,1,'only the read refresh is sent, never a payment request');
+});

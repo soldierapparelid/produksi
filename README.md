@@ -2,13 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
-## Pembaruan tampilan 30 Oktober 2026 — Invoice DP
+## Pembaruan tampilan 30 Oktober 2026 — Invoice DP dan pelunasan
 
 - Buka **Nota penjualan → pilih nota → Invoice DP**, isi nominal uang muka dan tanggal, lalu **Cetak / Simpan PDF**. Pilih kertas A4 atau Simpan sebagai PDF pada dialog cetak.
-- Dokumen menampilkan **TAGIHAN DP**, nominal yang ditagihkan, pelanggan, referensi nota, dan rincian barang/ukuran tanpa harga. Total pesanan, sisa tagihan, riwayat pembayaran, dan catatan nota asli tidak disertakan; catatan DP diisi terpisah bila diperlukan.
-- Nominal wajib berupa rupiah bulat positif dan tidak melebihi sisa tagihan. Nota lunas, dibatalkan, atau perlu diperiksa tidak dapat membuat tagihan DP baru. Perubahan sesi atau data meminta pengguna membuka ulang formulir.
-- Ini hanya pembuatan dokumen tagihan: tidak menambah pembayaran atau mengubah total nota. Setelah uang masuk, gunakan **Tambah DP / pembayaran** seperti biasa.
-- Versi tetap **1.5.61**, rakitan `20261030-invoice-dp-1561`; tidak memerlukan pemasangan server Apps Script.
+- **Invoice pelunasan** pada nota yang sama otomatis memakai seluruh sisa tagihan terbaru. Nominalnya tidak dapat diubah; tanggal dan catatan khusus tetap dapat diisi.
+- Dokumen menampilkan **TAGIHAN DP** atau **TAGIHAN PELUNASAN**, nominal yang ditagihkan, pelanggan, referensi nota, dan rincian barang/ukuran tanpa harga. Total pesanan, harga satuan, riwayat pembayaran, dan catatan nota asli tidak disertakan. Catatan tagihan diisi terpisah bila diperlukan.
+- Nominal DP wajib berupa rupiah bulat positif dan tidak melebihi sisa tagihan. Pelunasan harus sama persis dengan sisa tagihan. Nota lunas, dibatalkan, atau perlu diperiksa tidak dapat membuat tagihan baru. Perubahan sesi atau data meminta pengguna membuka ulang formulir.
+- Mencetak hanya membuat dokumen tagihan: tidak menambah pembayaran atau mengubah total nota. Setelah uang masuk, gunakan **Tambah DP / pembayaran** atau **Lunasi sisa**. Tanda **LUNAS** pada nota dan invoice lengkap mengikuti pembayaran yang benar-benar dicatat.
+- Versi tetap **1.5.61**, rakitan `20261030-invoice-dp-pelunasan-1561`; tidak memerlukan pemasangan server Apps Script.
 
 ## Pembaruan tampilan 29 Oktober 2026 — Unduh ringkasan HPP
 
