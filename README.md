@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Pembaruan tampilan 30 Oktober 2026 — Invoice DP
+
+- Buka **Nota penjualan → pilih nota → Invoice DP**, isi nominal uang muka dan tanggal, lalu **Cetak / Simpan PDF**. Pilih kertas A4 atau Simpan sebagai PDF pada dialog cetak.
+- Dokumen menampilkan **TAGIHAN DP**, nominal yang ditagihkan, pelanggan, referensi nota, dan rincian barang/ukuran tanpa harga. Total pesanan, sisa tagihan, riwayat pembayaran, dan catatan nota asli tidak disertakan; catatan DP diisi terpisah bila diperlukan.
+- Nominal wajib berupa rupiah bulat positif dan tidak melebihi sisa tagihan. Nota lunas, dibatalkan, atau perlu diperiksa tidak dapat membuat tagihan DP baru. Perubahan sesi atau data meminta pengguna membuka ulang formulir.
+- Ini hanya pembuatan dokumen tagihan: tidak menambah pembayaran atau mengubah total nota. Setelah uang masuk, gunakan **Tambah DP / pembayaran** seperti biasa.
+- Versi tetap **1.5.61**, rakitan `20261030-invoice-dp-1561`; tidak memerlukan pemasangan server Apps Script.
+
 ## Pembaruan tampilan 29 Oktober 2026 — Unduh ringkasan HPP
 
 - Di **HPP produk**, pilih **Unduh ringkasan** untuk mengunduh **Excel (.xlsx)** atau **PNG**. Ringkasan mengikuti pencarian dan pilihan menampilkan model arsip; Excel memuat seluruh hasil yang cocok, termasuk yang belum terlihat karena batas 50 baris.

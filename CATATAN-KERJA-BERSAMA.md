@@ -2,9 +2,11 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 29 Oktober 2026 oleh ChatGPT/Codex, ringkasan HPP pada cabang tampilan; server tetap 1.5.61.
+Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, Invoice DP pada cabang tampilan; server tetap 1.5.61.
 
 ## 1. Keadaan sekarang
+
+- Cabang `codex/invoice-dp` dari `main` `aba01da` menambahkan **Nota penjualan → Invoice DP → Cetak / Simpan PDF**. Dokumen A4 hanya memuat nominal uang muka yang diisi pengguna, pelanggan, referensi nota, dan barang/ukuran tanpa harga. Total pesanan, sisa, catatan nota asli, dan riwayat pembayaran tidak ikut dicetak. Tidak menulis pembayaran atau mengubah total nota. Versi **1.5.61**, rakitan `20261030-invoice-dp-1561`. Build dan **1.387 tes lulus**; pratinjau desktop/HP dengan data contoh telah diperiksa. Belum aktif: menunggu pengiriman dan PR. Tidak perlu memasang server Apps Script.
 
 - [PR #90](https://github.com/soldierapparelid/produksi/pull/90), cabang `codex/unduh-ringkasan-hpp`, menambahkan **Unduh ringkasan** pada HPP: Excel (.xlsx) seluruh hasil pencarian dan PNG per 6 model. Biaya kosong, perkiraan, acuan XL, dan status pemeriksaan dipertahankan. Rakitan tampilan `20261029-ringkasan-hpp-1561`; versi aplikasi tetap **1.5.61**, tanpa perubahan server atau data. Build dan **1.377 tes lulus**; pemeriksaan GitHub lulus. Pemilik menyetujui penggabungan dan pengaktifan melalui PR #90 pada 29 Oktober 2026. Sidik server di tabel berikut tetap merujuk pemasangan 24 Oktober.
 
@@ -95,6 +97,8 @@ Diperbarui: 29 Oktober 2026 oleh ChatGPT/Codex, ringkasan HPP pada cabang tampil
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-30 · ChatGPT/Codex · 1.5.61 (tampilan) · Invoice DP dengan nominal/tanggal/catatan tersendiri, cetak A4 / Simpan PDF tanpa nilai keseluruhan pesanan. Validasi sisa tagihan, status nota, sesi, dan data sebelum cetak; perbaikan tampilan HP serta pemulihan cache versi rusak. Build dan **1.387 tes lulus** (10 tes baru); pengujian browser memakai data contoh tanpa perubahan pembayaran. Cabang `codex/invoice-dp`; PR menunggu pengiriman. Server tetap.
 
 - 2026-10-29 · ChatGPT/Codex · 1.5.61 (tampilan) · Unduh ringkasan HPP ke Excel (.xlsx) dan PNG dengan pencarian/cakupan yang sama, status biaya dan acuan produksi, serta pemeriksaan sesi/data sebelum unduh. Berkas Excel dibaca kembali dengan pembaca independen; unduhan dan PNG diuji di browser dengan data contoh. Build dan **1.377 tes lulus** (11 tes baru). [PR #90](https://github.com/soldierapparelid/produksi/pull/90), cabang `codex/unduh-ringkasan-hpp`, disetujui pemilik untuk digabung dan diaktifkan pada 29 Oktober 2026; pemeriksaan GitHub lulus. Tidak memerlukan pemasangan server.
 

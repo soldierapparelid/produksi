@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261029-ringkasan-hpp-1561';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261030-invoice-dp-1561';</script>
 <script>
 (function () {
 'use strict';
@@ -12994,13 +12994,60 @@ function commerceNotaRincian(id){
     (ringkas.lunas?'<div class="note ok"><b>LUNAS'+(ringkas.tanggalLunas?' · '+tgl(ringkas.tanggalLunas):'')+'</b><p>Nota tersimpan di Riwayat nota. Semua pembayaran tetap dapat dilihat di bawah.</p></div>':'')+
     (batal?'<div class="note">Nota ini sudah dihapus dan tidak dihitung.'+(row.cancelReason?' Alasan: '+esc(row.cancelReason):'')+'</div>':'')+
     '<div class="card col"><div><h3>'+esc(c.name)+'</h3><p class="small muted">'+esc([c.phone,c.address].filter(Boolean).join(' · '))+'</p></div><div class="list">'+baris+'</div>'+hitung+'</div>'+
-    (row.notes?'<div class="note">'+esc(row.notes)+'</div>':'')+utama+commercePaymentsHtml('nota',row)+kelola+'</div>';
+    (row.notes?'<div class="note">'+esc(row.notes)+'</div>':'')+utama+(!batal&&!ringkas.periksa&&ringkas.sisa>0?'<div class="row wrap"><button class="btn" data-a="commerceNotaDpOpen"'+attrs+'>'+ic('list','s')+'Invoice DP</button><span class="small muted">Tagihan uang muka tanpa total pesanan.</span></div>':'')+commercePaymentsHtml('nota',row)+kelola+'</div>';
   return sheetHtml('Nota '+(row.noNota||row.number||row.id),h,'<button class="btn" data-a="commerceNotaCetak"'+attrs+'>'+ic('list','s')+'Cetak invoice</button><button class="btn" data-a="commerceNotaStruk"'+attrs+'>Struk thermal</button><button class="btn pri" data-a="commerceNotaPdf"'+attrs+'>'+ic('down','s')+'Unduh PDF</button>');
 }
 A.commerceNotaDetail=function(el){var id=el.getAttribute('data-id');openSheet(function(){return commerceNotaRincian(id);},{live:true,cls:'wide'});};
 function commerceNotaLogo(){return typeof LOGO_SRC==='string'?LOGO_SRC:'';}
 function commerceNotaDok(el){var row=commerceRecord('nota',el.getAttribute('data-id'));if(!row||typeof coreNotaInvoiceHtml!=='function'){toast('Data cetak belum tersedia. Muat ulang aplikasi.',true);return null;}return row;}
 A.commerceNotaCetak=function(el){var row=commerceNotaDok(el);if(!row)return;return act(el,dokumenCetakBuka(coreNotaInvoiceHtml(row,S.state.settings,{logo:commerceNotaLogo()}),{nama:'invoice',tanda:'.invoice'})).catch(quiet);};
+/* Invoice DP is a print-only request for an explicit amount, never a payment entry. */
+function commerceNotaDpValues(row,v) {
+  v=v||{};var r=coreNotaRingkas(row,{});
+  if(!row||row.historyHidden||r.batal||r.periksa||r.lunas||r.sisa<=0)throw new Error('Invoice DP hanya untuk nota yang masih memiliki tagihan dan datanya sudah benar.');
+  var raw=String(v.jumlah==null?'':v.jumlah).trim(),jumlah=Number(raw);
+  if(!/^\d+$/.test(raw)||!Number.isSafeInteger(jumlah)||jumlah<=0)throw new Error('Isi nominal DP dalam rupiah bulat, lebih dari nol.');
+  if(jumlah>r.sisa)throw new Error('Nominal DP melebihi sisa tagihan nota.');
+  var tanggal=coreNotaTanggalSah(v.tanggal),catatan=String(v.catatan||'').trim();
+  if(!tanggal)throw new Error('Isi tanggal invoice DP yang valid.');
+  if(catatan.length>500)throw new Error('Catatan invoice DP maksimal 500 karakter.');
+  return {jumlah:jumlah,tanggal:tanggal,catatan:catatan};
+}
+function commerceNotaDpHtml(row,settings,opt) {
+  opt=opt||{};var v=commerceNotaDpValues(row,opt),r=coreNotaRingkas(row,settings),e=coreNotaEsc,c=r.pelanggan,logo=coreNotaLogo(opt.logo);
+  var css='@page{size:A4 portrait;margin:15mm}*{box-sizing:border-box}body{margin:0;color:#111;font:11pt Arial,Helvetica,sans-serif;line-height:1.45}table{border-collapse:collapse;width:100%;table-layout:fixed}td,th{vertical-align:top;overflow-wrap:anywhere;word-wrap:break-word}p{margin:0 0 8px}.kop{border-bottom:3px solid #111;margin-bottom:20px}.kop td{padding:0 0 14px}.logo{width:62px}.logo img{width:50px;height:50px;object-fit:contain}.usaha{font-size:17pt;font-weight:700;letter-spacing:.6px}.judul{font-size:22pt;font-weight:700;letter-spacing:1px}.kanan{text-align:right}.kecil{font-size:9pt}.label{font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:.6px}.nama{font-size:13pt;font-weight:700}.tagihan{display:inline-block;border:2px solid #111;padding:6px 12px;font-weight:700;font-size:12pt}.penerima{margin-bottom:22px}.rincian th{text-align:left;padding:9px;border-top:2px solid #111;border-bottom:2px solid #111}.rincian td{padding:12px 9px;border-bottom:1px solid #333}.rincian .kanan{text-align:right}.rincian tr{break-inside:avoid;page-break-inside:avoid}.nominal{font-size:16pt;font-weight:700;white-space:nowrap}.barang{margin-top:18px}.barang li{margin:6px 0;break-inside:avoid;page-break-inside:avoid}.barang ul{padding-left:20px}.catatan{margin-top:18px;border:1px solid #333;padding:10px;white-space:pre-wrap}.ttd{margin-top:30px;break-inside:avoid;page-break-inside:avoid}.ttd td{width:50%;text-align:center}.ruang{height:58px}.kaki{margin-top:24px;padding-top:10px;border-top:1px solid #333;font-size:9pt;text-align:center}@media screen{body{background:#e6eaef;padding:12px}.invoice-dp{background:white;max-width:210mm;min-height:260mm;margin:auto;padding:15mm;box-shadow:0 2px 14px #0003}}';
+  var kop='<table class="kop"><tr>'+(logo?'<td class="logo"><img src="'+logo+'" alt=""></td>':'')+'<td><div class="usaha">'+e(r.usaha)+'</div>'+r.sub.map(function(x){return '<div class="kecil">'+e(x)+'</div>';}).join('')+'</td><td class="kanan" style="width:42%"><div class="judul">INVOICE DP</div><div class="kecil">No. '+e(r.nomor)+'/DP</div><div class="kecil">Tanggal '+e(coreNotaTgl(v.tanggal))+'</div></td></tr></table>';
+  var penerima='<table class="penerima"><tr><td style="width:65%"><div class="label">Kepada</div><div class="nama">'+e(c.name||'-')+'</div>'+[c.phone,c.address].filter(Boolean).map(function(x){return '<div class="kecil">'+e(x)+'</div>';}).join('')+'</td><td class="kanan"><span class="tagihan">TAGIHAN DP</span></td></tr></table>';
+  var tagihan='<table class="rincian"><thead><tr><th>Keterangan</th><th class="kanan" style="width:40%">Jumlah yang ditagihkan</th></tr></thead><tbody><tr><td><b>Uang muka pesanan</b><div class="kecil">Referensi nota '+e(r.nomor)+'</div></td><td class="kanan nominal">'+coreRupiah(v.jumlah)+'</td></tr></tbody></table>';
+  var barang=r.items.length?'<div class="barang"><div class="label">Pesanan</div><ul>'+r.items.map(function(it){var ukuran=coreNotaSizeText(it)||it.size;return '<li><b>'+e(it.name)+'</b> · '+coreRibuan(it.qty)+' pcs'+([it.color,ukuran].filter(Boolean).length?'<div class="kecil">'+e([it.color,ukuran].filter(Boolean).join(' · '))+'</div>':'')+'</li>';}).join('')+'</ul></div>':'';
+  return '<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice DP '+e(r.nomor)+'</title><style>'+css+'</style></head><body><main class="invoice-dp">'+kop+penerima+tagihan+barang+(v.catatan?'<div class="catatan"><b>Catatan DP</b><br>'+e(v.catatan)+'</div>':'')+'<table class="ttd"><tr><td>Hormat kami,<div class="ruang"></div><b>'+e(r.usaha)+'</b></td><td>Penerima,<div class="ruang"></div><b>'+e(c.name||'')+'</b></td></tr></table><div class="kaki">Dokumen ini adalah tagihan uang muka. Pembayaran dicatat setelah diterima.</div></main></body></html>';
+}
+function commerceNotaDpReady(entry) {
+  return !!entry.data&&entry.tried&&!entry.lama&&!entry.stale&&!entry.loading&&!entry.error&&entry.version!==null&&Number.isFinite(Number(entry.version))&&!(S.state&&Number(S.state.ver)>Number(entry.version));
+}
+A.commerceNotaDpOpen=function(el) {
+  var id=el.getAttribute('data-id'),scope=commerceScope(),seq=(S.notaDpOpenSeq||0)+1;S.notaDpOpenSeq=seq;if(!scope)return;
+  var cached=commerceEntry('nota');if(cached.version!==null&&!Number.isFinite(Number(cached.version)))cached.version=null;
+  return act(el,commerceFetch('nota',!commerceNotaDpReady(commerceEntry('nota'))).then(function(data){
+    if(scope!==commerceScope()||seq!==S.notaDpOpenSeq)throw new Error('Pilihan atau sesi berubah. Buka kembali Invoice DP.');
+    var entry=commerceEntry('nota'),row=commerceRecord('nota',id);if(!commerceNotaDpReady(entry))throw new Error('Data nota sedang diperbarui. Muat ulang lalu buka Invoice DP kembali.');
+    commerceNotaDpValues(row,{jumlah:1,tanggal:todayYmd()});
+    var body='<div class="note">Cetak tagihan khusus uang muka. Hanya nominal DP yang tampil; total pesanan dan sisa pembayaran tidak dicetak. Pembayaran baru dicatat setelah uang diterima.</div><div><b>'+esc((row.customer||{}).name)+'</b><p class="small muted">Referensi nota '+esc(row.noNota||row.number||row.id)+'</p></div><div class="grid g-2">'+fNum('Nominal DP yang ditagihkan (Rp)','jumlah','','step="1" max="'+row.balance+'"')+fTanggal('Tanggal invoice DP','tanggal',todayYmd())+'</div><label class="field"><span>Catatan khusus invoice DP (boleh kosong)</span><textarea name="catatan" maxlength="500" rows="3"></textarea></label><p class="small muted">Untuk menyimpan file, pilih Simpan sebagai PDF pada dialog cetak. Invoice DP ini tidak mencatat pembayaran.</p>';
+    var f=commerceForm('Invoice DP','nota',body,'commerceNotaDpCetak','Cetak / Simpan PDF');
+    f._commerceNotaDp={id:id,scope:scope,source:data,version:entry.version,revision:row.revision,rowJson:JSON.stringify(row),settingsJson:JSON.stringify(S.state.settings||{})};
+  })).catch(quiet);
+};
+A.commerceNotaDpCetak=function(el) {
+  var f=topForm(),s=f&&f._commerceNotaDp;if(!s||f._commerceLocked)return;
+  try{
+    if(!commerceScope()||s.scope!==commerceScope()||f._commerceScope!==commerceScope())throw new Error('Sesi berubah. Buka kembali Invoice DP.');
+    var entry=commerceEntry('nota'),row=commerceRecord('nota',s.id);
+    if(!commerceNotaDpReady(entry)||s.source!==entry.data||s.version!==entry.version||!row||String(row.revision)!==String(s.revision)||JSON.stringify(row)!==s.rowJson||JSON.stringify(S.state.settings||{})!==s.settingsJson)throw new Error('Data nota berubah. Tutup dan buka kembali Invoice DP dari daftar terbaru.');
+    var v=commerceNotaDpValues(row,formVals(f));v.logo=commerceNotaLogo();
+    return act(el,dokumenCetakBuka(commerceNotaDpHtml(row,S.state.settings,v),{nama:'invoice DP',tanda:'.invoice-dp',petunjuk:'Pilih printer dan kertas A4, atau Simpan sebagai PDF untuk menyimpan invoice DP.'})).catch(quiet);
+  }catch(e){toast(e.message,true);}
+};
+
 /* Struk thermal: lebar kertas dipilih tiap kali (pilihan terakhir ditandai), lalu tinggi halaman mengikuti panjang struknya */
 var NOTA_STRUK_LS='pk_struk_lebar';
 A.commerceNotaStruk=function(el){
