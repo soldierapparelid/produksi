@@ -13,7 +13,7 @@ function menu(file, role) {
   const html = fs.readFileSync(path.join(root, file), 'utf8');
   const context = vm.createContext({ role });
   vm.runInContext(`
-    var VIEWS = {}, UI_VERSION = '1.5.61', HARI_ARSIP = 30, A = {}, C = {};
+    var VIEWS = {}, UI_VERSION = '1.5.62', HARI_ARSIP = 30, A = {}, C = {};
     var S = {sub: {lain: 'menu'}, f: {}, state: {settings: {namaUsaha: 'Soldier'}, produk: [], users: [], karyawan: [], trimmed: false}};
     var DIVISI = {owner: {label: 'Owner'}, admin: {label: 'Admin'}, potong: {label: 'Potong'}, jahit: {label: 'Jahit'}, qc: {label: 'QC'}};
     var Api = {mode: function () { return 'hosted'; }}, LS = {get: function () { return ''; }};
@@ -70,8 +70,8 @@ test('the release keeps one shared version and a new page cache', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
   const core = fs.readFileSync(path.join(root, 'src/core.js'), 'utf8');
-  assert.match(html, /var UI_VERSION = '1\.5\.61';/);
-  assert.match(core, /var APP_VERSION = '1\.5\.61';/);
+  assert.match(html, /var UI_VERSION = '1\.5\.62';/);
+  assert.match(core, /var APP_VERSION = '1\.5\.62';/);
   assert.equal(html.match(/window\.PK_BUILD = '([^']+)'/)[1], worker.match(/var RAKITAN = '([^']+)'/)[1]);
   assert.match(html, /getReturState\|getReturDetail\|getReturBukti\)\$\/\.test\(action\)/, 'return reads use the read timeout');
 });

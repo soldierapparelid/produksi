@@ -366,7 +366,7 @@ test('the HPP list leaves out models whose PO was deleted and shows the automati
   h.run("S.state.settings={poBuang:['p2'],poSembunyi:['p3','p4']};");
   let body=h.run('VIEWS.hpp()');
   assert.match(body,/<b>Ada<\/b>/);assert.match(body,/<b>ArsipAdaPotong<\/b>/);assert.ok(!body.includes('<b>Dihapus</b>')&&!body.includes('<b>TanpaPO</b>')&&!body.includes('<b>ArsipKosong</b>'));
-  assert.match(body,/3 model dari PO yang sudah dihapus atau diarsipkan tidak ditampilkan/);assert.match(body,/<b>± Rp13800 \/ pcs<\/b><br><span class="chip warn">Periksa biaya/,'cloth + cutting + sewing + other costs, before the review');
+  assert.match(body,/3 model \/ kelompok dari PO yang sudah dihapus atau diarsipkan tidak ditampilkan/);assert.match(body,/<b>± Rp13800 \/ pcs<\/b><br><span class="chip warn">Periksa biaya/,'cloth + cutting + sewing + other costs, before the review');
   h.run("S.sub.hppSemua='1';");body=h.run('VIEWS.hpp()');assert.match(body,/<b>Dihapus<\/b>/);assert.match(body,/Sembunyikan lagi/);
   assert.match(html,/dihitung dari potongan ukuran '\+esc\(basis\.ukuran\)\+' saja/);
 });
@@ -705,4 +705,29 @@ test('HPP export keeps Excel available when canvas is unavailable and does not o
   const h=harness();hppExportBrowser(h);h.seed('hpp',{models:[hppExportModel('one')]});h.run("document.createElement=function(){throw new Error('Canvas unsupported');}");await h.run('A.commerceHppExportOpen(null)');
   assert.match(h.run('lastSheet'),/Pratinjau PNG belum dapat dibuat/);assert.match(h.run('lastSheet'),/data-a="commerceHppExportPng" disabled/);h.run('A.commerceHppExportExcel()');assert.equal(h.run('exportDownloads.length'),1);
   const empty=harness();empty.seed('hpp',{models:[]});await empty.run('A.commerceHppExportOpen(null)');assert.equal(empty.run('S.hppExport'),undefined);assert.match(empty.json('messages').at(-1).text,/Tidak ada model/);assert.equal(empty.requests.length,0);
+});
+
+test('HPP grouped export uses one common cost row, finds member names and leaves unrelated thick fabric separate',async()=>{
+  const h=harness();hppExportBrowser(h);
+  const members=[hppExportModel('red',{nama:'Oblong Merah',hppTotal:9000}),hppExportModel('blue',{nama:'Oblong Biru',hppTotal:null,configured:false,kain:{complete:false,totalPcs:0}})];
+  const group=hppExportModel('hppg_regular',{nama:'Oblong reguler',series:'Kelompok HPP',isGroup:true,modelIds:members.map(m=>m.id),memberModels:members.map(({id,nama,series,sizes,poIds})=>({id,nama,series,sizes,poIds})),poIds:members.flatMap(m=>m.poIds),hppTotal:7200,referenceModelIds:['red']});
+  h.seed('hpp',{models:[...members,hppExportModel('thick',{nama:'Loreng tebal',hppTotal:18000})],groups:[group],config:{hppGroups:{hppg_regular:{id:group.id,nama:group.nama,modelIds:group.modelIds}}}});
+  const before=h.run("JSON.stringify(commerceData('hpp'))");
+  const all=h.json("commerceHppExportRows(commerceData('hpp'))");
+  assert.equal(all.length,2);assert.equal(all.find(r=>r.nama==='Oblong reguler').total,7200);assert.equal(all.find(r=>r.nama==='Loreng tebal').total,18000);
+  const notes=all.find(r=>r.nama==='Oblong reguler').catatan;assert.match(notes,/Oblong Merah/);assert.match(notes,/Oblong Biru/);
+  h.run("S.f.q='Oblong Biru'");const searched=h.json("commerceHppExportRows(commerceData('hpp'))");
+  assert.equal(searched.length,1);assert.equal(searched[0].nama,'Oblong reguler');assert.equal(searched[0].total,7200);
+  await h.run('A.commerceHppExportOpen(null)');assert.equal(h.run('S.hppExport.rows.length'),1);
+  h.run('A.commerceHppExportExcel();A.commerceHppExportPng()');assert.equal(h.run('exportDownloads.length'),2);
+  assert.equal(h.run("JSON.stringify(commerceData('hpp'))"),before);assert.equal(h.requests.length,0);
+});
+
+test('HPP group visibility and export scope follow member PO visibility without duplicating members',()=>{
+  const h=harness(),members=[hppExportModel('a'),hppExportModel('b')];
+  const group=hppExportModel('hppg_hidden',{isGroup:true,nama:'Kelompok tersembunyi',modelIds:members.map(m=>m.id),memberModels:members,poIds:members.flatMap(m=>m.poIds)});
+  h.seed('hpp',{models:members,groups:[group]});h.run("S.state.settings.poBuang=['po-a','po-b']");
+  assert.equal(h.run("commerceHppExportRows(commerceData('hpp')).length"),0);
+  h.run("S.sub.hppSemua='1'");assert.equal(h.run("commerceHppExportRows(commerceData('hpp')).length"),1);
+  h.run("S.sub.hppSemua='';S.state.settings.poBuang=['po-a']");assert.equal(h.run("commerceHppExportRows(commerceData('hpp')).length"),1);
 });
