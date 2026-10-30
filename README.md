@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Persiapan rilis 1.5.62 — Kelompok HPP
+
+- Di **HPP produk → Kelompok baru**, owner memilih minimal dua model dengan bahan, pola, sablon, dan ongkos yang setara. Warna atau motif berbeda dapat memakai satu kelompok; bahan tebal atau pengerjaan berbeda dipilih terpisah.
+- Kelompok tampil satu baris. **Atur anggota** menampilkan model yang mengikuti acuan. Kain dan potong memakai **total biaya acuan XL ÷ total hasil XL** dari anggota dengan acuan XL tercatat, lalu berlaku untuk semua anggota dan ukuran. Model tanpa acuan XL mengikuti kelompok; hasil ukuran lain tidak dicampurkan ke rata-rata XL.
+- Ongkos jahit, biaya lain, dan margin disimpan sekali melalui **Simpan biaya bersama**. Acuan yang belum lengkap tetap ditandai perkiraan. Mengubah anggota meminta pemeriksaan biaya ulang. Admin dapat membaca kelompok; perubahan kelompok dan biaya bersama khusus owner.
+- Pencarian nama anggota menemukan kelompoknya. **Unduh ringkasan** Excel/PNG mengikuti pengelompokan dan memuat nama anggota, tanpa menggandakan model.
+- **Bubarkan kelompok** mengembalikan tampilan dan pengaturan biaya individual yang tetap tersimpan. Pengelompokan tidak mengubah PO, stok, hasil potong, upah, atau pembayaran.
+- Versi calon **1.5.62**, rakitan `20261030-kelompok-hpp-1562`. Memerlukan pemasangan server terlebih dahulu; belum aktif di aplikasi yang dipakai. Ikuti `CATATAN-KERJA-BERSAMA.md` untuk pemeriksaan sumber dan pemasangan.
+
 ## Pembaruan tampilan 30 Oktober 2026 — Invoice DP dan pelunasan
 
 - Buka **Nota penjualan → pilih nota → Invoice DP**, isi nominal uang muka dan tanggal, lalu **Cetak / Simpan PDF**. Pilih kertas A4 atau Simpan sebagai PDF pada dialog cetak.
