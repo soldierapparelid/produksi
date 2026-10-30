@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.63 — Acuan XL, kecepatan HPP, dan retur admin
+
+- **Cukup satu anggota dengan acuan XL lengkap** untuk HPP kelompok. Anggota lain mengikuti acuan yang sama tanpa menunggu seluruh model dipotong. Bila ada beberapa acuan lengkap, rata-rata memakai total biaya dibagi total hasil XL acuan tersebut. Data yang belum lengkap tidak menurunkan rata-rata dan tetap diberi keterangan.
+- Untuk catatan lama yang menggabungkan kain beberapa ukuran, owner dapat memilih **Tentukan kain XL** pada model atau anggota kelompok. Pilih rol yang benar-benar dipakai untuk XL dan centang konfirmasi; aplikasi tidak memilihkannya otomatis. Pilihan hanya menjadi acuan HPP, tanpa mengubah stok, hasil potong, atau upah. Perubahan catatan sumber meminta pemeriksaan ulang.
+- Pembacaan HPP mengumpulkan kebutuhan data sekaligus dan melewati perhitungan pembelian yang tidak diperlukan. Setelah menyimpan, halaman terbaru ikut dikirim dalam jawaban yang sama. Pada pengujian cache, jumlah pembacaan turun dari 26 menjadi paling banyak 4; ini pengukuran panggilan data, bukan janji durasi jaringan.
+- **Retur paket** dapat dipakai owner dan admin. Tiga tindakan utama: **Terima paket**, **Impor Shopee / TikTok**, dan **Laporan belum kembali**. Cari/scan resi atau nomor pesanan, pilih paket, isi kondisi dan jumlah fisik, lalu unggah bukti langsung di formulir penerimaan. Rincian klaim dibuka bila perlu; akun pekerja produksi tetap tidak mendapat akses retur.
+- Data retur yang baru dimuat dipakai kembali selama 30 detik, dengan **Muat ulang** bila diperlukan. Isian dikunci selama unggah; jawaban lama dari sesi lain atau modal yang sudah ditutup tidak menimpa tampilan aktif.
+- Versi **1.5.63**, rakitan `20261030-hpp-retur-1563`, cabang `codex/hpp-acuan-xl-siap` dari `main` `107c8a9`. Build, pemeriksaan hasil build, dan **1.465 tes lulus**. Server dipasang pada deployment **Versi 77**, **30 Oktober 2026 pukul 22.25 WIB**; seluruh sumber tersimpan cocok setelah muat ulang, termasuk penjagaan sesi unggah terakhir. Bootstrap **22.26 WIB** mengonfirmasi HTTP 200, `ok: true`, `appVersion: 1.5.63`, `needSetup: false`. **Peluncuran tampilan GitHub Pages menunggu PR.** Pemilihan kain XL pada data asli belum dilakukan dan menunggu konfirmasi pemilik. Rincian pemasangan ada di `CATATAN-KERJA-BERSAMA.md`.
+
 ## Rilis 1.5.62 — Kelompok HPP
 
 - Di **HPP produk → Kelompok baru**, owner memilih minimal dua model dengan bahan, pola, sablon, dan ongkos yang setara. Warna atau motif berbeda dapat memakai satu kelompok; bahan tebal atau pengerjaan berbeda dipilih terpisah.

@@ -267,7 +267,9 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
   function find(module,kind,key){return all().filter(function(r){return r.module===module&&r.kind===kind&&coreCommerceData(r).id===key;})[0];}
   function view(row){if(!row)fail('Catatan tidak ditemukan.');return coreCommerceRecordView(row,store.read('CommerceEvent'),all());}
   function stateOf(module,me){
-    var rows=all(),events=store.read('CommerceEvent'),lookup=coreCommerceLookup(rows,events),out={module:module,version:store.version(),actor:{id:me.id,divisi:me.divisi}};
+    var out={module:module,version:store.version(),actor:{id:me.id,divisi:me.divisi}};
+    if(module==='hpp')return out;
+    var rows=all(),events=store.read('CommerceEvent'),lookup=coreCommerceLookup(rows,events);
     function list(kind){return rows.filter(function(r){return r.module===module&&r.kind===kind;}).map(function(r){return coreCommerceRecordView(r,events,rows,lookup);});}
     if(module==='pembelian'){out.suppliers=list('supplier');out.products=list('product').map(coreCommerceLean);out.orders=list('order');}
     if(module==='nota')out.notes=list('nota');
@@ -681,16 +683,25 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
   actions.arsipCommerceNota=function(p){var me=writable(p),row=find('nota','nota',id(p.id)),v=historyEditable(view(row)),arsip=p.arsip!==false;if(!!v.archived===arsip)return reply('nota',row,p,me);expected(row,p);
     var data=coreCommerceData(row),stamp=now();if(arsip){data.archived=true;data.archivedBy=me.id;data.archivedAt=stamp;}else['archived','archivedBy','archivedAt'].forEach(function(k){delete data[k];});
     row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash([data,stamp,me.id]),diubah:stamp});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return reply('nota',row,p,me);};
+  /* Read versioned cache entries in one batch rather than two cache RPCs per
+     table. Authentication and durable write/import checks still run first. */
+  function hppPrefetch(){if(store.prefetch)store.prefetch(['CommerceRecord','CommerceEvent','CommerceImport','CommerceSource','PO','Produk','Potong','SlipKirim','StokBahan','RencanaPotong','KoreksiRiwayat','Pengaturan']);}
+  function hppState(row,me,calculated){
+    var out=stateOf('hpp',me);out.config=row?coreCommerceCopy(coreCommerceData(row)):{configs:{},modelConfigs:{},marketplace:{},pajak:0};
+    ['_lastMutation','_createHash','_createActor'].forEach(function(k){delete out.config[k];});out.revision=row?view(row).revision:'';
+    return Object.assign(out,calculated||(typeof coreCommerceHpp==='function'?coreCommerceHpp(hppInput(out.config)):{models:[],warnings:['Perhitungan HPP belum tersedia.']}));
+  }
+  function hppReply(row,p,me,calculated){var out={revision:view(row).revision};if(p.withState===true)out.commerce=hppState(row,me,calculated);return out;}
   function hppInput(config){
+    hppPrefetch();
     var source=store.read('CommerceSource'),legacy={production:[],stock:{pembelian:[],rolInfo:{}},meta:{},cuttingPlans:[]};
     store.read('CommerceImport').filter(function(r){return r.status==='complete';}).forEach(function(manifest){var proof=coreCommerceData(manifest),subset=source.filter(function(r){return r.sourceHash===manifest.sourceHash;}).map(function(r){var out={};SCHEMA.CommerceSource.forEach(function(k){out[k]=r[k]===undefined?'':r[k];});return out;}).sort(function(a,b){return a.id.localeCompare(b.id);});if(subset.length!==proof.sourceRows||coreCommerceHash(subset)!==proof.sourceDigest)fail('Snapshot HPP asal tidak utuh atau berubah. Periksa cadangan impor sebelum menghitung.');});
     var manifestHashes={};store.read('CommerceImport').filter(function(r){return r.status==='complete';}).forEach(function(r){manifestHashes[r.sourceHash]=true;});if(source.some(function(r){return !manifestHashes[r.sourceHash];}))fail('Ada snapshot HPP tanpa manifest impor lengkap.');
     source.forEach(function(r){var data=coreCommerceData(r);if(r.kind==='hpp-production')legacy.production.push(data);if(r.kind==='hpp-purchase')legacy.stock.pembelian.push(data);if(r.kind==='hpp-rollinfo')legacy.stock.rolInfo[r.parentId]=data;if(r.kind==='hpp-meta')legacy.meta=data;if(r.kind==='hpp-plan')legacy.cuttingPlans.push(data);});
     legacy.workers=coreCommerceRows(legacy.meta.tukangJahit||legacy.meta.maklon||{});var input={config:config,legacy:legacy,tables:{},settings:ctx.settings()};['PO','Produk','Potong','SlipKirim','StokBahan','RencanaPotong','KoreksiRiwayat'].forEach(function(s){input.tables[s]=store.read(s);});return input;
   }
-  actions.getCommerceState=function(p){var me=admin(p,false,true),module=p.module;if(['pembelian','nota','hpp'].indexOf(module)<0)fail('Modul tidak dikenal.');var waiting=pending();if(waiting.length)fail('Impor modul belum selesai. Owner perlu melanjutkan file yang sama sebelum modul dipakai.');var out=stateOf(module,me);
-    if(module==='hpp'){var row=find('hpp','config','config');out.config=row?coreCommerceCopy(coreCommerceData(row)):{configs:{},modelConfigs:{},marketplace:{},pajak:0};['_lastMutation','_createHash','_createActor'].forEach(function(k){delete out.config[k];});out.revision=row?view(row).revision:'';if(typeof coreCommerceHpp==='function')Object.assign(out,coreCommerceHpp(hppInput(out.config)));else{out.models=[];out.warnings=['Perhitungan HPP belum tersedia.'];}}
-    return out;
+  actions.getCommerceState=function(p){var me=admin(p,false,true),module=p.module;if(['pembelian','nota','hpp'].indexOf(module)<0)fail('Modul tidak dikenal.');if(module==='hpp')hppPrefetch();var waiting=pending();if(waiting.length)fail('Impor modul belum selesai. Owner perlu melanjutkan file yang sama sebelum modul dipakai.');
+    return module==='hpp'?hppState(find('hpp','config','config'),me):stateOf(module,me);
   };
   /* Photos for the products on screen. Each (product, revision) is kept in the
      small per-image cache, so repeat requests do not load the record table. */
@@ -702,33 +713,63 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
       if(store.imgPut)store.imgPut(fresh);}
     return {images:out};
   };
-  function hppWrite(current,row,me,intent){
-    current._lastMutation={hash:intent,actor:me.id};var stamp=now(),saved={id:coreCommerceKey('hpp','config','config'),module:'hpp',kind:'config',parentId:'',data:JSON.stringify(current),revision:coreCommerceHash(current),dibuat:row?row.dibuat:stamp,dibuatOleh:row?row.dibuatOleh:me.id,diubah:stamp,sourceHash:row?row.sourceHash:''};checkRows('CommerceRecord',[saved]);if(row)store.update('CommerceRecord',row.id,saved);else store.append('CommerceRecord',saved);return {revision:view(saved).revision};
+  function hppWrite(current,row,me,intent,p,calculated){
+    current._lastMutation={hash:intent,actor:me.id};var stamp=now(),saved={id:coreCommerceKey('hpp','config','config'),module:'hpp',kind:'config',parentId:'',data:JSON.stringify(current),revision:coreCommerceHash(current),dibuat:row?row.dibuat:stamp,dibuatOleh:row?row.dibuatOleh:me.id,diubah:stamp,sourceHash:row?row.sourceHash:''};checkRows('CommerceRecord',[saved]);if(row)store.update('CommerceRecord',row.id,saved);else store.append('CommerceRecord',saved);return hppReply(saved,p,me,calculated);
   }
   actions.saveCommerceHppGroup=function(p){
     var me=writable(p,true),row=find('hpp','config','config'),current=row?coreCommerceCopy(coreCommerceData(row)):{id:'config',configs:{},modelConfigs:{},marketplace:{},pajak:0};
     var key=id(p.id);if(!/^hppg_[A-Za-z0-9_-]{1,100}$/.test(key))fail('Identitas kelompok HPP tidak sah.');
     if(p.remove!==undefined&&typeof p.remove!=='boolean')fail('Pilihan hapus kelompok tidak sah.');
     var intent=coreCommerceHash({action:'saveCommerceHppGroup',id:key,nama:p.nama,modelIds:p.modelIds,remove:p.remove===true,before:p.expectedRevision||''});
-    if(row&&current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return {revision:view(row).revision};
+    if(row&&current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return hppReply(row,p,me);
     if(row)expected(row,p);else if(p.expectedRevision)fail('Konfigurasi asal tidak ditemukan.');
     var groups=current.hppGroups;if(groups===undefined)groups={};if(!groups||typeof groups!=='object'||Array.isArray(groups))fail('Data kelompok HPP perlu diperiksa.');current.hppGroups=groups;
     var old=Object.prototype.hasOwnProperty.call(groups,key)?groups[key]:null;
-    if(p.remove===true){if(!old)fail('Kelompok HPP tidak ditemukan.');delete groups[key];return hppWrite(current,row,me,intent);}
+    if(p.remove===true){if(!old)fail('Kelompok HPP tidak ditemukan.');delete groups[key];var removedState=p.withState===true?coreCommerceHpp(hppInput(current)):null;return hppWrite(current,row,me,intent,p,removedState);}
     var name=text(p.nama,80,true);if(!Array.isArray(p.modelIds)||p.modelIds.length<2||p.modelIds.length>100)fail('Pilih 2 sampai 100 model untuk kelompok HPP.');
     if(!old&&Object.keys(groups).length>=20)fail('Maksimal 20 kelompok HPP.');
-    var available=Object.create(null),seen=Object.create(null);coreCommerceHpp(hppInput(current)).models.forEach(function(m){available[m.id]=true;});
-    var modelIds=p.modelIds.map(function(modelId){modelId=text(modelId,500,true);if(!available[modelId])fail('Model HPP tidak ditemukan.');if(seen[modelId])fail('Model dipilih lebih dari sekali.');seen[modelId]=true;return modelId;}).sort();
+    var available=Object.create(null),seen=Object.create(null);
+    var modelIds=p.modelIds.map(function(modelId){modelId=text(modelId,500,true);if(seen[modelId])fail('Model dipilih lebih dari sekali.');seen[modelId]=true;return modelId;}).sort();
     Object.keys(groups).forEach(function(other){if(other===key)return;var g=groups[other];if(!g||!Array.isArray(g.modelIds))fail('Data kelompok HPP perlu diperiksa.');if(coreCommerceLegacyCost.norm(g.nama)===coreCommerceLegacyCost.norm(name))fail('Nama kelompok HPP sudah dipakai.');if(g.modelIds.some(function(member){return !!seen[member];}))fail('Model sudah masuk kelompok HPP lain. Lepaskan dari kelompok asal dahulu.');});
     var config=old&&old.config?coreCommerceCopy(old.config):null,changed=old&&JSON.stringify((old.modelIds||[]).slice().sort())!==JSON.stringify(modelIds);if(changed&&config)config.costsReviewed=false;
-    groups[key]={id:key,nama:name,modelIds:modelIds,config:config};return hppWrite(current,row,me,intent);
+    groups[key]={id:key,nama:name,modelIds:modelIds,config:config};
+    var calculated=coreCommerceHpp(hppInput(current));calculated.models.forEach(function(m){available[m.id]=true;});modelIds.forEach(function(modelId){if(!available[modelId])fail('Model HPP tidak ditemukan.');});
+    return hppWrite(current,row,me,intent,p,calculated);
   };
-  function saveHpp(p,settingsOnly){var me=writable(p),row=find('hpp','config','config'),current=row?coreCommerceCopy(coreCommerceData(row)):{id:'config',configs:{},modelConfigs:{},marketplace:{},pajak:0};var groupTarget=!settingsOnly&&current.hppGroups&&Object.prototype.hasOwnProperty.call(current.hppGroups,p.modelId);if(groupTarget&&me.divisi!=='owner')fail('Hanya owner yang boleh mengubah biaya kelompok HPP.');var intent=coreCommerceHash({modelId:p.modelId,config:p.config,marketplace:p.marketplace,pajak:p.pajak,before:p.expectedRevision||''});if(current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return {revision:view(row).revision};if(row)expected(row,p);else if(p.expectedRevision)fail('Konfigurasi asal tidak ditemukan.');
+  actions.saveCommerceHppXLReference=function(p){
+    var me=writable(p,true),modelId=text(p.modelId,500,true),row=find('hpp','config','config'),current=row?coreCommerceCopy(coreCommerceData(row)):{id:'config',configs:{},modelConfigs:{},marketplace:{},pajak:0};
+    if(['__proto__','constructor','prototype'].indexOf(modelId)>=0)fail('Model HPP tidak ditemukan.');
+    var intent=coreCommerceHash({action:'saveCommerceHppXLReference',modelId:modelId,planId:p.planId,evidenceRevision:p.evidenceRevision,rollIds:p.rollIds,confirmed:p.confirmed,remove:p.remove===true,before:p.expectedRevision||''});
+    if(row&&current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return hppReply(row,p,me);
+    if(row)expected(row,p);else if(p.expectedRevision)fail('Konfigurasi asal tidak ditemukan.');
+    var refs=current.xlReferences||(current.xlReferences={});if(!refs||typeof refs!=='object'||Array.isArray(refs))fail('Pengaturan acuan XL perlu diperiksa.');
+    var old=Object.prototype.hasOwnProperty.call(refs,modelId)?refs[modelId]:null,next=null;
+    if(p.remove===true){if(!old)fail('Acuan kain XL belum ditentukan.');delete refs[modelId];}
+    else{
+      if(p.confirmed!==true)fail('Pastikan rol yang dipilih khusus untuk hasil XL.');
+      if(!Array.isArray(p.rollIds)||!p.rollIds.length||p.rollIds.length>50)fail('Pilih rol kain khusus XL.');
+      var rollIds=p.rollIds.map(function(id){return text(id,500,true);}).sort();if(rollIds.some(function(id,i){return rollIds.indexOf(id)!==i;}))fail('Rol kain dipilih lebih dari sekali.');
+      var input=hppInput(current),model=coreCommerceHpp(input).models.filter(function(m){return m.id===modelId;})[0],candidate=model&&model.xlReferenceCandidate;
+      if(!candidate)fail('Belum ada jatah kain campuran dan hasil XL yang dapat dicocokkan untuk model ini.');
+      if(p.planId!==candidate.planId||p.evidenceRevision!==candidate.evidenceRevision)fail('Riwayat acuan berubah. Muat ulang dan pilih kain XL lagi.');
+      if(rollIds.length>=candidate.rolls.length||!rollIds.every(function(id){return candidate.rolls.some(function(r){return r.id===id;});}))fail('Pilih hanya rol khusus XL dari daftar; sisakan rol untuk ukuran lainnya.');
+      next={planId:candidate.planId,evidenceRevision:candidate.evidenceRevision,rollIds:rollIds,confirmed:true,createdBy:me.id,createdAt:now()};refs[modelId]=next;
+    }
+    current.xlReferenceHistory=(current.xlReferenceHistory||[]).concat([{modelId:modelId,before:coreCommerceCopy(old),after:coreCommerceCopy(next),by:me.id,at:now()}]);
+    var calculated=coreCommerceHpp(hppInput(current));return hppWrite(current,row,me,intent,p,calculated);
+  };
+  function saveHpp(p,settingsOnly){var me=writable(p),row=find('hpp','config','config'),current=row?coreCommerceCopy(coreCommerceData(row)):{id:'config',configs:{},modelConfigs:{},marketplace:{},pajak:0};var groupTarget=!settingsOnly&&current.hppGroups&&Object.prototype.hasOwnProperty.call(current.hppGroups,p.modelId);if(groupTarget&&me.divisi!=='owner')fail('Hanya owner yang boleh mengubah biaya kelompok HPP.');var intent=coreCommerceHash({modelId:p.modelId,config:p.config,marketplace:p.marketplace,pajak:p.pajak,before:p.expectedRevision||''});if(current._lastMutation&&current._lastMutation.hash===intent&&current._lastMutation.actor===me.id)return hppReply(row,p,me);if(row)expected(row,p);else if(p.expectedRevision)fail('Konfigurasi asal tidak ditemukan.');
     if(settingsOnly){if(p.pajak!==undefined)current.pajak=num(p.pajak,100,false,false);if(p.marketplace!==undefined){if(!p.marketplace||typeof p.marketplace!=='object'||p.marketplace instanceof Array||Object.keys(p.marketplace).length>20)fail('Pengaturan marketplace tidak sah.');current.marketplace={};Object.keys(p.marketplace).forEach(function(k){id(k);var m=p.marketplace[k];current.marketplace[k]={nama:text(m.nama,80,true),fee:num(m.fee,100,false,false),fixedPerPcs:num(m.fixedPerPcs===undefined?0:m.fixedPerPcs,1e12,false,true)};});}}
-    else{var modelId=text(p.modelId,500,true),config=p.config;if(typeof coreCommerceHpp!=='function'||typeof coreCommerceHppConfig!=='function')fail('Perhitungan HPP belum tersedia.');var calculated=coreCommerceHpp(hppInput(current)),model=(groupTarget?calculated.groups:calculated.models).filter(function(m){return m.id===modelId;})[0];if(!model||['__proto__','constructor','prototype'].indexOf(modelId)>=0)fail('Model HPP tidak ditemukan.');
+    else{var modelId=text(p.modelId,500,true),config=p.config;if(typeof coreCommerceHpp!=='function'||typeof coreCommerceHppConfig!=='function')fail('Perhitungan HPP belum tersedia.');
+      if(['__proto__','constructor','prototype'].indexOf(modelId)>=0)fail('Model HPP tidak ditemukan.');
       if(!groupTarget&&Object.keys(current.hppGroups||{}).some(function(key){var g=current.hppGroups[key];return g&&Array.isArray(g.modelIds)&&g.modelIds.indexOf(modelId)>=0;}))fail('Model ini mengikuti kelompok HPP. Ubah biaya melalui kelompoknya.');
-      config=coreCommerceHppConfig(config,model);if(groupTarget)current.hppGroups[modelId].config=config;else{current.modelConfigs=current.modelConfigs||{};current.modelConfigs[modelId]=config;}}
-    return hppWrite(current,row,me,intent);
+      /* Validate the candidate first, then compute once. The same evidence
+         validates its model/basis and supplies the post-save page. */
+      config=coreCommerceHppConfig(config);if(groupTarget)current.hppGroups[modelId].config=config;else{current.modelConfigs=current.modelConfigs||{};current.modelConfigs[modelId]=config;}
+      var calculated=coreCommerceHpp(hppInput(current)),model=(groupTarget?calculated.groups:calculated.models).filter(function(m){return m.id===modelId;})[0];if(!model)fail('Model HPP tidak ditemukan.');
+      config=coreCommerceHppConfig(config,model);if(groupTarget)current.hppGroups[modelId].config=config;else current.modelConfigs[modelId]=config;model.config.value=coreCommerceCopy(config);}
+    if(settingsOnly&&p.withState===true)calculated=coreCommerceHpp(hppInput(current));
+    return hppWrite(current,row,me,intent,p,calculated);
   }
   actions.saveCommerceHpp=function(p){return saveHpp(p,false);};actions.saveCommerceHppSettings=function(p){return saveHpp(p,true);};
   actions.makeCommercePdf=function(p){admin(p,false,true);if(!ctx.env.makePdf)fail('PDF tersedia setelah aplikasi terpasang.');var module=p.module;if(['pembelian','nota'].indexOf(module)<0)fail('Jenis dokumen tidak dikenal.');if(pending().length)fail('Impor belum selesai.');var grouped=p.ids!==undefined,ids=grouped?p.ids:[p.id];if(!(ids instanceof Array)||!ids.length||ids.length>20||grouped&&module!=='pembelian')fail('Pilih 1 sampai 20 pesanan pembelian untuk PDF gabungan.');var seen={},supplierId='',records=ids.map(function(key){key=id(key);if(seen[key])fail('Pesanan gabungan tidak boleh ganda.');seen[key]=true;var record=historyEditable(view(find(module,module==='nota'?'nota':'order',key)));if(p.expectedRevisions&&p.expectedRevisions[key]!==record.revision)fail('Pesanan berubah sejak pilihan cetak dibuka. Muat ulang dan pilih kembali.');if(grouped){var sid=(record.supplierSnapshot||{}).id;if(!sid||supplierId&&sid!==supplierId)fail('PDF gabungan harus memakai identitas supplier yang sama.');supplierId=sid;}return record;});/* nota penjualan: invoice untuk pelanggan (logo dikirim perangkat sebagai gambar kecil); pembelian tetap memakai slip */

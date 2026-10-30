@@ -2,7 +2,7 @@
    Retur paket (1.5.60) — catatan paket retur marketplace
    Dipindahkan dari aplikasi "Soldier Retur" (paket 24 Okt 2026) ke aplikasi ini: impor ekspor TikTok Shop (CSV)
    dan Shopee (XLSX), status operasional, penerimaan fisik dengan bukti, paket tanpa resi, tindak lanjut klaim,
-   dan kronologi. Hanya owner. Data di tab ReturKasus / ReturImpor / ReturEvent / ReturBukti; berkas bukti di
+   dan kronologi. Untuk owner/admin. Data di tab ReturKasus / ReturImpor / ReturEvent / ReturBukti; berkas bukti di
    Google Drive pemilik lewat env.simpanBukti, bukan di Sheet. Nama pembeli, telepon, dan alamat dari file ekspor
    tidak pernah disimpan: hanya kolom operasional yang dipetakan.
    ============================================================ */
@@ -393,10 +393,10 @@ function coreReturJenisBerkas(b64) {
 }
 function coreReturUkuranBase64(b64) { var s = String(b64 || ''), pad = /==$/.test(s) ? 2 : /=$/.test(s) ? 1 : 0; return Math.max(0, Math.floor(s.length * 3 / 4) - pad); }
 
-/* ---------- aksi server (owner) ---------- */
+/* ---------- aksi server (owner/admin) ---------- */
 function coreInstallReturActions(actions, ctx) {
   var store = ctx.store, env = ctx.env, fail = ctx.fail;
-  function owner(p) { var me = ctx.auth(p); if (me.divisi !== 'owner') fail('Retur paket hanya untuk owner.'); return me; }
+  function admin(p) { var me = ctx.auth(p); if (!coreIsAdmin(me)) fail('Retur paket hanya untuk owner/admin.'); return me; }
   function fresh(names) { if (store.checkpoint) store.checkpoint(names); else if (store.fresh) names.forEach(function (n) { store.fresh(n); }); }
   function now() { return env.now().toISOString(); }
   function idBaru() { return env.id ? String(env.id()) : Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -417,14 +417,14 @@ function coreInstallReturActions(actions, ctx) {
   function buktiView(b) { return { id: b.id, name: b.name, type: b.type, size: coreNum(b.size), category: b.category, createdAt: b.dibuat, url: env.alamatBukti ? env.alamatBukti(b.fileId) : '' }; }
 
   actions.getReturState = function (p) {
-    owner(p); fresh(['ReturKasus', 'ReturImpor']);
+    admin(p); fresh(['ReturKasus', 'ReturImpor']);
     var rows = store.read('ReturKasus').slice().sort(function (a, b) { return terbaru(a.diubah, b.diubah); });
     var imports = store.read('ReturImpor').slice().sort(function (a, b) { return terbaru(a.dibuat, b.dibuat); }).slice(0, 30)
       .map(function (i) { return { id: i.id, filename: i.filename, createdAt: i.dibuat, added: coreNum(i.added), updated: coreNum(i.updated) }; });
     return { cases: rows.slice(0, 5000).map(unpack), imports: imports, truncated: rows.length > 5000, drive: !!env.simpanBukti };
   };
   actions.getReturDetail = function (p) {
-    owner(p); fresh(['ReturKasus', 'ReturEvent', 'ReturBukti']);
+    admin(p); fresh(['ReturKasus', 'ReturEvent', 'ReturBukti']);
     var r = baris(p.id), c = unpack(r);
     var events = store.read('ReturEvent').filter(function (e) { return e.caseId === r.id; }).sort(function (a, b) { return terbaru(a.dibuat, b.dibuat); }).slice(0, 500)
       .map(function (e) { return { id: e.id, type: e.type, actor: e.actor, detail: e.detail, createdAt: e.dibuat }; });
@@ -432,7 +432,7 @@ function coreInstallReturActions(actions, ctx) {
     return { case: c, events: events, evidence: bukti, folderUrl: c.folderId && env.alamatFolder ? env.alamatFolder(c.folderId) : '' };
   };
   actions.importRetur = function (p) {
-    var me = owner(p), actor = me.nama || 'Owner';
+    var me = admin(p), actor = me.nama || 'Admin';
     var filename = coreReturStr(p.filename, 250, 'nama file'), shop = coreReturStr(p.shop, 100, 'nama toko', true), importKey = coreReturStr(p.importKey, 200, 'kunci impor', true);
     if (!RETUR_PLATFORM[p.platform]) fail('Platform tidak dikenal.');
     if (!(Array.isArray(p.cases)) || !p.cases.length || p.cases.length > 200) fail('Kirim 1 sampai 200 paket per tahap impor.');
@@ -478,7 +478,7 @@ function coreInstallReturActions(actions, ctx) {
     return { added: added, updated: updated };
   };
   actions.saveRetur = function (p) {
-    var me = owner(p), actor = me.nama || 'Owner';
+    var me = admin(p), actor = me.nama || 'Admin';
     var revisi = Number(p.revision); if (!Number.isSafeInteger(revisi) || revisi < 1) fail('Versi paket tidak valid. Muat ulang paket.');
     var patch = periksa(function () { return coreReturPatch(p.patch); });
     fresh(['ReturKasus', 'ReturEvent', 'ReturBukti']);
@@ -494,7 +494,7 @@ function coreInstallReturActions(actions, ctx) {
     return { case: unpack(baris(r.id)) };
   };
   actions.catatReturTanpaResi = function (p) {
-    var me = owner(p), actor = me.nama || 'Owner';
+    var me = admin(p), actor = me.nama || 'Admin';
     var reqId = coreReturStr(p.requestId, 60, 'kunci permintaan', true);
     if (!/^[A-Za-z0-9_-]{6,60}$/.test(reqId)) fail('Kunci permintaan tidak valid. Buka ulang formulir.');
     var shop = coreReturStr(p.shop, 100, 'nama toko', true), produk = coreReturStr(p.productSummary, 4000, 'produk / ciri paket', true);
@@ -514,7 +514,7 @@ function coreInstallReturActions(actions, ctx) {
     return { case: unpack(row) };
   };
   actions.cocokkanRetur = function (p) {
-    var me = owner(p), actor = me.nama || 'Owner';
+    var me = admin(p), actor = me.nama || 'Admin';
     fresh(['ReturKasus', 'ReturEvent', 'ReturBukti']);
     var from = baris(p.id), to = baris(p.targetId), a = unpack(from), t = unpack(to);
     if (!a.unidentified || a.matchedTo || t.unidentified || from.id === to.id) fail('Pilih paket tanpa resi yang belum dicocokkan dan pesanan tujuan yang jelas.');
@@ -537,7 +537,7 @@ function coreInstallReturActions(actions, ctx) {
     return { case: unpack(baris(to.id)) };
   };
   actions.unggahReturBukti = function (p) {
-    var me = owner(p), actor = me.nama || 'Owner';
+    var me = admin(p), actor = me.nama || 'Admin';
     var reqId = coreReturStr(p.requestId, 60, 'kunci permintaan', true);
     if (!/^[A-Za-z0-9_-]{6,60}$/.test(reqId)) fail('Kunci permintaan tidak valid. Pilih ulang berkasnya.');
     var kategori = String(p.category || 'other'); if (!RETUR_KATEGORI[kategori]) fail('Jenis bukti tidak valid.');
@@ -565,7 +565,7 @@ function coreInstallReturActions(actions, ctx) {
     return { bukti: buktiView(row) };
   };
   actions.getReturBukti = function (p) {
-    owner(p); fresh(['ReturBukti']);
+    admin(p); fresh(['ReturBukti']);
     var b = store.read('ReturBukti').filter(function (x) { return x.id === String(p.id || ''); })[0]; if (!b) fail('Bukti tidak ditemukan.');
     var out = buktiView(b);
     if (out.size <= 8 * 1024 * 1024 && env.ambilBukti) out.base64 = env.ambilBukti(b.fileId);

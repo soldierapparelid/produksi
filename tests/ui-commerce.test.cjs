@@ -87,12 +87,23 @@ test('a save answer that carries the refreshed page needs no second request and 
   h.requests[0].resolve(reply('nota',{notes:[]},11));await assert.rejects(old);assert.equal(h.run("commerceData('nota').notes[0].id"),'fixed');
   assert.equal(JSON.parse(h.run("kv.pks_cm_nota_pusat.s")).notes[0].id,'fixed','the device copy follows the saved page');
 });
-test('a save answer with a foreign or incomplete page falls back to one fresh read; HPP never asks for a page in the answer',async()=>{
+test('a save answer with a foreign or incomplete page falls back to one fresh read',async()=>{
   for(const page of [{module:'nota',actor:{id:'other',divisi:'owner'},notes:[],version:12},{module:'pembelian',actor:{id:'owner',divisi:'owner'},orders:[],version:12}]){
     const h=harness();h.form({},'nota');const save=h.run("commerceMutation('nota','saveCommerceNota',{record:{id:'fixed'}},currentForm,null)");h.requests[0].resolve({record:{id:'fixed'},commerce:page});await turn();
     assert.equal(h.requests.length,2);assert.equal(h.requests[1].action,'getCommerceState');h.requests[1].resolve(reply('nota',{notes:[{id:'fixed'}]},12));await save;assert.equal(h.run('drops'),1);
   }
-  const h=harness();h.form({},'hpp');h.run("commerceMutation('hpp','saveCommerceHppSettings',{pajak:1},currentForm,null)");assert.equal(h.requests[0].payload.withState,undefined);
+});
+test('HPP save uses its confirmed refreshed page without another request and ignores an older read',async()=>{
+  const h=harness();h.form({},'hpp');const old=h.run("commerceFetch('hpp')"),save=h.run("commerceMutation('hpp','saveCommerceHppSettings',{pajak:1},currentForm,null)");
+  assert.equal(h.requests[1].payload.withState,true);assert.equal(h.run('currentForm._commerceIntent.payload.withState'),undefined);
+  h.requests[1].resolve({revision:'saved',commerce:reply('hpp',{models:[{id:'model',hppTotal:12000}],groups:[],config:{pajak:1},revision:'saved'},12)});await save;
+  assert.equal(h.requests.length,2);assert.equal(h.run('drops'),1);assert.equal(h.run('commerceData("hpp").models[0].hppTotal'),12000);
+  h.requests[0].resolve(reply('hpp',{models:[],revision:'old'},11));await assert.rejects(old);assert.equal(h.run('commerceData("hpp").revision'),'saved');
+});
+test('an older HPP server without a page in its save answer still refreshes once',async()=>{
+  const h=harness();h.form({},'hpp');const save=h.run("commerceMutation('hpp','saveCommerceHppSettings',{pajak:1},currentForm,null)");
+  h.requests[0].resolve({revision:'saved'});await turn();assert.equal(h.requests.length,2);assert.equal(h.requests[1].action,'getCommerceState');
+  h.requests[1].resolve(reply('hpp',{models:[],revision:'saved'},12));await save;assert.equal(h.run('drops'),1);
 });
 test('lists mark product photos for separate loading, never fetch them inline, and refuse unsafe picture text',()=>{
   const h=harness(),marked=h.run("commerceThumb({id:'p1',nama:'Kaos Polos',revision:'abcdef0123456789ffff',hasPicture:true})");
