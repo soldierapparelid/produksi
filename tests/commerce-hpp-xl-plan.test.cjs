@@ -84,3 +84,29 @@ test('configSaved rejects malformed and unreviewed configs and legacy-compatible
  const input=fixture();input.config.configs={'native:po1':input.config.modelConfigs[id]};delete input.config.modelConfigs;
  const m=run(input);assert.equal(m.config.source,'legacy-compatible');assert.equal(m.configSaved,false);
 });
+
+test('XL supplies its own reference immediately while other explicitly allocated sizes wait for cutting',()=>{
+ const input=fixture();input.tables.Potong[0].ukuran={XL:117};input.tables.Potong[0].total=117;
+ const before=JSON.stringify(input),pending=run(input);
+ assert.equal(pending.basis.ukuran,'XL');assert.equal(pending.kain.totalPcs,117);assert.equal(pending.kain.totalCost,2266000);assert.equal(pending.kain.observasi.totalKg,25.75);assert.equal(pending.potong.totalCost,58500);assert.equal(pending.configured,true);assert.equal(JSON.stringify(input),before);
+ assert.deepEqual(pending.kain.details.map(d=>d.sourceId),['rollXL']);assert.deepEqual(pending.kain.observasi.sizes,[{size:'XL',jumlah:117}]);
+ input.tables.Potong.push({id:'cutM',poId:'po1',asal:'lanjut',total:121,ukuran:{M:121},tarif:700,bahanList:'',alokasiBahan:'',bahan:'',kg:0});
+ const finished=run(input);assert.equal(finished.kain.totalPcs,pending.kain.totalPcs);assert.equal(finished.kain.totalCost,pending.kain.totalCost);assert.equal(finished.potong.totalCost,pending.potong.totalCost);assert.equal(finished.hppTotal,pending.hppTotal);assert.equal(finished.configured,true);
+});
+
+test('explicit result roll labels can isolate XL without waiting for another size or a plan lookup',()=>{
+ const input=fixture();input.tables.Potong[0].ukuran={XL:117};input.tables.Potong[0].total=117;
+ input.tables.Potong[0].alokasiBahan=structuredClone(input.tables.RencanaPotong[0].alokasiBahan);input.tables.RencanaPotong=[];
+ const m=run(input);assert.equal(m.basis.ukuran,'XL');assert.equal(m.kain.totalPcs,117);assert.equal(m.kain.totalCost,2266000);assert.equal(m.configured,true);
+});
+
+test('pending size reference rejects missing labels and contradictions between explicit result and plan labels',()=>{
+ const mutations=[
+  i=>{i.tables.Potong[0].alokasiBahan[0].ukuran='';i.tables.RencanaPotong[0].alokasiBahan.forEach(a=>delete a.ukuran);},
+  i=>{i.tables.Potong[0].alokasiBahan[0].ukuran='M';i.tables.Potong[0].alokasiBahan[1].ukuran='XL';}
+ ];
+ for(const change of mutations){
+  const input=fixture();input.tables.Potong[0].ukuran={XL:117};input.tables.Potong[0].total=117;input.tables.Potong[0].alokasiBahan=structuredClone(input.tables.RencanaPotong[0].alokasiBahan);change(input);
+  const m=run(input);assert.equal(m.basis.ukuran,undefined);assert.equal(m.configured,false);assert.deepEqual(m.prices,{});
+ }
+});

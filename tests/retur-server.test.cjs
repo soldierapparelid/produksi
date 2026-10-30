@@ -1,5 +1,5 @@
 'use strict';
-/* 1.5.60 Retur paket lewat adaptor Sheets asli dan Google Drive tiruan: hanya owner, impor tanpa menggandakan,
+/* 1.5.60 Retur paket lewat adaptor Sheets asli dan Google Drive tiruan: owner/admin, impor tanpa menggandakan,
    penerimaan wajib bukti, bukti di Drive, paket tanpa resi dicocokkan. Data sintetis saja. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -33,12 +33,14 @@ function fixture() {
   const setup = h.request('setupOwner', { nama: 'Fixture Owner', pin: '1234' });
   assert.equal(setup.ok, true, setup.error);
   const owner = setup.data.token, admin = 'fixture-retur-admin-token';
+  const workers = ['potong', 'jahit', 'qc'].map(role => ({ role, token: 'fixture-retur-' + role }));
   h.run(`pkStore_().lock(function(){ pkStore_().append('Pegawai',{id:'returadmin01',nama:'Fixture Admin',divisi:'admin',aktif:true,token:'${admin}'}); });`);
+  workers.forEach(({role, token}) => h.run(`pkStore_().lock(function(){ pkStore_().append('Pegawai',{id:'retur-${role}',nama:'Fixture ${role}',divisi:'${role}',aktif:true,token:'${token}'}); });`));
   function call(action, payload = {}, token = owner) { h.cold(); return h.request(action, { token, workflowVersion: 2, ...payload }); }
   function good(action, payload = {}, token = owner) { const r = call(action, payload, token); assert.equal(r.ok, true, r.error); return r.data; }
   function bad(action, payload, pattern, token = owner) { const r = call(action, payload, token); assert.equal(r.ok, false, 'operation must reject'); if (pattern) assert.match(r.error, pattern); return r; }
   const drive = () => h.run('DRIVE');
-  return { h, owner, admin, call, good, bad, drive };
+  return { h, owner, admin, workers, call, good, bad, drive };
 }
 function kasus(orderId, extra = {}) {
   return { orderId, returnId: 'R-' + orderId, trackingReturn: 'RET-' + orderId, productSummary: 'Kaos BDU contoh', items: [{ name: 'Kaos BDU contoh', variant: 'Hitam L', sku: 'SKU-1', qty: 1, returnQty: 1 }],
@@ -46,10 +48,8 @@ function kasus(orderId, extra = {}) {
 }
 const impor = (f, key, cases, filename = 'ekspor.csv') => f.good('importRetur', { filename, platform: 'tiktok', shop: 'Toko Contoh', importKey: key, cases });
 
-test('only the owner opens or changes returns; an import is idempotent and a newer file updates source data only', () => {
+test('an import is idempotent and a newer file updates source data only', () => {
   const f = fixture();
-  f.bad('getReturState', {}, /hanya untuk owner/, f.admin);
-  f.bad('importRetur', { filename: 'x.csv', platform: 'tiktok', shop: 'Toko', importKey: 'k1', cases: [kasus('A1')] }, /hanya untuk owner/, f.admin);
   assert.deepEqual(impor(f, 'kunci-1', [kasus('A1'), kasus('A2')]), { added: 2, updated: 0 });
   assert.deepEqual(impor(f, 'kunci-1', [kasus('A1'), kasus('A2')]), { added: 2, updated: 0, replayed: true }, 'the same batch is not saved twice');
   let st = f.good('getReturState');
@@ -127,4 +127,30 @@ test('the new tables join the owner backup, and production state stays untouched
   for (const t of ['ReturKasus', 'ReturImpor', 'ReturEvent', 'ReturBukti']) assert.ok(backup.tabel.includes(t), t);
   const state = f.good('getState');
   assert.ok(!('retur' in state) && !JSON.stringify(state).includes('E1'), 'returns are loaded only by the owner page');
+});
+
+test('production workers cannot read or change returns through any action', () => {
+  const f = fixture();
+  for (const worker of f.workers) for (const action of ['getReturState', 'getReturDetail', 'getReturBukti', 'importRetur', 'saveRetur', 'catatReturTanpaResi', 'cocokkanRetur', 'unggahReturBukti']) {
+    f.bad(action, {}, /hanya untuk owner\/admin/, worker.token);
+  }
+});
+
+test('admin can import, receive with evidence, match an unlabelled parcel and read its report history', () => {
+  const f = fixture(), good = (action, payload) => f.good(action, payload, f.admin);
+  good('importRetur', { filename: 'contoh.csv', platform: 'tiktok', shop: 'Toko Contoh', importKey: 'admin-1', cases: [kasus('ADM1'), kasus('ADM2')] });
+  const st = good('getReturState'), first = st.cases.find(c => c.orderId === 'ADM1'), second = st.cases.find(c => c.orderId === 'ADM2');
+  const received = { status: 'diterima_baik', receivedAt: '2026-10-30', receiver: 'Admin penerima', receivedQty: 1 };
+  f.bad('saveRetur', { id: first.id, revision: first.revision, patch: received }, /minimal satu bukti/, f.admin);
+  const proof = good('unggahReturBukti', { caseId: first.id, requestId: 'admin-proof-1', name: 'foto.jpg', category: 'label', base64: JPG });
+  assert.equal(good('getReturBukti', { id: proof.bukti.id }).base64, JPG);
+  good('saveRetur', { id: first.id, revision: first.revision, patch: received });
+  const detail = good('getReturDetail', { id: first.id });
+  assert.equal(detail.case.status, 'diterima_baik');
+  assert.ok(detail.events.every(e => e.actor === 'Fixture Admin'), 'admin activity keeps its own actor');
+  const unknown = good('catatReturTanpaResi', { requestId: 'admin-unknown-1', shop: 'Toko Contoh', productSummary: 'Kaos BDU', receivedAt: '2026-10-30', receiver: 'Admin penerima', receivedQty: 1 });
+  good('unggahReturBukti', { caseId: unknown.case.id, requestId: 'admin-proof-2', name: 'isi.jpg', category: 'contents', base64: JPG });
+  good('cocokkanRetur', { id: unknown.case.id, revision: unknown.case.revision, targetId: second.id, targetRevision: second.revision });
+  assert.equal(good('getReturDetail', { id: second.id }).evidence.length, 1);
+  f.bad('deleteRecord', { sheet: 'ReturKasus', id: first.id }, /tidak dikenal|Tidak bisa dihapus/, f.admin);
 });

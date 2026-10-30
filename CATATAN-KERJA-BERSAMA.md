@@ -2,11 +2,16 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, server kelompok HPP 1.5.62 sudah dipasang dan diverifikasi; peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92) atas izin pemilik.
+Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex. Server 1.5.63 dipasang dan diverifikasi sebagai Versi 77, termasuk penjagaan sesi unggah terakhir. Peluncuran tampilan GitHub Pages melalui [PR #93](https://github.com/soldierapparelid/produksi/pull/93) atas izin pemilik.
 
 ## 1. Keadaan sekarang
 
-- **Server terpasang; peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92):** cabang `codex/kelompok-hpp` dari `main` `0777ad1` menambahkan kelompok HPP pilihan owner. Kain/potong memakai total biaya XL dibagi total hasil XL anggota; anggota tanpa acuan XL mengikuti kelompok. Jahit, biaya lain, dan margin diatur sekali. Bahan tebal/pengerjaan berbeda tetap dipilih terpisah. Satu baris kelompok pada daftar dan Excel/PNG, pencarian nama anggota, edit/bubarkan, serta pengamanan perubahan sesi/revisi tersedia. Pengaturan individual dan data produksi tetap utuh. Versi **1.5.62**, rakitan `20261030-kelompok-hpp-1562`. Build dan **1.424 tes lulus** (30 tes baru); alur browser dengan data contoh termasuk HP, ekspor, perubahan anggota, pembubaran, dan keutuhan PO/stok/upah lulus. Pemilik menyetujui pemasangan dan pengaktifan pada 30 Oktober 2026. Server sudah dipasang sebagai deployment **Versi 75** pukul **20.29 WIB** dan diverifikasi setelah muat ulang. Peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92) atas izin pemilik.
+- **Server 1.5.63 terpasang dan terverifikasi; peluncuran GitHub Pages melalui PR #93:** cabang `codex/hpp-acuan-xl-siap` dari `main` `107c8a9`, rakitan `20261030-hpp-retur-1563`. HPP kelompok memakai satu atau lebih acuan XL lengkap tanpa menunggu anggota lain; biaya anggota yang belum lengkap tidak mencemari rata-rata. Owner dapat menetapkan rol XL untuk catatan lama yang mencampur beberapa ukuran melalui **Tentukan kain XL**, dengan pilihan dan konfirmasi eksplisit. Aksi `saveCommerceHppXLReference` hanya mengubah konfigurasi HPP dan memeriksa revisi sumber; PO, stok, potong, upah, dan pembayaran tidak diubah. Pemilihan rol pada data asli **belum dilakukan** dan menunggu konfirmasi pemilik.
+- **Kecepatan HPP:** prefetch tabel secara berkelompok, tanpa lookup pembelian pada halaman HPP, serta respons simpan `withState` memakai hasil hitungan yang sama. Pengujian cache menurunkan pembacaan dari 26 menjadi paling banyak 4; penyimpanan tidak lagi membutuhkan permintaan pemuatan halaman kedua. Angka ini jumlah panggilan pada pengujian, bukan pengukuran waktu jaringan produksi.
+- **Retur admin:** owner dan admin dapat membuka menu/aksi retur; pekerja produksi tetap ditolak. Alur utama menjadi terima paket (cari/scan), impor, dan laporan belum kembali. Kondisi, jumlah fisik, dan bukti berada pada formulir penerimaan; klaim diringkas dalam bagian opsional. Cache 30 detik terikat sesi/endpoint, respons lama diabaikan setelah sesi berubah, dan unggahan mengunci isian serta hanya memperbarui modal pemiliknya.
+- **Validasi final:** build, pemeriksaan hasil build, dan **1.465 tes lulus**. Sebelum pemasangan, seluruh sumber Kode/Core/Index server dibandingkan setelah normalisasi LF dan cocok dengan `main` `107c8a9` (1.5.62). Setelah pemasangan Versi 77, seluruh sumber tersimpan dimuat ulang dan cocok dengan rilis 1.5.63, termasuk penjagaan sesi sesudah pembacaan/kompresi file bukti. Kedua regresi perpindahan sesi/endpoint terbukti gagal sebelum perbaikan dan lulus sesudahnya. Tidak ada perubahan pada data produksi atau pilihan rol asli.
+
+- **Rilis terpasang sebelumnya; peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92):** cabang `codex/kelompok-hpp` dari `main` `0777ad1` menambahkan kelompok HPP pilihan owner. Kain/potong memakai total biaya XL dibagi total hasil XL anggota; anggota tanpa acuan XL mengikuti kelompok. Jahit, biaya lain, dan margin diatur sekali. Bahan tebal/pengerjaan berbeda tetap dipilih terpisah. Satu baris kelompok pada daftar dan Excel/PNG, pencarian nama anggota, edit/bubarkan, serta pengamanan perubahan sesi/revisi tersedia. Pengaturan individual dan data produksi tetap utuh. Versi **1.5.62**, rakitan `20261030-kelompok-hpp-1562`. Build dan **1.424 tes lulus** (30 tes baru); alur browser dengan data contoh termasuk HP, ekspor, perubahan anggota, pembubaran, dan keutuhan PO/stok/upah lulus. Pemilik menyetujui pemasangan dan pengaktifan pada 30 Oktober 2026. Server sudah dipasang sebagai deployment **Versi 75** pukul **20.29 WIB** dan diverifikasi setelah muat ulang. Peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92) atas izin pemilik.
 
 - Cabang `codex/invoice-dp` dari `main` `aba01da` menambahkan **Nota penjualan → Invoice DP / Invoice pelunasan → Cetak / Simpan PDF**. Dokumen A4 memuat nominal DP yang diisi atau seluruh sisa tagihan pelunasan secara otomatis, pelanggan, referensi nota, dan barang/ukuran tanpa harga. Total pesanan, harga satuan, catatan nota asli, dan riwayat pembayaran tidak dicetak. Mencetak tidak menulis pembayaran atau mengubah total/status nota; LUNAS mengikuti pembayaran yang benar-benar dicatat. Versi **1.5.61**, rakitan `20261030-invoice-dp-pelunasan-1561`. Build dan **1.394 tes lulus** (17 tes baru); contoh A4 dan tampilan HP diperiksa lewat browser terpisah. Pemilik mengizinkan penambahan dan pemasangan pada 30 Oktober 2026. Peluncuran tampilan melalui [PR #91](https://github.com/soldierapparelid/produksi/pull/91), sesuai izin pemasangan dari pemilik. Tidak perlu memasang server Apps Script.
 
@@ -14,16 +19,18 @@ Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, server kelompok HPP 1.5.62 sudah
 
 - Rilis sebelumnya: server **1.5.61** dipasang pada 24 Oktober dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
-- Versi server dan cabang rilis: **1.5.62**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`.
-- Rakitan cabang rilis: `20261030-kelompok-hpp-1562`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
-- Dasar cabang rilis dan pembanding server: `main` `0777ad1` (30 Oktober 2026). Kode dan Core awal cocok dengan `main`. Index awal cocok persis dengan merge PR #89 (`838a9c1`), tertinggal pembaruan tampilan PR #90/#91 dan penanda rakitan; tidak ada kode khusus server yang hilang. Setelah selisih dilaporkan, pemilik secara khusus menyetujui penyelarasan Index dan pemasangan.
-- Server Apps Script: deployment yang sama diperbarui ke **Versi 75** (30 Okt 2026, **20.29 WIB**), dengan URL, akun pelaksana, dan akses tetap. Core dan Index disimpan, dimuat ulang, lalu seluruh sumber dibandingkan dan cocok dengan cabang rilis setelah akhir baris dinormalisasi ke LF. Kode dan Maintenance tidak diubah. Pemeriksaan `bootstrap` pukul **20.32 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.62`, `needSetup: false`. Salinan pemeriksaan disimpan privat di `outputs/pemeriksaan-server-20261030` di luar repo; jangan dimasukkan ke repo publik.
+- Versi server dan cabang rilis: **1.5.63**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 77** sudah diverifikasi.
+- Rakitan rilis: `20261030-hpp-retur-1563`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- Dasar cabang dan pembanding sebelum pemasangan: `main` `107c8a9` (30 Oktober 2026). Seluruh Kode/Core/Index server cocok dengan sumber 1.5.62 di `main` setelah normalisasi akhir baris; tidak ditemukan perubahan server di luar repo.
+- Server Apps Script: deployment yang sama diperbarui ke **Versi 77** (30 Okt 2026, **22.25 WIB**), dengan URL, akun pelaksana, dan akses tetap. Core/Index tersimpan dimuat ulang dan seluruh sumber cocok dengan rilis 1.5.63 setelah normalisasi LF; Kode/Maintenance tetap. `bootstrap` pukul **22.26 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.63`, `needSetup: false`. Seluruh penjagaan sesi unggah terakhir sudah terpasang. Salinan pemeriksaan tetap privat di luar repo; jangan dipublikasikan.
+
+Sidik berikut adalah **server 1.5.63 pada Versi 77** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis.
 
 | Berkas di editor | Sumber di repo | Sidik (panjang + 16 huruf awal sha256, akhir baris LF) |
 |---|---|---|
 | Kode.gs | `apps-script/Server.gs` | 38162 d72ab735e5f1a288 |
-| Core.gs | `apps-script/Core.gs` | 729257 37c2720ce8d9e982 |
-| Index.html | `apps-script/Index.html` | 1776242 977cd842a6475d89 |
+| Core.gs | `apps-script/Core.gs` | 739249 be2656b13d33de14 |
+| Index.html | `apps-script/Index.html` | 1800694 c2b7b8c61ef590bc |
 | Maintenance.gs | tidak ada di repo, jangan diubah | 136 373dd791f45fca0e |
 
 - Tampilan: GitHub Pages `https://soldierapparelid.github.io/produksi/`. **Repo ini publik.**
@@ -38,7 +45,7 @@ Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, server kelompok HPP 1.5.62 sudah
    - Rilis yang mengubah server: naikkan `APP_VERSION` dan `UI_VERSION` bersama (1.5.61, dan seterusnya). **Pasang server dulu, baru buka PR.** Server menolak penyimpanan bila versi tampilan berbeda dengan versi server, dan pemilik biasanya merge dalam hitungan detik.
    - Perubahan tampilan saja (warna, teks, tata letak): versi **tetap**. Ganti hanya `PK_BUILD` dan `RAKITAN` dengan nilai yang sama. Server tidak perlu dipasang.
 5. **Jangan edit `apps-script/Core.gs` atau `apps-script/Index.html` langsung.** Ubah `src/*.js` dan `index.html`, lalu jalankan `node scripts/build-core.cjs`. Pemeriksaannya: `node scripts/build-core.cjs --check`.
-6. **Uji sebelum PR:** jalankan `node --test`. Semua harus lulus; pada rilis kelompok HPP 1.5.62 ada 1.424 uji. Pakai Node 22 atau lebih baru.
+6. **Uji sebelum PR:** jalankan `node --test`. Semua harus lulus; rilis 1.5.63 sudah melewati 1.465 uji. Pakai Node 22 atau lebih baru.
 7. **Akhir baris:** tiap berkas di repo memakai LF atau CRLF (ada yang campuran). Pertahankan akhir baris aslinya supaya diff PR hanya berisi baris yang diubah. Hati-hati dengan salinan dari `git archive` atau autocrlf.
 8. **Setelah selesai**, tambahkan satu baris di "Riwayat pekerjaan" (tanggal, alat, versi, ringkasan, PR) dan perbarui "Keadaan sekarang" bila server dipasang.
 
@@ -56,16 +63,16 @@ Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, server kelompok HPP 1.5.62 sudah
   - Blok CORE, dibangkitkan dari `src/`.
   - "UI bagian 1" sampai "UI bagian 6".
 - `src/core.js`: daftar tab (`SCHEMA`), aturan alur produksi, aksi server (`actions.*`), daftar `WRITE`, `NO_STATE`, dan `GLOBAL_VERSION_WRITE`.
-- `src/commerce*.js`: Pembelian produk, Nota penjualan, HPP.
-- `src/retur.js`: Retur paket (1.5.60).
+- `src/commerce*.js`: Pembelian produk, Nota penjualan, HPP. `src/commerce-hpp.js` menyusun acuan XL/kelompok; `src/commerce.js` memvalidasi dan menyimpan pilihan rol HPP.
+- `src/retur.js`: Retur paket; rilis 1.5.63 mengizinkan owner/admin dan tetap menolak akun pekerja.
 - `apps-script/Server.gs`: adaptor Sheets, cache, kunci, `doPost`/`doGet`, jembatan, dan `env` (`makePdf`, bukti Drive).
 - `sw.js`: cache halaman.
 - `README.md`: catatan setiap rilis.
 
-## 5. Retur paket (1.5.60), untuk melanjutkan
+## 5. Retur paket, untuk melanjutkan rilis 1.5.63
 
-- **Menu:** Lainnya > Admin > Retur paket. Khusus owner. Dibuka lewat `A.returMenu`, dengan `S.sub.lain = 'retur'` lalu `returView()`.
-- **Tampilan:** blok "Retur paket (1.5.60, owner)" di `index.html`, tepat sebelum "UI bagian 5". Fungsi utamanya: `returView`, `returBarisHtml`, `returImporHtml`, `returDetailHtml`, `returTerimaHtml`, `returBuktiHtml`, `returLaporanHtml`, `returCsvSel`, `returXlsx`.
+- **Menu:** Lainnya > Admin > Retur paket. Rilis 1.5.63 memberi akses owner dan admin pada tampilan maupun semua aksi server; akun pekerja tetap ditolak. Dibuka lewat `A.returMenu`, dengan `S.sub.lain = 'retur'` lalu `returView()`.
+- **Tampilan:** blok Retur paket di `index.html`, tepat sebelum "UI bagian 5". Tiga tindakan utama: **Terima paket**, **Impor Shopee / TikTok**, dan **Laporan belum kembali**. Penerimaan diawali pencarian/scan resi atau nomor pesanan; kondisi, jumlah fisik, dan unggah bukti tersedia dalam satu formulir. Rincian klaim bersifat opsional. Fungsi utama: `returView`, `returCariTerimaHtml`, `returBarisHtml`, `returImporHtml`, `returDetailHtml`, `returTerimaHtml`, `returBuktiHtml`, `returLaporanHtml`, `returCsvSel`, `returXlsx`.
 - **Warna status:** diatur di `returChip()`, memakai kelas `chip ok`, `chip warn`, `chip bad`, `chip info`. Selebihnya memakai kelas yang sudah ada: `card`, `list`, `item`, `seg`, `chip`, `note`, `btn`.
 - **Aturan di `src/retur.js`:**
   - Impor: `coreReturPeriksa`. Paket baru: `coreReturKasusBaru`. Syarat diterima: `coreReturCekTerima`. Isian yang boleh diubah: `coreReturPatch`.
@@ -77,7 +84,8 @@ Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, server kelompok HPP 1.5.62 sudah
   - ID folder induk disimpan di properti skrip `returFolder`. Izin Drive sudah diberikan pemilik (fungsi editor `siapkanFolderRetur`).
   - Batas 20 MB per berkas.
 - **Uji:** `tests/retur-impor.test.cjs`, `tests/retur-server.test.cjs`, `tests/ui-retur.test.cjs`.
-- **Status:** sudah diuji di mode coba, belum dipakai dengan data asli.
+- **Pemuatan dan unggah:** cache daftar dipakai 30 detik pada sesi/endpoint yang sama, dengan muat ulang manual. Cache tidak menyeberang sesi. Form penerimaan dikunci selama unggah; jawaban lama tidak mengganti modal lain setelah pengguna menutupnya. Jumlah awal dapat mengikuti rincian pesanan; pengguna tetap harus memeriksa dan menyesuaikannya dengan barang fisik sebelum menyimpan.
+- **Status:** perubahan diuji dengan data contoh; server 1.5.63 Versi 77 terpasang dan terverifikasi, termasuk penjagaan sesi unggah terakhir. Belum ada pengujian penerimaan dengan data asli.
 
 ## 6. Cara memasang
 
@@ -93,12 +101,15 @@ Diperbarui: 30 Oktober 2026 oleh ChatGPT/Codex, server kelompok HPP 1.5.62 sudah
 
 ## 7. Pekerjaan yang belum selesai
 
+- Acuan kain XL pada catatan lama gabungan ukuran: tunggu pemilik memilih/menegaskan rol yang benar. Jangan menebak pembagian kain atau mengubah produksi/stok untuk memenuhi HPP.
 - Paket tiga etalase (folder Codex `2026-10-14\bu\outputs\SOLDIER-3-ETALASE-UNTUK-CLAUDE-20261019`): belum dikerjakan.
 - Cetak resi di website toko (WooCommerce) belum menampilkan jasa kirim: belum diperiksa.
 - Database aplikasi lama: aturan aksesnya perlu dikunci, atau dihapus sendiri oleh pemilik setelah ekspor cadangan.
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-30 · ChatGPT/Codex · 1.5.63 · HPP kelompok cukup satu acuan XL lengkap; pilihan rol XL eksplisit untuk catatan lama, khusus HPP tanpa mengubah produksi/stok/upah. Pembacaan cache diuji turun 26 → paling banyak 4 panggilan dan simpan mengembalikan halaman terbaru dari hitungan yang sama. Retur owner/admin disederhanakan menjadi cari/scan, kondisi/jumlah, bukti dalam formulir, impor, serta laporan; cache sesi dan penjagaan unggah/modal dipertahankan. Build, pemeriksaan hasil build, dan **1.465 tes lulus**. Cabang `codex/hpp-acuan-xl-siap` dari `107c8a9`, rakitan `20261030-hpp-retur-1563`. Baseline server 1.5.62 cocok dengan `main` sebelum pemasangan. Server final dipasang pada deployment **Versi 77**, **22.25 WIB**, dengan URL/akun/akses tetap; seluruh sumber penuh cocok setelah muat ulang, termasuk penjagaan sesi unggah terakhir. Bootstrap **22.26 WIB** mengonfirmasi HTTP 200, `ok: true`, `appVersion: 1.5.63`, `needSetup: false`. **Peluncuran tampilan GitHub Pages melalui [PR #93](https://github.com/soldierapparelid/produksi/pull/93) atas izin pemilik.** Pemilihan rol pada data asli belum dilakukan.
 
 - 2026-10-30 · ChatGPT/Codex · 1.5.62 · Kelompok HPP dengan rata-rata tertimbang XL dan biaya bersama pilihan owner; pencarian anggota, ekspor satu baris per kelompok, serta pembubaran yang mempertahankan pengaturan individual. Build, pemeriksaan hasil build, dan **1.424 tes lulus**; QA browser dengan data contoh lulus. Cabang `codex/kelompok-hpp` dari `0777ad1`. Server dipasang ke deployment **Versi 75** pukul **20.29 WIB** atas izin pemilik, termasuk persetujuan khusus menyelaraskan Index lama dari merge PR #89 setelah selisih diperiksa. Core/Index tersimpan cocok seluruhnya dengan kandidat setelah muat ulang; Kode/Maintenance tetap. Bootstrap pukul **20.32 WIB** mengonfirmasi HTTP 200, `ok: true`, versi **1.5.62**, dan `needSetup: false`. Peluncuran tampilan melalui [PR #92](https://github.com/soldierapparelid/produksi/pull/92) atas izin pemilik.
 

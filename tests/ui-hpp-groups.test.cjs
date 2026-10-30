@@ -18,7 +18,7 @@ function harness(data=fixture()){
     function topForm(){return currentForm;}function formVals(f){return f.values||{};}function toast(v,b){messages.push({text:v,bad:b});}function sheetHtml(t,b,f){return '<h2>'+esc(t)+'</h2>'+b+(f||'');}function openSheet(fn){lastSheet=fn();}
     function commerceForm(t,m,b,a,l){lastSheet=sheetHtml(t,b,l);currentForm={values:{},rows:[],note:{hidden:true},_commerceScope:commerceScope(),action:a,label:l};return currentForm;}
     function $(s,f){if(!f)return null;if(s==='[data-hpp-member]')return f.input;if(s==='[data-hpp-member-count]')return f.count;if(s==='[data-hpp-member-empty]')return f.empty;return null;}
-    function $$(s,f){if(s==='[data-hpp-member-row]')return f.rows||[];if(s==='[data-hpp-member]')return (f.rows||[]).map(function(r){return r.input;});return [];}
+    function $$(s,f){if(s==='[data-hpp-member-row]')return f.rows||[];if(s==='[data-hpp-member]')return (f.rows||[]).map(function(r){return r.input;});if(s==='[data-hpp-xl-roll]')return f.xlRolls||[];return [];}
     function commerceNumber(v,l,int,max){var n=Number(v);if(v==null||String(v).trim()===''||!Number.isFinite(n)||n<0||int&&!Number.isSafeInteger(n)||n>(max===undefined?1e12:max))throw Error(l+' belum valid');return n;}
     function commerceRevision(v){return v.revision||undefined;}function commerceMutation(module,action,payload,f){requests.push({module:module,action:action,payload:payload});return Promise.resolve();}
     function commerceLoadView(m,t,sub,draw){return draw(commerceData());}function commerceEmptyActions(){return '';}function searchBox(){return '';}function commerceList(m,rows,draw,parts){return rows.filter(function(r){return cocok(S.f.q,parts(r));}).map(draw).join('');}
@@ -143,4 +143,173 @@ test('real request path decorates group writes and refuses an old production wor
   assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{action:'saveCommerceHppGroup',payload:{id:'hppg_safe',nama:'Oblong',modelIds:['model0','model1'],expectedRevision:'rev1',token:'owner-session',workflowVersion:2}});
   vm.runInContext('S.state.workflowVersion=1',c);
   await assert.rejects(vm.runInContext("req('saveCommerceHppGroup',{id:'hppg_safe'})",c),/Pembaruan alur produksi/);assert.equal(c.calls.length,1);
+});
+
+
+function xlFixture(){
+  const data=fixture();
+  data.models[0].xlReferenceCandidate={planId:'plan-mixed',evidenceRevision:'evidence-1',totalPcs:117,rolls:[
+    {id:'roll-m',label:'Rol M',bahan:'Loreng contoh',unit:'kg',qty:25.14,harga:88000,totalCost:2212320},
+    {id:'roll-xl',label:'Rol XL',bahan:'Loreng contoh',unit:'kg',qty:26.61,harga:88000,totalCost:2341680},
+    {id:'roll-body',label:'Rol badan',bahan:'Bahan badan',unit:'yd',qty:10,harga:33000,totalCost:330000}
+  ]};
+  return data;
+}
+function selectXLRolls(h,ids){h.c.currentForm.xlRolls=h.c.currentForm._commerceXL.candidate.rolls.map(r=>({value:r.id,checked:ids.includes(r.id)}));}
+function xlIntent(){return {modelId:'model0',planId:'plan-mixed',evidenceRevision:'evidence-1',rollIds:['roll-xl','roll-body'],confirmed:true,expectedRevision:'rev1'};}
+function installXLRecovery(h){
+  h.run("var dropped=0,afterSave=[],notices=[],fetches=0;function act(el,p){return p;}function commerceFetch(){fetches++;return Promise.resolve();}function dropForm(){dropped++;}function commerceAfterSave(intent){afterSave.push(intent);}function commerceFormNotice(f,msg,retry){notices.push({message:msg,retry:retry});}function quiet(e){throw e;}");
+  vm.runInContext(html.slice(html.indexOf('A.commerceCheck = function'),html.indexOf('function commerceNumber(value')),h.c);
+  h.c.pending=xlIntent();
+  h.run("currentForm={_commerceScope:commerceScope(),_commerceLocked:true,_commerceIntent:{module:'hpp',action:'saveCommerceHppXLReference',payload:pending}};");
+}
+
+test('XL picker uses the raw member evidence inside a group and never selects a roll automatically',()=>{
+  const h=harness(xlFixture()),before=JSON.stringify(h.c.entry.data);
+  h.run('A.commerceHppOpen('+trigger('hppg_example')+');');
+  assert.match(h.c.lastSheet,/data-a="commerceHppXLOpen" data-id="model0"/);
+  assert.doesNotMatch(h.c.lastSheet,/data-a="commerceHppXLOpen" data-id="hppg_example"/);
+  h.run('A.commerceHppXLOpen('+trigger('model0')+');');
+  assert.equal(h.c.currentForm._commerceXL.modelId,'model0');
+  assert.equal(h.c.currentForm._commerceXL.candidate.planId,'plan-mixed');
+  assert.equal((h.c.lastSheet.match(/data-hpp-xl-roll/g)||[]).length,3);
+  assert.match(h.c.lastSheet,/XL 117 pcs/);assert.match(h.c.lastSheet,/26.61 kg/);assert.match(h.c.lastSheet,/10 yd/);
+  assert.match(h.c.lastSheet,/name="xlConfirmed"/);assert.doesNotMatch(h.c.lastSheet,/ checked/);
+  assert.equal(h.c.requests.length,0);assert.equal(JSON.stringify(h.c.entry.data),before);
+});
+
+test('XL picker preselects only a saved choice from the same evidence and still requires confirmation',()=>{
+  for(const evidenceRevision of ['evidence-1','evidence-old']){
+    const data=xlFixture();data.models[0].xlReference={...xlIntent(),evidenceRevision,rollIds:['roll-xl']};
+    const h=harness(data);h.run('A.commerceHppXLOpen('+trigger('model0')+');');
+    assert.match(h.run('commerceHppXLButton(entry.data.models[0])'),/Ubah kain acuan XL/);
+    assert.equal((h.c.lastSheet.match(/data-hpp-xl-roll[^>]* checked/g)||[]).length,evidenceRevision==='evidence-1'?1:0);
+    assert.doesNotMatch(h.c.lastSheet,/name="xlConfirmed"[^>]* checked/);
+    selectXLRolls(h,['roll-xl']);h.run('A.commerceHppXLSave(null)');
+    assert.equal(h.c.requests.length,0);assert.match(h.c.messages.at(-1).text,/Centang kepastian/);
+  }
+});
+
+test('XL save requires a nonempty genuine selection and explicit owner confirmation',()=>{
+  for(const scenario of ['empty','forged','duplicate','unconfirmed']){
+    const h=harness(xlFixture());h.run('A.commerceHppXLOpen('+trigger('model0')+');');selectXLRolls(h,['roll-xl']);
+    h.c.currentForm.values={xlConfirmed:true};
+    if(scenario==='empty')h.c.currentForm.xlRolls.forEach(r=>r.checked=false);
+    if(scenario==='forged')h.c.currentForm.xlRolls[1].value='different-plan-roll';
+    if(scenario==='duplicate')h.c.currentForm.xlRolls.push({value:'roll-xl',checked:true});
+    if(scenario==='unconfirmed')h.c.currentForm.values.xlConfirmed=false;
+    h.run('A.commerceHppXLSave(null)');assert.equal(h.c.requests.length,0,scenario);assert.ok(h.c.messages.length,scenario);
+  }
+});
+
+test('XL save sends only explicitly chosen physical rolls and captured evidence for the raw model',()=>{
+  const h=harness(xlFixture()),before=JSON.stringify(h.c.entry.data);
+  h.run('A.commerceHppXLOpen('+trigger('model0')+');');selectXLRolls(h,['roll-xl','roll-body']);h.c.currentForm.values={xlConfirmed:true};
+  h.run('A.commerceHppXLSave(null)');
+  assert.deepEqual(h.json('requests'),[{module:'hpp',action:'saveCommerceHppXLReference',payload:xlIntent()}]);
+  assert.equal(JSON.stringify(h.c.entry.data),before,'opening and saving cannot edit source rolls, production output or cached HPP locally');
+});
+
+test('XL controls reject nonowners and unavailable or stale state before opening',()=>{
+  for(const change of ["actor.divisi='admin'","actor.divisi='qc'","S.token=''","entry.stale=true","entry.loading={}","entry.error='offline'","entry.lama=true","entry.version=null","delete entry.data.groups"]){
+    const h=harness(xlFixture());h.run(change+';A.commerceHppXLOpen('+trigger('model0')+');');
+    assert.equal(h.c.currentForm,null,change);assert.equal(h.c.requests.length,0,change);assert.ok(h.c.messages.length,change);
+  }
+  const h=harness(xlFixture());h.run("actor.divisi='admin'");
+  assert.equal(h.run('commerceHppXLButton(entry.data.models[0])'),'');
+  assert.doesNotMatch(h.run('commerceHppGroupMembers(entry.data.groups[0])'),/commerceHppXLOpen/);
+});
+
+test('XL save rejects changed source snapshots, sessions and owner permissions',()=>{
+  for(const change of ["S.token='new-session'","actor.divisi='admin'","entry.data=JSON.parse(JSON.stringify(entry.data))","entry.version=2","entry.data.revision='rev2'","entry.stale=true","entry.loading={}","entry.error='offline'"]){
+    const h=harness(xlFixture());h.run('A.commerceHppXLOpen('+trigger('model0')+');');selectXLRolls(h,['roll-xl']);h.c.currentForm.values={xlConfirmed:true};
+    h.run(change+';A.commerceHppXLSave(null)');assert.equal(h.c.requests.length,0,change);assert.ok(h.c.messages.length,change);
+  }
+  const h=harness(xlFixture());h.run('A.commerceHppXLOpen('+trigger('model0')+');');selectXLRolls(h,['roll-xl']);h.c.currentForm.values={xlConfirmed:true};
+  h.run('currentForm._commerceLocked=true;A.commerceHppXLSave(null)');assert.equal(h.c.requests.length,0);
+});
+
+test('opening XL evidence cannot discard unsaved shared cost changes',()=>{
+  const h=harness(xlFixture());h.run('A.commerceHppOpen('+trigger('hppg_example')+');');
+  h.c.currentForm.values={jahitMode:'manual',hargaJahit:'3000',biayaLain:'999',targetMargin:'30',ketLain:''};
+  const old=h.c.currentForm;
+  h.run("A.commerceHppXLOpen({getAttribute:function(){return 'model0';},closest:function(){return currentForm;}})");
+  assert.equal(h.c.currentForm,old);assert.equal(h.c.requests.length,0);assert.match(h.c.messages.at(-1).text,/Simpan perubahan biaya dahulu/);
+});
+
+test('removing stale XL evidence is explicit, revision checked, and leaves cached production unchanged',()=>{
+  const data=xlFixture();data.models[0].xlReference={...xlIntent()};data.models[0].xlReferenceCandidate=null;
+  const h=harness(data),before=JSON.stringify(h.c.entry.data);
+  h.run('A.commerceHppXLOpen('+trigger('model0')+');');assert.match(h.c.lastSheet,/Catatan sumber berubah/);assert.match(h.c.lastSheet,/commerceHppXLClear/);
+  h.run('A.commerceHppXLSave(null)');assert.equal(h.c.requests.length,0);
+  h.run('A.commerceHppXLClear()');assert.equal(h.c.requests.length,0);assert.equal(h.c.currentForm.action,'commerceHppXLClearSave');
+  h.run('A.commerceHppXLClearSave(null)');assert.deepEqual(h.json('requests[0].payload'),{modelId:'model0',remove:true,expectedRevision:'rev1'});
+  assert.equal(JSON.stringify(h.c.entry.data),before);
+  const stale=harness(data);stale.run('A.commerceHppXLOpen('+trigger('model0')+');A.commerceHppXLClear();entry.version=9;A.commerceHppXLClearSave(null)');
+  assert.equal(stale.c.requests.length,0);assert.match(stale.c.messages.at(-1).text,/Data HPP berubah/);
+});
+
+test('XL timeout recovery recognizes an already committed choice without resending',async()=>{
+  const h=harness(xlFixture());installXLRecovery(h);
+  h.c.entry.data.config.xlReferences={model0:{...xlIntent(),rollIds:['roll-body','roll-xl']}};h.c.entry.data.revision='rev2';
+  await h.run('A.commerceCheck({closest:function(){return currentForm;}})');
+  assert.equal(h.c.fetches,1);assert.equal(h.c.dropped,1);assert.equal(h.c.requests.length,0);
+  assert.equal(h.c.afterSave[0].action,'saveCommerceHppXLReference');
+  assert.equal(h.c.currentForm._commerceRetry,false);
+});
+
+test('XL timeout recovery retries the same selection only while the revision is unchanged',async()=>{
+  const h=harness(xlFixture());installXLRecovery(h);const original=h.json('pending');
+  await h.run('A.commerceCheck({closest:function(){return currentForm;}})');
+  assert.equal(h.c.dropped,0);assert.equal(h.c.currentForm._commerceRetry,true);assert.equal(h.c.requests.length,0);
+  await h.run('A.commerceRetry({closest:function(){return currentForm;}})');
+  assert.deepEqual(h.json('requests[0]'),{module:'hpp',action:'saveCommerceHppXLReference',payload:original});
+  assert.equal(h.c.currentForm._commerceRetry,false);
+  const conflict=harness(xlFixture());installXLRecovery(conflict);conflict.c.entry.data.revision='rev3';
+  await conflict.run('A.commerceCheck({closest:function(){return currentForm;}})');
+  await conflict.run('A.commerceRetry({closest:function(){return currentForm;}})');
+  assert.equal(conflict.c.requests.length,0);assert.equal(conflict.c.currentForm._commerceRetry,false);assert.match(conflict.c.notices[0].message,/Data acuan berubah/);
+  const session=harness(xlFixture());installXLRecovery(session);session.run("S.token='new-session'");
+  await session.run('A.commerceCheck({closest:function(){return currentForm;}})');assert.equal(session.c.fetches,0);assert.equal(session.c.requests.length,0);
+});
+
+test('XL timeout recovery recognizes completed removal and rejects a different saved allocation',()=>{
+  const h=harness(xlFixture());h.c.payload=xlIntent();
+  h.c.entry.data.config.xlReferences={model0:{...xlIntent(),rollIds:['roll-m']}};h.c.entry.data.revision='rev2';
+  assert.equal(h.run('commerceHppXLCheck(payload,entry.data).complete'),false);assert.equal(h.run('commerceHppXLCheck(payload,entry.data).retry'),false);
+  h.c.payload={modelId:'model0',remove:true,expectedRevision:'rev1'};
+  assert.equal(h.run('commerceHppXLCheck(payload,entry.data).complete'),false);
+  delete h.c.entry.data.config.xlReferences.model0;
+  assert.equal(h.run('commerceHppXLCheck(payload,entry.data).complete'),true);
+});
+
+test('XL roll labels and material names are escaped, including checkbox attribute values',()=>{
+  const data=xlFixture();data.models[0].nama='<svg onload=bad>';data.models[0].xlReferenceCandidate.rolls[0]={id:'roll" onfocus="bad',label:'<img src=x onerror=bad>',bahan:'<script>bad</script>',unit:'kg',qty:1,harga:1,totalCost:1};
+  const h=harness(data);h.run('A.commerceHppXLOpen('+trigger('model0')+');');
+  assert.match(h.c.lastSheet,/&lt;svg/);assert.match(h.c.lastSheet,/&lt;img/);assert.match(h.c.lastSheet,/&lt;script/);assert.match(h.c.lastSheet,/value="roll&quot; onfocus=&quot;bad"/);
+  assert.doesNotMatch(h.c.lastSheet,/<script>|<svg|<img|value="roll" onfocus=/);
+});
+
+test('real request path sends the XL choice with session and workflow metadata and rejects old workflow',async()=>{
+  const requestSource=html.slice(html.indexOf('function req(action, payload)'),html.indexOf('function signOutLocal()'));
+  const c=vm.createContext({console});vm.runInContext("var calls=[],S={token:'owner-session',state:{workflowVersion:2},busy:0},Api={mode:function(){return 'remote';},call:function(a,p){calls.push({action:a,payload:p});return Promise.resolve({ok:true});}};function paintSync(){}function refresh(){}function applyState(){}"+requestSource,c);
+  c.payload=xlIntent();await vm.runInContext("req('saveCommerceHppXLReference',payload)",c);
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{action:'saveCommerceHppXLReference',payload:{...xlIntent(),token:'owner-session',workflowVersion:2}});
+  vm.runInContext('S.state.workflowVersion=1',c);
+  await assert.rejects(vm.runInContext("req('saveCommerceHppXLReference',{modelId:'model0'})",c),/Pembaruan alur produksi/);assert.equal(c.calls.length,1);
+});
+
+
+test('XL timeout keeps the original roll intent locked until refreshed state confirms the save',async()=>{
+  const h=harness(xlFixture());h.run('A.commerceHppXLOpen('+trigger('model0')+');');selectXLRolls(h,['roll-xl','roll-body']);h.c.currentForm.values={xlConfirmed:true};
+  h.run("var notices=[],dropped=0,afterSave=[];function act(el,p){return p;}function req(action,payload){requests.push({action:action,payload:payload});var e=new Error('timeout');e.timeout=true;return Promise.reject(e);}function commerceHistoryWriteAllowed(){return true;}function commerceFormLock(f,yes){f._commerceLocked=yes;}function commerceFormNotice(f,msg,retry){notices.push({message:msg,retry:retry});}function commerceFetch(){return Promise.resolve();}function dropForm(){dropped++;}function commerceAfterSave(intent){afterSave.push(intent);}function quiet(e){throw e;}");
+  vm.runInContext(html.slice(html.indexOf('function commerceMutation(module, action'),html.indexOf('function commerceNumber(value')),h.c);
+  await h.run('A.commerceHppXLSave(null)');
+  assert.equal(h.c.requests.length,1);assert.equal(h.c.requests[0].payload.withState,true);
+  assert.deepEqual(h.json('currentForm._commerceIntent.payload'),xlIntent());
+  assert.equal(h.c.currentForm._commerceSending,false);assert.equal(h.c.currentForm._commerceLocked,true);assert.equal(h.c.dropped,0);
+  await h.run('A.commerceHppXLSave(null)');assert.equal(h.c.requests.length,1,'a second Save cannot create another request while the outcome is uncertain');
+  h.c.entry.data.config.xlReferences={model0:{...xlIntent()}};h.c.entry.data.revision='rev2';
+  await h.run('A.commerceCheck({closest:function(){return currentForm;}})');
+  assert.equal(h.c.requests.length,1);assert.equal(h.c.dropped,1);assert.deepEqual(h.json('afterSave[0].payload'),xlIntent());
 });

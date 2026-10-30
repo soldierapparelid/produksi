@@ -39,7 +39,7 @@ test('missing or invalid XL prices stop the shared cost instead of dropping the 
 
 test('group without isolated XL retains an unavailable reference and never reuses mixed-size fallback costs',()=>{
  const input=fixtureInput();input.tables.Potong[0].ukuran={M:100};input.tables.Potong[1].ukuran={L:300};const g=callPure('coreCommerceHpp',input).groups[0];
- assert.equal(g.referenceModelIds.length,0);assert.equal(g.kain.totalPcs,0);assert.equal(g.hppTotal,null);assert.equal(g.configured,false);assert.equal(g.configSaved,true);assert.match(g.warnings.join(' '),/Belum ada acuan hasil XL/);
+ assert.equal(g.referenceModelIds.length,0);assert.equal(g.kain.totalPcs,0);assert.equal(g.hppTotal,null);assert.equal(g.configured,false);assert.equal(g.configSaved,true);assert.match(g.warnings.join(' '),/Belum ada acuan kain XL/);
 });
 
 test('structural production warnings hold group approval while owner opening notes stay separate from costs',()=>{
@@ -107,4 +107,19 @@ test('membership changes require review again; rename preserves approval; removi
  f.good('saveCommerceHppGroup',f.group({modelIds:[modelId('Red'),modelId('Blue')]}));st=f.state();assert.equal(st.groups[0].configSaved,false);assert.equal(st.groups[0].configured,false);assert.equal(st.groups[0].config.value.hargaJahit,2500);assert.equal(st.groups[0].config.value.costsReviewed,false);
  const remove={id:groupId,remove:true,expectedRevision:st.revision},removed=f.good('saveCommerceHppGroup',remove);assert.equal(f.good('saveCommerceHppGroup',remove).revision,removed.revision);st=f.state();assert.deepEqual(st.groups,[]);assert.equal(st.models.find(m=>m.nama==='Red').hargaJahit,7777);
  f.good('saveCommerceHpp',{modelId:modelId('Red'),config:costs({hargaJahit:1500}),expectedRevision:st.revision});assert.equal(f.state().models.find(m=>m.nama==='Red').hargaJahit,1500);
+});
+
+test('one valid XL member supplies all fourteen members before the other models have any cuts',()=>{
+ const input=fixtureInput();input.tables.Potong=input.tables.Potong.filter(r=>r.poId==='poRed');
+ for(let i=1;i<=11;i++){const name='Waiting '+i;input.tables.PO.push({id:'waiting'+i,series:'Fixture',nama:name,ukuranAktif:['M','L','XL']});input.config.hppGroups[groupId].modelIds.push(modelId(name));}
+ delete input.settings.upahJahit;
+ const before=JSON.stringify(input),g=callPure('coreCommerceHpp',input).groups[0];
+ assert.equal(g.memberModels.length,14);assert.deepEqual(g.referenceModelIds,[modelId('Red')]);assert.equal(g.kain.totalPcs,100);assert.equal(g.kain.totalCost,200000);assert.equal(g.potong.totalCost,90000);assert.equal(g.hppTotal,5800);assert.equal(g.configured,true);assert.ok(g.prices.shop.valid);assert.match(g.warnings.join(' '),/13 anggota mengikuti/);assert.equal(JSON.stringify(input),before);
+});
+
+test('a non-reference member retains history warnings without blocking the valid shared XL reference',()=>{
+ const input=fixtureInput();input.tables.Potong=input.tables.Potong.filter(r=>r.poId==='poRed');input.tables.PO.find(p=>p.id==='poGreen').imporReview=true;input.tables.KoreksiRiwayat=[{poId:'poGreen'}];
+ const out=callPure('coreCommerceHpp',input),g=out.groups[0];
+ assert.deepEqual(g.referenceModelIds,[modelId('Red')]);assert.equal(g.configured,true);assert.equal(g.hppTotal,5800);assert.deepEqual(g.sourceWarnings,[]);assert.match(g.warnings.join(' '),/Green: PO poGreen masih memerlukan pemeriksaan/);assert.match(g.warnings.join(' '),/Green: Jumlah riwayat memiliki koreksi fisik/);assert.equal(out.models.find(m=>m.nama==='Green').configured,false);
+ input.tables.PO.find(p=>p.id==='poRed').imporReview=true;const blocked=callPure('coreCommerceHpp',input).groups[0];assert.equal(blocked.configured,false);assert.match(blocked.sourceWarnings.join(' '),/Red: PO poRed/);assert.deepEqual(blocked.prices,{});
 });
