@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261031-hpp-refresh-ready-1564';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261031-hpp-hide-offline-1564';</script>
 <script>
 (function () {
 'use strict';
@@ -13473,7 +13473,7 @@ A.commerceHppGroupOpen=function(el){
   var data=commerceData('hpp'),id=el&&el.getAttribute('data-id'),group=id?commerceHppGroupFor(id,data):null;if(id&&!group)return toast('Kelompok tidak ditemukan. Muat ulang HPP.',true);
   var editing=el&&el.closest&&el.closest('[data-form]');if(editing&&editing._commerceModel){try{if(commerceHppDraft(editing).changed)return toast('Simpan perubahan biaya sebelum mengatur anggota kelompok.',true);}catch(e){return toast(e.message,true);}}
   var selected=group?group.modelIds.slice():[],assigned=Object.create(null);(data.groups||[]).forEach(function(g){if(!group||g.id!==group.id)(g.modelIds||[]).forEach(function(k){assigned[k]=g.nama;});});
-  var available=(data.models||[]).filter(function(m){return !assigned[m.id];}),visible=commerceHppTampil(available).map(function(m){return m.id;});
+  var available=(data.models||[]).filter(function(m){return !assigned[m.id]&&(selected.indexOf(m.id)>=0||!/^OFFLINE(?:-|$)/i.test(String(m.series||'').trim()));}),visible=commerceHppTampil(available).map(function(m){return m.id;});
   available=available.slice().sort(function(a,b){return (selected.indexOf(b.id)>=0?1:0)-(selected.indexOf(a.id)>=0?1:0)||(visible.indexOf(b.id)>=0?1:0)-(visible.indexOf(a.id)>=0?1:0)||String(a.nama).localeCompare(String(b.nama));});
   var body=fText('Nama kelompok','nama',group?group.nama:'','maxlength="80" placeholder="Contoh: Oblong reguler"')+'<p class="small muted">Pilih minimal 2 model dengan bahan, pola, sablon, dan ongkos yang setara. Bahan tebal atau pengerjaan berbeda dibuat kelompok sendiri.</p>'+fText('Cari model atau series','groupQuery','','placeholder="Cari anggota kelompok"')+'<b data-hpp-member-count>'+nf(selected.length)+' model dipilih</b><div class="col gap-s" style="max-height:44vh;overflow:auto">'+available.map(function(m){return '<label class="card row gap-s" data-hpp-member-row><input type="checkbox" data-hpp-member value="'+esc(m.id)+'"'+(selected.indexOf(m.id)>=0?' checked':'')+'>'+commerceHppThumb(m)+'<span class="grow"><b>'+esc(m.nama)+'</b><br><span class="small muted">'+esc(m.series)+' · '+esc((m.sizes||[]).join(', '))+(visible.indexOf(m.id)<0?' · Riwayat PO':'')+'</span></span></label>';}).join('')+'<p class="small muted" data-hpp-member-empty hidden>Tidak ada model yang cocok.</p></div>'+(Object.keys(assigned).length?'<p class="small muted">'+nf(Object.keys(assigned).length)+' model sudah mengikuti kelompok lain.</p>':'')+'<p class="small muted">Setelah menyimpan anggota, periksa dan simpan biaya bersama. Pengaturan biaya masing-masing model tetap tersimpan.</p>';
   var f=commerceForm(group?'Atur anggota kelompok':'Kelompok HPP baru','hpp',body,'commerceHppGroupSave','Simpan anggota');f._commerceHppGroup={id:group?group.id:'hppg_'+newId()};f._commerceHppChoices=available;f._commerceHppGroupSnapshot=commerceHppGroupSnapshot();commerceHppGroupPaint(f);
