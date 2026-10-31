@@ -2,6 +2,17 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.67 — Penugasan pindah, tarif potong nol, dan riwayat impor di HPP
+
+- Penugasan impor yang dipindah atau diisi ulang tidak lagi terhitung dua kali. Snapshot lama hanya dihitung sebanyak penugasan yang masih hidup di tabel, per maklon, dan hanya bila PO impor itu sudah punya slip baru. Pcs yang benar-benar baru tetap ditambahkan. Tarif rata-rata dan pembagi "÷ pcs" sekarang mengikuti jumlah penugasan yang sebenarnya.
+- Tarif potong 0 pada hasil potong dibaca sebagai belum diisi, sama seperti tarif jahit, sehingga model ditahan sampai harga potong diisi lewat Atur harga dan HPP tidak terlalu rendah tanpa peringatan.
+- Slip hitung yang seluruhnya reject (total 0, ada reject, identitas dan nomor slip sah) tidak lagi dianggap rusak dan tidak menahan tarif PO/maklon. Slip seperti ini tidak memberi tarif. Slip kosong, ganda, atau tanpa nomor tetap menahan perhitungan.
+- Baris `asal=lama` hanya disembunyikan bila snapshot model itu sendiri memuat riwayatnya. PO impor yang diganti nama atau baris katalog tanpa riwayat tetap terlihat dengan peringatan sumber, bukan "Belum ada hasil potong".
+
+- Versi **1.5.67**, rakitan `20261031-hpp-celah-1567`, cabang `rilis-1-5-67` dari `main` `4fff951`. Build, pemeriksaan hasil build, dan **1.536 tes lulus** (24 tes baru). Perbaikan diperiksa pemeriksa independen dengan data contoh; rancangan pertama yang memasukkan baris lama ke hitungan dibatalkan karena menggandakan jahit kelompok dan menghidupkan potongan yang sudah dibatalkan. Baris `asal=lama` tetap di luar hitungan; hanya pesannya yang dibetulkan.
+- Server terpasang pada deployment yang sama, **Versi 82**, **31 Oktober 2026 pukul 22.17 WIB**. Kode/Core/Index cocok penuh dengan `main` sebelum pemasangan; Core/Index cocok dengan hasil build setelah dimuat ulang; Kode/Maintenance tetap. Bootstrap menjawab HTTP 200, `ok: true`, `appVersion: 1.5.67`, `needSetup: false`. Pemeriksaan baca sesudah pasang: 174 model, 20 kelompok, 28 HPP, 8 biaya diperiksa, tanda tarif jahit sama dengan sebelumnya; BDU Combatshirt Hijau-Malvinas 757 → 541 pcs dan Polo Ziper Pendek Maroon 249 → 165 pcs dengan tarif per pcs tetap. Tidak mengubah data produksi, stok, upah, pembayaran, atau pengaturan usaha.
+- Batas yang diketahui: bila catatan lama memuat penugasan yang tidak pernah masuk tabel Produksi, atau siklus diarsipkan sesudah catatan dibekukan, pcs lama itu ikut terbuang saat PO punya slip baru. Tidak ada tanda kasus ini pada pemeriksaan sesudah pasang.
+
 ## Rilis 1.5.66 — Acuan potong dan ongkos jahit HPP
 
 - Baris katalog impor yang belum memiliki riwayat potong tidak lagi membuat hasil potong lengkap dari Produksi terlihat belum tersedia. Catatan yang rusak atau belum memiliki bahan tetap meminta pemeriksaan; acuan XL tetap diperlukan untuk rekomendasi harga.

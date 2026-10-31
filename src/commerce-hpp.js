@@ -231,8 +231,8 @@ var coreCommerceLegacyCost=(function(){var module={exports:{}};
         if(q>0)assignments.push({p,a});
       });
     });
-    var totalCost=0,totalPcs=0;
-    if(assignments.length){assignments.forEach(({p,a})=>{var matches=list.filter(w=>String(w.id)===String(a.tukangId)),r=matches.length===1?rate(matches[0],p):null,q=number(a.qty);if(r===null)warn(warnings,'Tarif jahit saat ini belum tersedia untuk semua penugasan model.');else totalCost+=r*q;totalPcs+=q;});return {perPcs:totalPcs?totalCost/totalPcs:0,totalCost,totalPcs,hasEvidence:true,complete:!warnings.length,warnings,source:'Tarif jahit saat ini · rata-rata sesuai jumlah penugasan'};}
+    var totalCost=0,totalPcs=0,assigned=[];
+    if(assignments.length){assignments.forEach(({p,a})=>{var matches=list.filter(w=>String(w.id)===String(a.tukangId)),r=matches.length===1?rate(matches[0],p):null,q=number(a.qty);if(r===null)warn(warnings,'Tarif jahit saat ini belum tersedia untuk semua penugasan model.');else totalCost+=r*q;totalPcs+=q;assigned.push({id:String((a.payroll||{}).workerId||a.tukangId||a.workerId||''),size:String(p.size||'').trim().toUpperCase(),qty:q,rate:r});});return {perPcs:totalPcs?totalCost/totalPcs:0,totalCost,totalPcs,hasEvidence:true,complete:!warnings.length,warnings,assigned,source:'Tarif jahit saat ini · rata-rata sesuai jumlah penugasan'};}
     var rates=[];list.forEach(w=>{var values=new Set((model.members||[model]).map(p=>rate(w,p)).filter(v=>v!==null));if(values.size>1)warn(warnings,'Tarif nama model yang sama berbeda; periksa tarif jahit.');values.forEach(v=>rates.push(v));});if(rates.length){if(new Set(rates).size>1)warn(warnings,'Tarif berbeda antarpenjahit. Pilih biaya jahit model sebelum memakai rekomendasi.');return {perPcs:warnings.length?0:rates[0],totalCost:0,totalPcs:0,hasEvidence:true,complete:!warnings.length,warnings,source:'Tarif jahit saat ini'};}
     var historic=ledger(model.members||[model],'jahit',warnings);historic.forEach(({entry:e})=>{var q=number(e.jumlah),r=number(e.tarif);if(q===null||q<=0||r===null||r<=0){warn(warnings,'Tarif atau jumlah pada riwayat jahit belum lengkap.');return;}totalCost+=q*r;totalPcs+=q;});var hasEvidence=historic.length>0||warnings.length>0;if(!totalPcs)warn(warnings,'Tarif jahit belum tersedia; isi biaya jahit per pcs.');return {perPcs:totalPcs?totalCost/totalPcs:0,totalCost,totalPcs,hasEvidence:hasEvidence,complete:!!totalPcs&&!warnings.length,warnings,source:totalPcs?'Riwayat tarif jahit · bukan tarif terbaru':'Belum ada tarif jahit'};
   }
@@ -362,7 +362,7 @@ function coreCommerceHpp(input) {
     if(!Number.isSafeInteger(pcs)||!Number.isFinite(cost)||cost>Number.MAX_SAFE_INTEGER)warnings.push('Jumlah atau biaya melampaui batas perhitungan yang aman.');
     return {perPcs:pcs?cost/pcs:null,totalPcs:pcs,totalCost:cost,complete:!!parts.length&&parts.every(function(p){return p.complete;})&&!warnings.length,warnings:warnings,details:[].concat.apply([],parts.map(function(p){return p.details || [];})),source:unique(parts.map(function(p){return p.source;})).join(' + ')};
   }
-  function summary(component){var out={};Object.keys(component || {}).forEach(function(k){if(k!=='includedEntries')out[k]=component[k];});return out;}
+  function summary(component){var out={};Object.keys(component || {}).forEach(function(k){if(k!=='includedEntries'&&k!=='assigned')out[k]=component[k];});return out;}
   var stockRows=rows(tables.StokBahan),effectivePrices=typeof coreStockPrices==='function'?coreStockPrices(stockRows):null;
   /* A material-wide policy applies to every matching material/unit, including
      receipts only present in the old snapshot. Per-roll corrections still need
@@ -388,21 +388,29 @@ function coreCommerceHpp(input) {
   });
   rows(tables.PO).forEach(function(p){
     var id=C.modelId(p.series,p.nama), g=groups[id]; if(!g)g=groups[id]={id:id,series:String(p.series || ''),nama:String(p.nama || ''),sizes:[],poIds:[],nativeCuts:[],assignments:[],warnings:[],members:[],rates:[]};
-    g.poIds.push(p.id);poMap[p.id]=g;poRows[p.id]=p;g.sizes=g.sizes.concat(Object.keys(json(p.ukuran,{})));
+    g.poIds.push(p.id);poMap[p.id]=g;poRows[p.id]=p;g.sizes=g.sizes.concat(Object.keys(json(p.ukuran,{})));var origin=json(p.imporSumber,{})||{};if((p.asal==='lama'||origin.skuId||origin.legacyReconciliation)&&!archivedCycle(p,origin))g.importedPO=true;
     var active=json(p.ukuranAktif,[]);if(Array.isArray(active))g.sizes=g.sizes.concat(active);
     g.members.push({id:'native:'+p.id,series:g.series,namaBarang:g.nama});
     var prod=productById[p.produkId],rate=n(prod&&prod.tarifJahit);if(rate===null||rate===0)rate=n(settings.upahJahit);if(rate!==null)g.rates.push(rate);
     if(p.imporReview)g.warnings.push('PO '+String(p.noPO || p.id)+' masih memerlukan pemeriksaan riwayat.');
   });
   function ownerOpening(r){return r.asal==='koreksi-ukuran';}
+  /* Only the v2 importer flags archive cycles; older imports mark them in the note. */
+  function archivedCycle(p,origin){return origin.arsip===true||(p.asal==='lama'||!!origin.legacyReconciliation)&&/^Arsip\b/.test(String(p.catatan||''));}
   function noteOwnerOpening(g,r){
     var p=poRows[r.poId], notes=g.ownerOpeningWarnings || (g.ownerOpeningWarnings=[]);
     notes.push('PO '+String(p.noPO || p.id)+' memiliki ukuran yang ditambahkan dari keterangan owner. Biaya kain, potong, dan jahitnya belum diketahui; catatan awal tersebut tidak menjadi acuan rata-rata HPP.');
     g.sizes=g.sizes.concat(Object.keys(json(r.ukuran,{})));
   }
+  function noteMirror(g,r){
+    var po=poRows[r.poId],origin=json(po&&po.imporSumber,{})||{};if(!g||archivedCycle(po,origin))return;
+    var live=g.mirrors||(g.mirrors=Object.create(null)),id=String(r.maklonId||''),total=n(r.total)||0,sizes=json(r.ukuran,{})||{},named=0;
+    Object.keys(sizes).forEach(function(size){var q=n(sizes[size])||0,key=id+'|'+String(size).trim().toUpperCase();live[key]=(live[key]||0)+q;named+=q;});
+    if(total>named)live[id]=(live[id]||0)+total-named;
+  }
   var cutSeen=Object.create(null);
   rows(tables.Potong).forEach(function(r){
-    if(r.asal==='lama'&&originals.length)return;
+    if(r.asal==='lama'&&originals.length){var mirrored=poMap[r.poId];if(mirrored)mirrored.hiddenCutPcs=(mirrored.hiddenCutPcs||0)+(n(r.total)||0);return;}
     var g=poMap[r.poId];if(!g){allWarnings.push('Ada hasil potong tanpa PO; belum masuk perhitungan HPP.');return;}
     /* Opening quantities restore workflow identity, not measured cost evidence. */
     if(ownerOpening(r)){noteOwnerOpening(g,r);return;}
@@ -410,7 +418,7 @@ function coreCommerceHpp(input) {
     if(cutSeen[r.id]){g.warnings.push('Identitas hasil potong ganda; periksa riwayat.');cutSeen[r.id].warnings.push('Identitas hasil potong ganda; periksa riwayat.');return;}cutSeen[r.id]=g;
     g.nativeCuts.push(r);g.sizes=g.sizes.concat(Object.keys(json(r.ukuran,{})));
   });
-  rows(tables.SlipKirim).forEach(function(r){if(r.asal==='lama'&&originals.length)return;var g=poMap[r.poId];if(!g)return;if(ownerOpening(r)){noteOwnerOpening(g,r);return;}g.assignments.push(r);});
+  rows(tables.SlipKirim).forEach(function(r){var g=poMap[r.poId];if(r.asal==='lama'&&originals.length){noteMirror(g,r);return;}if(!g)return;if(ownerOpening(r)){noteOwnerOpening(g,r);return;}g.assignments.push(r);});
   rows(tables.KoreksiRiwayat).forEach(function(r){var g=poMap[r.poId];if(g)g.warnings.push('Jumlah riwayat memiliki koreksi fisik; cocokkan acuan biaya lama sebelum memakai HPP.');});
   function nativeMaterials(r){var list=rows(json(r.bahanList,[]));return !list.length&&r.bahan?[{nama:r.bahan,qty:r.kg}]:list;}
   function materialTotals(list){
@@ -506,7 +514,7 @@ function coreCommerceHpp(input) {
     cuts.forEach(function(r){
       var q=n(r.total), sizeMap=json(r.ukuran,{}), actual=sum(Object.keys(sizeMap).map(function(k){return n(sizeMap[k]) || 0;}));
       if(q===null||q<=0||!Number.isSafeInteger(q)||q!==actual){warn('Jumlah hasil potong '+r.id+' belum konsisten.');cutWarnings.push('Jumlah hasil potong belum konsisten.');return;}pcs+=q;
-      var wage=n(r.tarif);if(wage===null)cutWarnings.push('Tarif potong '+r.id+' belum tercatat.');else{cutCost+=q*wage;cutDetails.push({id:r.id,tanggal:r.tanggal || '',jumlah:q,tarif:wage,totalCost:q*wage,source:'tarif-tercatat'});}
+      var wage=n(r.tarif);if(wage===null||wage===0)cutWarnings.push('Tarif potong '+r.id+' belum tercatat.');else{cutCost+=q*wage;cutDetails.push({id:r.id,tanggal:r.tanggal || '',jumlah:q,tarif:wage,totalCost:q*wage,source:'tarif-tercatat'});}
       var list=rows(json(r.bahanList,[]));if(!list.length&&r.bahan)list=[{nama:r.bahan,qty:r.kg}];
       var plan=planById[r.rencanaId], planMaterials=rows(json(plan&&plan.bahanList,[])), declared=Object.create(null), allocated=Object.create(null), allocations=rows(json(r.alokasiBahan,[])), allocSeen=Object.create(null);
       list.forEach(function(b){var key=C.norm(b.nama),amount=n(b.qty);if(!key||amount===null||amount<=0){warn('Rincian bahan hasil potong '+r.id+' belum lengkap.');return;}var units=unique((stockByName[key] || []).map(function(p){return unit(p.satuan);})),planRow=planMaterials.filter(function(p){return C.norm(p.nama)===key;})[0],u=unit(b.satuan || planRow&&planRow.satuan)||(units.length===1?units[0]:null);if(!u){warn('Satuan '+b.nama+' belum dapat dipastikan.');return;}if(declared[key]&&declared[key].unit!==u)warn('Satuan bahan ganda tidak konsisten.');var d=declared[key] || (declared[key]={nama:b.nama,qty:0,unit:u});d.qty+=amount;});
@@ -526,9 +534,19 @@ function coreCommerceHpp(input) {
      never had one. Index once; these receipts contribute rates, never pcs. */
   var sewingReceiptRates=Object.create(null),sewingReceiptIds=Object.create(null);
   rows(tables.SlipSetor).forEach(function(r){if(r.id)sewingReceiptIds[r.id]=(sewingReceiptIds[r.id]||0)+1;});
+  function rejectOnlyReceipt(r){
+    var sizes=json(r.ukuran,null),rejects=r.rejectUkuran==null||r.rejectUkuran===''?{}:json(r.rejectUkuran,null),reject=n(r.reject),listed=0;
+    if(n(r.total)!==0||!Number.isSafeInteger(reject)||reject<=0||!r.id||sewingReceiptIds[r.id]!==1||!String(r.noSlip||'').trim())return false;
+    if(!sizes||typeof sizes!=='object'||Array.isArray(sizes)||Object.keys(sizes).some(function(size){return n(sizes[size])!==0;}))return false;
+    if(!rejects||typeof rejects!=='object'||Array.isArray(rejects))return false;
+    Object.keys(rejects).forEach(function(size){listed+=n(rejects[size])===null?NaN:n(rejects[size]);});
+    return !Object.keys(rejects).length||listed===reject;
+  }
   rows(tables.SlipSetor).forEach(function(r){
     var key=sewingPair(r);
     if(!key||r.status!=='diterima'||ownerOpening(r)||Number(r.workflowVersion)!==2||!String(r.diprosesOleh||'').trim())return;
+    /* A reject-only count pays nothing and carries no rate; it is not damaged. */
+    if(rejectOnlyReceipt(r))return;
     var group=sewingReceiptRates[key]||(sewingReceiptRates[key]={rates:[],rows:[],invalid:false}),q=n(r.total),rate=n(r.upah),sizes=json(r.ukuran,null),actual=0;
     var valid=!!r.id&&sewingReceiptIds[r.id]===1&&!!String(r.noSlip||'').trim()&&Number.isSafeInteger(q)&&q>0&&rate>0&&Number.isFinite(q*rate)&&q*rate<=Number.MAX_SAFE_INTEGER&&sizes&&typeof sizes==='object'&&!Array.isArray(sizes);
     if(sizes&&typeof sizes==='object'&&!Array.isArray(sizes))Object.keys(sizes).forEach(function(size){var count=n(sizes[size]);if(!String(size).trim()||!Number.isSafeInteger(count)||count<0)valid=false;else actual+=count;});
@@ -558,6 +576,22 @@ function coreCommerceHpp(input) {
     if(pcs||g.assignments.length)return {perPcs:pcs?cost/pcs:null,totalPcs:pcs,totalCost:cost,hasEvidence:true,complete:pcs>0&&!warnings.length,warnings:warnings,details:details,source:'Tarif jahit tercatat · rata-rata penugasan'+(receiptInferred?' · tarif kosong mengikuti slip hitung PO dan maklon yang sama':inferred?' · tarif kosong mengikuti PO dan maklon yang sama':'')};
     var rates=unique(g.rates.filter(function(x){return x>0;}).map(function(x){return String(x);})).map(Number);if(rates.length===1)return {perPcs:rates[0],totalPcs:0,totalCost:0,complete:!warnings.length,warnings:warnings,source:'Perkiraan tarif jahit saat ini'};
     return {perPcs:null,totalPcs:0,totalCost:0,complete:false,warnings:warnings.concat(rates.length?'Tarif jahit model berbeda; pilih perkiraan manual.':'Tarif jahit belum tersedia.'),source:'Belum ada tarif jahit'};
+  }
+  /* Moving an imported assignment deletes its mirror row, yet the frozen snapshot
+     keeps it, so the replacement slip would add on top of the pcs it replaced.
+     Match mirrors by worker and size, then worker, then any mirror left: only pcs
+     no live mirror covers are dropped. Truly new pcs keep adding as before. */
+  function liveLegacySewing(g,ls){
+    if(!ls||!ls.assigned||!g.importedPO)return ls;
+    var live=Object.assign(Object.create(null),g.mirrors||{}),pcs=0,cost=0,dropped=0,unrated=false,kept=ls.assigned.map(function(row){return row.id?0:row.qty;});
+    function take(key,i){var q=Math.min(ls.assigned[i].qty-kept[i],live[key]||0);if(q>0){live[key]-=q;kept[i]+=q;}}
+    ls.assigned.forEach(function(row,i){if(row.id)take(row.id+'|'+row.size,i);});
+    ls.assigned.forEach(function(row,i){if(row.id)take(row.id,i);});
+    ls.assigned.forEach(function(row,i){if(row.id)Object.keys(live).forEach(function(key){take(key,i);});});
+    ls.assigned.forEach(function(row,i){var q=kept[i];dropped+=row.qty-q;pcs+=q;if(row.rate===null)unrated=unrated||q>0;else cost+=q*row.rate;});
+    if(!dropped)return ls;
+    var warnings=ls.warnings.filter(function(w){return unrated||w!=='Tarif jahit saat ini belum tersedia untuk semua penugasan model.';});
+    return Object.assign({},ls,{perPcs:pcs?cost/pcs:0,totalPcs:pcs,totalCost:cost,complete:!warnings.length,warnings:warnings,capped:true});
   }
   function legacyReference(g){
     /* Imported catalog rows may have no cutting history. They are not missing
@@ -669,13 +703,15 @@ function coreCommerceHpp(input) {
   var models=Object.keys(groups).sort().map(function(id){
     var g=groups[id],legacyChoice=legacyXLSelection(g,legacyReference(g)),native=nativeCosts(g),pakaiXL=!!(legacyChoice.xl||native&&native.xl),lc=pakaiXL?legacyChoice.xl:legacyChoice.all,nativeReference=pakaiXL&&!(native&&native.xl)?null:native,lp=lc?C.cutting(g.legacy,legacy.meta || {},lc):null,ls=g.legacy?C.sewing(g.legacy,legacy.workers || []):null,ns=nativeSewing(g),kain=evidence([lc,nativeReference&&nativeReference.fabric]),potong=evidence([lp,nativeReference&&nativeReference.cutting]);
     /* A clean catalog-only legacy row must not hide the current native rate. */
-    var jahit=ns.totalPcs||ns.hasEvidence?(ls&&ls.totalPcs?evidence([ls,ns]):ns):(ls&&ls.hasEvidence?ls:ns),ci=C.config({id:id,members:g.members},cfg),value=ci.value,mode=value&&value.jahitMode || (value?'manual':'auto');
+    if(ns.totalPcs)ls=liveLegacySewing(g,ls);
+    var jahit=ns.totalPcs||ns.hasEvidence?(ls&&(ls.totalPcs||ls.capped&&ls.warnings.length)?evidence([ls,ns]):ns):(ls&&ls.hasEvidence?ls:ns),ci=C.config({id:id,members:g.members},cfg),value=ci.value,mode=value&&value.jahitMode || (value?'manual':'auto');
     var sourceWarnings=g.warnings.slice();
     if(mode!=='auto'&&mode!=='manual')g.warnings.push('Pilihan ongkos jahit tidak valid.');
     var hargaJahit=mode==='auto'?(jahit.complete?jahit.perPcs:null):n(value&&value.hargaJahit),biayaLain=value?n(value.biayaLain===undefined?0:value.biayaLain):0,margin=value?n(value.targetMargin===undefined?30:value.targetMargin):30;
     var basis={policy:'complete-legacy-v1',allPcs:(lc?lc.basis.allPcs:0)+(nativeReference?nativeReference.fabric.totalPcs:0),includedPcs:kain.totalPcs,excludedPcs:lc?lc.basis.excludedPcs:0,excluded:lc?lc.basis.excluded:[],origins:{legacy:lc?lc.totalPcs:0,native:nativeReference?nativeReference.fabric.totalPcs:0}};
     if(pakaiXL)basis.ukuran='XL';
     var warnings=unique(g.warnings.concat(g.ownerOpeningWarnings || [],kain.warnings,potong.warnings,ci.warnings));
+    if(g.hiddenCutPcs&&!(g.legacy&&(g.legacy.ledger||[]).length)){warnings=warnings.filter(function(w){return w!=='Belum ada hasil potong untuk menghitung HPP.';});warnings.unshift('Ada '+g.hiddenCutPcs+' pcs hasil potong impor yang tidak terbaca di catatan lama model ini, jadi belum masuk HPP. Periksa nama PO atau catatan asalnya.');}
     if(hargaJahit===null)warnings=warnings.concat(jahit.warnings,['Isi ongkos jahit atau lengkapi tarif penugasan.']);
     if(ci.source==='legacy-compatible')warnings.push('Biaya lama tetap tersimpan. Periksa dan simpan sekali untuk model ini.');
     if(value&&value.costSchema!==2)warnings.push('Periksa biaya lain agar kain, potong, dan jahit tidak dihitung dua kali.');
