@@ -2,9 +2,13 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Perbaikan acuan potong dan ongkos jahit HPP pada cabang `codex/hpp-cut-sewing-sync` dari `main` `cd44a96`; server 1.5.66 Versi 81 sudah terpasang.
+Diperbarui: 31 Oktober 2026 oleh Claude. Perbaikan penugasan pindah, tarif potong nol, dan slip reject HPP pada cabang `rilis-1-5-67` dari `main` `4fff951`; server 1.5.67 Versi 82 sudah terpasang.
 
 ## 1. Keadaan sekarang
+
+- **Rilis 1.5.67 — HPP:** penugasan impor yang dipindah tidak terhitung dobel (`liveLegacySewing`: snapshot dihitung sebanyak baris cermin `asal=lama` yang masih hidup, cocokkan per maklon + ukuran, lalu maklon, lalu sisa cermin; hanya jalan bila PO impor punya slip baru). Tarif potong 0 dibaca belum diisi. Slip hitung seluruhnya reject yang utuh tidak menahan tarif, sedangkan slip total 0 yang rusak tetap menahan. Baris `asal=lama` tetap di luar hitungan; pesan "Belum ada hasil potong" diganti keterangan yang benar bila hasil potong impor tidak terbaca di snapshot model itu. **Jangan memasukkan baris `asal=lama` ke hitungan berdasarkan nama model:** sudah dicoba dan terbukti menggandakan jahit kelompok serta menghidupkan potongan batal. Build, pemeriksaan hasil build, dan **1.536 tes lulus**.
+- **Pemasangan 1.5.67:** sebelum pemasangan Kode/Core/Index cocok penuh dengan `main` `4fff951`. Sesudah muat ulang Core/Index cocok dengan hasil build; Kode/Maintenance tetap. Deployment yang sama diperbarui ke **Versi 82**, **31 Oktober 2026, 22.17 WIB**. Bootstrap menjawab HTTP 200, `ok: true`, `appVersion: 1.5.67`, `needSetup: false`. Rakitan `20261031-hpp-celah-1567`. Pembacaan sesudah pasang: 174 model, 20 kelompok, 28 HPP, 8 biaya diperiksa, tanda tarif jahit sama; BDU Combatshirt Hijau-Malvinas 757 → 541 pcs, Polo Ziper Pendek Maroon 249 → 165 pcs, tarif per pcs tetap. Foto penuh sebelum pasang hilang karena aplikasi memuat ulang sendiri, jadi perbandingan memakai ringkasan yang tercatat.
+- **Batas yang diketahui:** bila snapshot memuat penugasan yang tidak pernah masuk tabel, atau siklus diarsipkan sesudah snapshot dibekukan, pcs lama itu ikut terbuang saat PO punya slip baru. Tidak ada tanda kasus ini pada pemeriksaan sesudah pasang.
 
 - **Rilis 1.5.66 — hasil potong dan ongkos jahit HPP:** baris katalog impor tanpa riwayat potong tidak lagi menghalangi acuan produksi yang lengkap. Riwayat rusak atau hasil potong tanpa bahan tetap memerlukan pemeriksaan. Ongkos jahit otomatis tidak menganggap tarif kosong/nol sebagai jahit gratis; hanya mengikuti tarif positif seragam dari penugasan atau slip hitung yang sudah diterima/diproses pada PO dan maklon yang sama. Slip hitung memerlukan identitas unik, rincian jumlah cocok, dan bukti proses sah; jumlahnya tidak ditambahkan ke pembagi penugasan. Tarif kosong dengan acuan berbeda, sumber tidak lengkap, atau identitas ganda tetap menahan perhitungan otomatis. Pilihan biaya manual nol tetap tersedia.
 - **Tampilan dan validasi 1.5.66:** tarif otomatis tampil sebagai rupiah yang dibulatkan untuk dibaca, disertai sumber dan dasar rata-rata; perhitungan tetap memakai nilai tepat. Isian manual hanya muncul pada mode manual dan drafnya tetap ada saat berpindah mode. Build, pemeriksaan hasil build, dan **1.512 tes lulus**; alur otomatis/manual diuji di browser dengan data contoh. Perubahan tarif/status slip diuji terhadap cache. Pemeriksaan baca di aplikasi memastikan hasil potong dan tarif slip terbaca. Tidak menulis perubahan ke data produksi, stok, upah, pembayaran, atau pengaturan usaha.
@@ -34,8 +38,8 @@ Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Perbaikan acuan potong dan ongko
 
 - Rilis sebelumnya: server **1.5.61** dipasang pada 24 Oktober dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
-- Versi server dan cabang rilis: **1.5.66**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 81** sudah diverifikasi.
-- Rakitan tampilan terbaru: `20261031-hpp-cut-sewing-1566`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- Versi server dan cabang rilis: **1.5.67**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 82** sudah diverifikasi.
+- Rakitan tampilan terbaru: `20261031-hpp-celah-1567`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
 - Dasar cabang: `main` `cd44a96` (31 Oktober 2026), cabang `codex/hpp-cut-sewing-sync`. Sebelum pemasangan, Kode/Core/Index dibandingkan seluruhnya setelah normalisasi LF dan cocok penuh dengan `main`. Setelah muat ulang, seluruh sumber cocok dengan hasil build 1.5.66; Kode/Maintenance tidak berubah.
 - Server Apps Script: deployment yang sama diperbarui ke **Versi 81** (31 Okt 2026, **19.14 WIB**). Bootstrap **19.15 WIB** mengonfirmasi server 1.5.66. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
 
@@ -123,6 +127,8 @@ Sidik berikut adalah **server 1.5.66 pada Versi 81** yang sudah dimuat ulang dan
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-31 · Claude · 1.5.67 · Empat celah HPP dari pemeriksaan 1.5.66: penugasan impor pindah terhitung dobel, tarif potong 0, slip seluruhnya reject, dan pesan hasil potong impor yang tidak terbaca. **1.536 tes lulus.** Server **Versi 82**, **22.17 WIB**; bootstrap mengonfirmasi 1.5.67. Cabang `rilis-1-5-67` dari `main` `4fff951`, rakitan `20261031-hpp-celah-1567`. Tidak mengubah data usaha.
 
 - 2026-10-31 · ChatGPT/Codex · 1.5.66 · Perbaiki katalog impor kosong yang menahan acuan potong sah, pertahankan pemeriksaan riwayat rusak, dan cegah tarif jahit kosong/nol menurunkan rata-rata. Tarif kosong mengikuti tarif positif seragam dari penugasan atau slip hitung sah yang sudah diterima/diproses pada PO/maklon yang sama; sumber ambigu tetap menahan HPP otomatis. Tampilan otomatis dibulatkan tanpa mengubah hitungan, draf manual tetap tersimpan saat berganti mode. Build, pemeriksaan hasil build, dan **1.512 tes lulus**; alur browser memakai data contoh lulus. Kode/Core/Index sebelum pemasangan cocok penuh dengan `main` `cd44a96`, dan sumber rilis cocok penuh setelah muat ulang; Kode/Maintenance tetap. Server **Versi 81**, **19.14 WIB**; bootstrap **19.15 WIB** mengonfirmasi HTTP 200, `ok: true`, `appVersion: 1.5.66`, `needSetup: false`. Cabang `codex/hpp-cut-sewing-sync`, rakitan `20261031-hpp-cut-sewing-1566`; peluncuran tampilan melalui [PR #98](https://github.com/soldierapparelid/produksi/pull/98). Tidak mengubah data usaha.
 
