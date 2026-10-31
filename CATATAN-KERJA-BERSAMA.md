@@ -2,9 +2,11 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Pembaruan tampilan HPP menunggu data siap pada cabang `codex/hpp-refresh-ready` dari `main` `783f2c2`; server tetap 1.5.64 Versi 78.
+Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Pilihan kelompok HPP menyembunyikan model OFFLINE pada cabang `codex/hpp-hide-offline` dari `main` `c4e561d`; server tetap 1.5.64 Versi 78.
 
 ## 1. Keadaan sekarang
+
+- **Pilihan anggota HPP:** model dengan series OFFLINE / OFFLINE- tidak ditawarkan sebagai anggota baru. Model reguler tetap tersedia termasuk riwayat PO. Anggota OFFLINE yang sudah tersimpan tetap terlihat saat mengatur kelompok agar dapat dilepas secara sengaja, tanpa hilang ketika hanya mengganti nama. Tidak menghapus PO, stok, atau data HPP. Build, pemeriksaan hasil build, dan **1.481 tes lulus**; pemeriksaan formulir memastikan filter series dan keutuhan anggota lama. Versi tetap **1.5.64**, rakitan `20261031-hpp-hide-offline-1564`; tidak perlu pemasangan server.
 
 - **Pembaruan tampilan HPP:** klik kelompok, atur anggota, atau tentukan kain XL saat data diperbarui menunggu permintaan yang sedang berjalan lalu membuka formulir sekali. Klik berulang tidak menambah permintaan/formulir; perpindahan halaman, modal, sesi, atau peran membatalkan pembukaan tertunda. Versi cache yang rusak dapat diganti jawaban server sah, sedangkan data server terbaru tidak ditimpa versi lebih lama. Penjagaan revisi saat menyimpan tetap berlaku.
 - **Validasi pembaruan tampilan:** build, pemeriksaan hasil build, dan **1.481 tes lulus** (8 regresi baru). Kasus muat ulang lalu klik kelompok berhasil direproduksi di aplikasi; perbaikan diuji di browser memakai data contoh dan pemuatan tertunda. Tidak mengubah perhitungan HPP maupun data usaha. Versi tetap **1.5.64**, rakitan `20261031-hpp-refresh-ready-1564`; server tidak perlu dipasang ulang.
@@ -27,7 +29,7 @@ Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Pembaruan tampilan HPP menunggu 
 - Rilis sebelumnya: server **1.5.61** dipasang pada 24 Oktober dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
 - Versi server dan cabang rilis: **1.5.64**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 78** sudah diverifikasi.
-- Rakitan tampilan terbaru: `20261031-hpp-refresh-ready-1564`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- Rakitan tampilan terbaru: `20261031-hpp-hide-offline-1564`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
 - Dasar cabang dan pembanding sebelum pemasangan: `main` `ca44d15` (31 Oktober 2026). Seluruh Kode/Core/Index server cocok dengan sumber 1.5.63 setelah normalisasi LF; tidak ditemukan perubahan server di luar repo.
 - Server Apps Script: deployment yang sama diperbarui ke **Versi 78** (31 Okt 2026, **09.02 WIB**). Bootstrap **09.03 WIB** mengonfirmasi server 1.5.64. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
 
@@ -115,6 +117,8 @@ Sidik berikut adalah **server 1.5.64 pada Versi 78** yang sudah dimuat ulang dan
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-31 · ChatGPT/Codex · 1.5.64 (tampilan) · Sembunyikan model series OFFLINE dari pilihan anggota baru kelompok HPP sesuai permintaan pemilik. Anggota lama tetap bisa dilepas tanpa penghapusan diam-diam saat edit. Build, pemeriksaan hasil build, dan **1.481 tes lulus**; pemeriksaan formulir dengan data contoh lulus. Cabang `codex/hpp-hide-offline` dari `c4e561d`, rakitan `20261031-hpp-hide-offline-1564`; PR cabang tersebut. Server tetap Versi 78 dan data usaha tidak berubah.
 
 - 2026-10-31 · ChatGPT/Codex · 1.5.64 (tampilan) · Hilangkan siklus permintaan muat ulang ketika tombol kelompok diklik saat pemuatan berjalan. Formulir menunggu satu permintaan bersama; klik berulang, navigasi, sesi/peran, versi cache rusak, dan penolakan versi mundur diuji. Build, pemeriksaan hasil build, dan **1.481 tes lulus**. Uji browser dengan pemuatan tertunda berhasil membuka kelompok dan kelompok baru. Cabang `codex/hpp-refresh-ready` dari `783f2c2`, rakitan `20261031-hpp-refresh-ready-1564`; peluncuran melalui PR cabang tersebut atas izin pemasangan yang sudah diberikan pemilik. Server tetap Versi 78; data usaha tidak diubah.
 
