@@ -672,6 +672,16 @@ function coreCommerceHppGroups(models,config) {
   function sum(v){return v.reduce(function(total,x){return total+x;},0);}
   function join(v){return [].concat.apply([],v);}
   function prefixed(m,warnings){return list(warnings).map(function(w){return m.nama+': '+w;});}
+  function isXL(m){return (m.basis||(m.kain||{}).basis||{}).ukuran==='XL';}
+  function usableXLReference(m){
+    var kain=m.kain||{},potong=m.potong||{};
+    // Use one matched set of fabric and cutting evidence. Personal sewing or
+    // approval settings do not determine whether that evidence is usable.
+    return isXL(m)&&kain.complete===true&&potong.complete===true&&
+      Number.isSafeInteger(kain.totalPcs)&&kain.totalPcs>0&&
+      Number.isSafeInteger(potong.totalPcs)&&potong.totalPcs===kain.totalPcs&&
+      n(kain.totalCost)!==null&&n(potong.totalCost)!==null&&!list(m.sourceWarnings).length;
+  }
   var groups=config.hppGroups||{},warnings=[],lookup=Object.create(null),claims=Object.create(null),invalid=Object.create(null);
   models.forEach(function(m){lookup[m.id]=m;});
   if(!groups||typeof groups!=='object'||Array.isArray(groups))return {groups:[],warnings:['Data kelompok HPP tidak terbaca. Model tetap ditampilkan sendiri.']};
@@ -701,17 +711,22 @@ function coreCommerceHppGroups(models,config) {
   }
   var computed=keys.filter(function(key){if(invalid[key]){warnings.push('Kelompok '+String(groups[key]&&groups[key].nama||key)+' tidak sah atau anggotanya bertumpuk. Model tetap ditampilkan sendiri.');return false;}return true;}).map(function(key){
     var g=groups[key],members=g.modelIds.map(function(id){return lookup[id];}).filter(Boolean),missing=g.modelIds.filter(function(id){return !lookup[id];});
-    var refs=members.filter(function(m){return (m.basis||(m.kain||{}).basis||{}).ukuran==='XL';}),inherited=members.filter(function(m){return refs.indexOf(m)<0;});
-    // Only members contributing XL evidence can block its shared reference.
-    // Other members retain their own warnings while following that reference.
-    var sourceWarnings=join(refs.map(function(m){return prefixed(m,m.sourceWarnings);})),inheritedWarnings=join(inherited.map(function(m){return prefixed(m,m.sourceWarnings);}));
+    var refs=members.filter(usableXLReference),inherited=members.filter(function(m){return refs.indexOf(m)<0;});
+    // Incomplete members follow the complete XL reference. Their evidence is
+    // excluded from both costs and quantities, with its warnings still visible.
+    var sourceWarnings=[],inheritedWarnings=join(inherited.map(function(m){
+      var notes=list(m.sourceWarnings).concat(list((m.kain||{}).warnings),list((m.potong||{}).warnings));
+      if(isXL(m))notes.push('Acuan kain dan potong XL belum lengkap atau tidak cocok; belum dipakai dalam rata-rata kelompok.');
+      return prefixed(m,unique(notes));
+    }));
+    if(inherited.length)inheritedWarnings.push(inherited.length+' anggota mengikuti acuan XL kelompok; hanya acuan XL lengkap yang dimasukkan ke rata-rata.');
+    inheritedWarnings=unique(inheritedWarnings);
     if(missing.length)sourceWarnings.push('Ada '+missing.length+' anggota kelompok yang datanya belum ditemukan.');
     var kain=aggregate(refs,'kain'),potong=aggregate(refs,'potong'),jahit=sewing(members),value=copy(g.config),mode=value&&value.jahitMode||'auto';
     var basis={policy:'complete-legacy-v1',allPcs:sum(refs.map(function(m){return (m.basis||{}).allPcs||0;})),includedPcs:kain.totalPcs,excludedPcs:sum(refs.map(function(m){return (m.basis||{}).excludedPcs||0;})),excluded:join(refs.map(function(m){return list((m.basis||{}).excluded).map(function(x){return Object.assign({},copy(x),{modelId:m.id,modelNama:m.nama});});})),origins:{legacy:0,native:0}};
     refs.forEach(function(m){var origins=(m.basis||{}).origins||{};basis.origins.legacy+=origins.legacy||0;basis.origins.native+=origins.native||0;});if(refs.length)basis.ukuran='XL';
     var notes=sourceWarnings.concat(inheritedWarnings,kain.warnings,potong.warnings),configSaved=false;
     if(!refs.length)notes.push('Belum ada acuan kain XL yang lengkap. Tentukan kain XL atau lengkapi hasil potong satu anggota.');
-    if(inherited.length)notes.push(inherited.length+' anggota mengikuti acuan XL kelompok; hasil ukuran lain tidak dimasukkan ke rata-rata XL.');
     if(value){try{coreCommerceHppConfig(value);configSaved=true;}catch(e){notes.push(e.message);}}
     if(!configSaved)notes.push('Biaya kelompok belum diperiksa dan disimpan.');
     var hargaJahit=mode==='auto'?(jahit.complete?jahit.perPcs:null):mode==='manual'?n(value&&value.hargaJahit):null,other=value?n(value.biayaLain):0,margin=value?n(value.targetMargin):30;
@@ -733,7 +748,7 @@ function coreCommerceHppGroups(models,config) {
     kain.observasi={sizes:Object.keys(sizes).sort().map(function(size){return {size:size,jumlah:sizes[size]};}),totalPcs:kain.totalPcs,totalKg:qtyByUnit.kg||0,qtyByUnit:qtyByUnit,yieldByUnit:yieldByUnit,verifiedRollCount:Object.keys(rolls).length,fullRollCount:fullRollCount,fullRollPcs:fullRollPcs,pcsPerFullRoll:fullRollCount?fullRollPcs/fullRollCount:null,rolls:Object.keys(rolls).map(function(id){return rolls[id];}),rollGroups:rollGroups,provisional:provisional,notes:unique(obsNotes)};
     basis.provisional=provisional;kain.basis=basis;
     var series=unique(members.map(function(m){return m.series;})).join(' · ');
-    return {id:key,nama:g.nama,namaBarang:g.nama,series:series,isGroup:true,modelIds:g.modelIds.slice(),memberModels:members.map(function(m){return {id:m.id,nama:m.nama,series:m.series,sizes:copy(m.sizes||[]),poIds:copy(m.poIds||[])};}),referenceModelIds:refs.map(function(m){return m.id;}),sizes:unique(join(members.map(function(m){return list(m.sizes);}))).sort(),poIds:unique(join(members.map(function(m){return list(m.poIds);}))),kain:kain,potong:potong,jahit:jahit,basis:basis,config:{value:value,source:'group',complete:configSaved,warnings:[]},hargaJahit:hargaJahit,biayaLain:other,targetMargin:margin,hppTotal:total,configSaved:configSaved,configured:ready,complete:ready,sourceWarnings:sourceWarnings,warnings:unique(notes),prices:prices};
+    return {id:key,nama:g.nama,namaBarang:g.nama,series:series,isGroup:true,modelIds:g.modelIds.slice(),memberModels:members.map(function(m){return {id:m.id,nama:m.nama,series:m.series,sizes:copy(m.sizes||[]),poIds:copy(m.poIds||[])};}),referenceModelIds:refs.map(function(m){return m.id;}),sizes:unique(join(members.map(function(m){return list(m.sizes);}))).sort(),poIds:unique(join(members.map(function(m){return list(m.poIds);}))),kain:kain,potong:potong,jahit:jahit,basis:basis,config:{value:value,source:'group',complete:configSaved,warnings:[]},hargaJahit:hargaJahit,biayaLain:other,targetMargin:margin,hppTotal:total,configSaved:configSaved,configured:ready,complete:ready,sourceWarnings:sourceWarnings,inheritedWarnings:inheritedWarnings,warnings:unique(notes),prices:prices};
   });
   return {groups:computed,warnings:unique(warnings)};
 }
