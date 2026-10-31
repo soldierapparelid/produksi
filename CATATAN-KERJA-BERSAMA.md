@@ -2,9 +2,13 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Batas kelompok HPP naik menjadi 100 pada cabang `codex/hpp-100-groups` dari `main` `bff025f`; server 1.5.65 Versi 79 sudah terpasang.
+Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Perbaikan acuan potong dan ongkos jahit HPP pada cabang `codex/hpp-cut-sewing-sync` dari `main` `cd44a96`; server 1.5.66 Versi 80 sudah terpasang.
 
 ## 1. Keadaan sekarang
+
+- **Rilis 1.5.66 — hasil potong dan ongkos jahit HPP:** baris katalog impor tanpa riwayat potong tidak lagi menghalangi acuan produksi yang lengkap. Riwayat rusak atau hasil potong tanpa bahan tetap memerlukan pemeriksaan. Ongkos jahit otomatis tidak menganggap tarif kosong/nol sebagai jahit gratis; hanya mengikuti tarif positif yang seragam dari penugasan lain pada PO dan maklon yang sama. Tarif kosong dengan acuan berbeda, sumber tidak lengkap, atau identitas ganda tetap menahan perhitungan otomatis. Pilihan biaya manual nol tetap tersedia.
+- **Tampilan dan validasi 1.5.66:** tarif otomatis tampil sebagai rupiah yang dibulatkan untuk dibaca, disertai sumber dan dasar rata-rata; perhitungan tetap memakai nilai tepat. Isian manual hanya muncul pada mode manual dan drafnya tetap ada saat berpindah mode. Build, pemeriksaan hasil build, dan **1.503 tes lulus**; alur otomatis/manual diuji di browser dengan data contoh. Tidak menulis perubahan ke data produksi, stok, upah, pembayaran, atau pengaturan usaha.
+- **Pemasangan 1.5.66:** sebelum pemasangan, seluruh Kode/Core/Index cocok penuh dengan `main` `cd44a96`. Setelah disimpan dan dimuat ulang, seluruh sumber cocok dengan hasil build rilis; Kode/Maintenance tetap. Deployment yang sama diperbarui ke **Versi 80**, **31 Oktober 2026, 18.59 WIB**. Bootstrap **18.59 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.66`, `needSetup: false`. Rakitan `20261031-hpp-cut-sewing-1566`; peluncuran tampilan disiapkan dari cabang `codex/hpp-cut-sewing-sync`, PR belum dibuat.
 
 - **Rilis 1.5.65 — hingga 100 kelompok HPP:** batas saat simpan dan saat membaca konfigurasi sama-sama dinaikkan dari 20 menjadi 100. Kelompok ke-21 dan ke-100 tetap terbaca setelah disimpan/dimuat ulang; kelompok ke-101 ditolak tanpa menulis. Edit/bubarkan tetap tersedia saat mencapai batas. Pengaman ukuran sel konfigurasi 49.000 karakter tetap berlaku, sehingga konfigurasi yang sangat besar ditolak utuh sebelum menulis. Build, pemeriksaan hasil build, dan **1.485 tes lulus**; empat regresi tambahan terbukti gagal dengan batas lama. Tidak mengubah data usaha atau rumus biaya.
 - **Pemasangan 1.5.65:** Core/Index tersimpan dimuat ulang dan cocok penuh dengan rilis. Kode/Maintenance tetap. Deployment yang sama diperbarui ke **Versi 79**, **31 Oktober 2026, 10.48 WIB**. Bootstrap **10.48 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.65`, `needSetup: false`. Peluncuran tampilan melalui [PR #97](https://github.com/soldierapparelid/produksi/pull/97), rakitan `20261031-hpp-100-groups-1565`.
@@ -30,18 +34,18 @@ Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Batas kelompok HPP naik menjadi 
 
 - Rilis sebelumnya: server **1.5.61** dipasang pada 24 Oktober dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
-- Versi server dan cabang rilis: **1.5.65**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 79** sudah diverifikasi.
-- Rakitan tampilan terbaru: `20261031-hpp-100-groups-1565`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
-- Dasar cabang: `main` `bff025f` (31 Oktober 2026). Sebelum pemasangan, Kode/Core cocok dengan sumber 1.5.64; Index cocok penuh dengan salinan terverifikasi Versi 78/PR #94. Selisih Index terhadap main hanya pembaruan tampilan PR #95/#96 yang tercatat di atas; ikut diselaraskan saat rilis 1.5.65. Tidak ada perubahan khusus server yang hilang.
-- Server Apps Script: deployment yang sama diperbarui ke **Versi 79** (31 Okt 2026, **10.48 WIB**). Bootstrap **10.48 WIB** mengonfirmasi server 1.5.65. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
+- Versi server dan cabang rilis: **1.5.66**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 80** sudah diverifikasi.
+- Rakitan tampilan terbaru: `20261031-hpp-cut-sewing-1566`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- Dasar cabang: `main` `cd44a96` (31 Oktober 2026), cabang `codex/hpp-cut-sewing-sync`. Sebelum pemasangan, Kode/Core/Index dibandingkan seluruhnya setelah normalisasi LF dan cocok penuh dengan `main`. Setelah muat ulang, seluruh sumber cocok dengan hasil build 1.5.66; Kode/Maintenance tidak berubah.
+- Server Apps Script: deployment yang sama diperbarui ke **Versi 80** (31 Okt 2026, **18.59 WIB**). Bootstrap **18.59 WIB** mengonfirmasi server 1.5.66. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
 
-Sidik berikut adalah **server 1.5.65 pada Versi 79** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis cabang `codex/hpp-100-groups`. Index server memakai rakitan `20261031-hpp-100-groups-1565`, termasuk pembaruan tampilan PR #95/#96.
+Sidik berikut adalah **server 1.5.66 pada Versi 80** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis cabang `codex/hpp-cut-sewing-sync`. Index server memakai rakitan `20261031-hpp-cut-sewing-1566`.
 
 | Berkas di editor | Sumber di repo | Sidik (panjang + 16 huruf awal sha256, akhir baris LF) |
 |---|---|---|
 | Kode.gs | `apps-script/Server.gs` | 38162 d72ab735e5f1a288 |
-| Core.gs | `apps-script/Core.gs` | 740093 01f22a0797f8f69a |
-| Index.html | `apps-script/Index.html` | 1805234 094a6a20fab3acd9 |
+| Core.gs | `apps-script/Core.gs` | 742243 81f0189ae9aeccf9 |
+| Index.html | `apps-script/Index.html` | 1808686 4c49e55fabd2aca9 |
 | Maintenance.gs | tidak ada di repo, jangan diubah | 136 373dd791f45fca0e |
 
 - Tampilan: GitHub Pages `https://soldierapparelid.github.io/produksi/`. **Repo ini publik.**
@@ -119,6 +123,8 @@ Sidik berikut adalah **server 1.5.65 pada Versi 79** yang sudah dimuat ulang dan
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-31 · ChatGPT/Codex · 1.5.66 · Perbaiki katalog impor kosong yang menahan acuan potong sah, pertahankan pemeriksaan riwayat rusak, dan cegah tarif jahit kosong/nol menurunkan rata-rata. Tarif kosong hanya mengikuti tarif positif seragam pada PO/maklon yang sama; sumber ambigu tetap menahan HPP otomatis. Tampilan otomatis dibulatkan tanpa mengubah hitungan, draf manual tetap tersimpan saat berganti mode. Build, pemeriksaan hasil build, dan **1.503 tes lulus**; alur browser memakai data contoh lulus. Kode/Core/Index sebelum pemasangan cocok penuh dengan `main` `cd44a96`, dan sumber rilis cocok penuh setelah muat ulang; Kode/Maintenance tetap. Server **Versi 80**, **18.59 WIB**; bootstrap **18.59 WIB** mengonfirmasi HTTP 200, `ok: true`, `appVersion: 1.5.66`, `needSetup: false`. Cabang `codex/hpp-cut-sewing-sync`, rakitan `20261031-hpp-cut-sewing-1566`; PR peluncuran tampilan belum dibuat. Tidak mengubah data usaha.
 
 - 2026-10-31 · ChatGPT/Codex · 1.5.65 · Naikkan batas kelompok HPP 20 → 100 pada simpan dan baca sesuai permintaan pemilik. Regresi 21/100 tersimpan dan dibuka ulang, penolakan 101 tanpa perubahan, edit/bubarkan saat penuh, serta batas sel konfigurasi diuji. Build, pemeriksaan hasil build, dan **1.485 tes lulus**. Core/Index tersimpan cocok penuh setelah muat ulang, Kode/Maintenance tetap. Server **Versi 79**, 10.48 WIB; bootstrap mengonfirmasi 1.5.65. Cabang `codex/hpp-100-groups` dari `bff025f`, rakitan `20261031-hpp-100-groups-1565`; peluncuran melalui [PR #97](https://github.com/soldierapparelid/produksi/pull/97). Tidak mengubah data usaha.
 

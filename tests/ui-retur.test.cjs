@@ -75,8 +75,8 @@ test('the release keeps one shared version and a new page cache', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
   const core = fs.readFileSync(path.join(root, 'src/core.js'), 'utf8');
-  assert.match(html, /var UI_VERSION = '1\.5\.65';/);
-  assert.match(core, /var APP_VERSION = '1\.5\.65';/);
+  assert.match(html, /var UI_VERSION = '1\.5\.66';/);
+  assert.match(core, /var APP_VERSION = '1\.5\.66';/);
   assert.equal(html.match(/window\.PK_BUILD = '([^']+)'/)[1], worker.match(/var RAKITAN = '([^']+)'/)[1]);
   assert.match(html, /getReturState\|getReturDetail\|getReturBukti\)\$\/\.test\(action\)/, 'return reads use the read timeout');
 });
