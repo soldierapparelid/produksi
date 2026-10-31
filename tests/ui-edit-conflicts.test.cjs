@@ -7,7 +7,7 @@ function harness(){
  vm.runInContext(core,c);
  vm.runInContext(fs.readFileSync(path.join(root,'src/history-corrections.js'),'utf8'),c);
  vm.runInContext(`
- var A={},C={},R={},sheets=[],messages=[],S={token:'owner-session',busy:0,displayVersion:10,state:{ver:10,workflowVersion:2,me:{id:'owner01',divisi:'owner'},settings:{ukuran:['M'],poSembunyi:[]},stok:[],kirim:[],setor:[],potong:[],payroll:[]}},D={po:{},produk:{},user:{}};
+ var A={},C={},R={},sheets=[],sheetRevision=0,messages=[],S={token:'owner-session',busy:0,displayVersion:10,state:{ver:10,workflowVersion:2,me:{id:'owner01',divisi:'owner'},settings:{ukuran:['M'],poSembunyi:[]},stok:[],kirim:[],setor:[],potong:[],payroll:[]}},D={po:{},produk:{},user:{}};
  var modal={appendChild:function(node){node.parentNode=this;},removeChild:function(node){node.parentNode=null;}},document={body:{classList:{toggle:function(){}}},createElement:function(){return {innerHTML:''};}};
  function decode(s){return String(s||'').replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');}
  function attr(tag,name){var m=tag.match(new RegExp('(?:^|\\\\s)'+name+'="([^"]*)"'));return m?decode(m[1]):null;}

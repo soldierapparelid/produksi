@@ -10,19 +10,20 @@ function fixture(){
 }
 function harness(data=fixture()){
   const c=vm.createContext({console});
-  vm.runInContext(`var A={},C={},R={},VIEWS={},S={token:'one',state:{settings:{}},f:{},sub:{}},actor={id:'owner',divisi:'owner'},entry={data:null,version:1},currentForm=null,lastSheet='',messages=[],requests=[];
+  vm.runInContext(`var A={},C={},R={},VIEWS={},S={token:'one',state:{settings:{}},f:{},sub:{},tab:'hpp'},actor={id:'owner',divisi:'owner'},entry={data:null,version:1},currentForm=null,lastSheet='',messages=[],requests=[],formOpens=0;
     function me(){return actor;}function isAdmin(){return ['owner','admin'].includes(actor.divisi);}function commerceScope(){return S.token&&isAdmin()?S.token+':'+actor.divisi:'';}function commerceEntry(){return entry;}function commerceData(){return entry.data||{};}
     function nf(v){return String(v||0);}function nfQty(v){return nf(v);}function rp(v){return 'Rp'+v;}function tgl(v){return v;}function satuanPendek(v){return v;}function inisial(v){return String(v).slice(0,1);}function ic(){return '';}function newId(){return 'stable';}
     function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}function cocok(q,a){return !q||a.join(' ').toLowerCase().includes(q.toLowerCase());}
     function hid(k,v){return '<input name="'+k+'" value="'+esc(v)+'">';}function fText(l,k,v,attrs){return '<label>'+esc(l)+'<input name="'+k+'" value="'+esc(v)+'" '+(attrs||'')+'></label>';}function fNum(l,k,v,a){return fText(l,k,v,a);}function fSelect(l,k,opts,v){return fText(l,k,v);}
     function topForm(){return currentForm;}function formVals(f){return f.values||{};}function toast(v,b){messages.push({text:v,bad:b});}function sheetHtml(t,b,f){return '<h2>'+esc(t)+'</h2>'+b+(f||'');}function openSheet(fn){lastSheet=fn();}
-    function commerceForm(t,m,b,a,l){lastSheet=sheetHtml(t,b,l);currentForm={values:{},rows:[],note:{hidden:true},_commerceScope:commerceScope(),action:a,label:l};return currentForm;}
+    function commerceForm(t,m,b,a,l){formOpens++;lastSheet=sheetHtml(t,b,l);currentForm={values:{},rows:[],note:{hidden:true},_commerceScope:commerceScope(),action:a,label:l};return currentForm;}
     function $(s,f){if(!f)return null;if(s==='[data-hpp-member]')return f.input;if(s==='[data-hpp-member-count]')return f.count;if(s==='[data-hpp-member-empty]')return f.empty;return null;}
     function $$(s,f){if(s==='[data-hpp-member-row]')return f.rows||[];if(s==='[data-hpp-member]')return (f.rows||[]).map(function(r){return r.input;});if(s==='[data-hpp-xl-roll]')return f.xlRolls||[];return [];}
     function commerceNumber(v,l,int,max){var n=Number(v);if(v==null||String(v).trim()===''||!Number.isFinite(n)||n<0||int&&!Number.isSafeInteger(n)||n>(max===undefined?1e12:max))throw Error(l+' belum valid');return n;}
     function commerceRevision(v){return v.revision||undefined;}function commerceMutation(module,action,payload,f){requests.push({module:module,action:action,payload:payload});return Promise.resolve();}
     function commerceLoadView(m,t,sub,draw){return draw(commerceData());}function commerceEmptyActions(){return '';}function searchBox(){return '';}function commerceList(m,rows,draw,parts){return rows.filter(function(r){return cocok(S.f.q,parts(r));}).map(draw).join('');}
   `+source,c);
+  const versionStart=html.indexOf('function commerceVersionValid(');if(versionStart>=0)vm.runInContext(html.slice(versionStart,html.indexOf('function commerceApply(',versionStart)),c);
   c.entry.data=JSON.parse(JSON.stringify(data));
   return {c,run:code=>vm.runInContext(code,c),json:code=>JSON.parse(vm.runInContext('JSON.stringify('+code+')',c)),select(ids){c.currentForm.rows=c.currentForm._commerceHppChoices.map(m=>({input:{value:m.id,checked:ids.includes(m.id)},hidden:false}));c.currentForm.count={textContent:''};c.currentForm.empty={hidden:true};}};
 }
@@ -53,8 +54,8 @@ test('member opens shared HPP with member evidence and saves only the group iden
   assert.equal(h.c.entry.data.models[1].biayaLain,500);
 });
 
-test('new groups require owner, a fresh snapshot and group capability from the server',()=>{
-  for(const update of ["actor.divisi='admin'","entry.stale=true","entry.loading={}","entry.error='offline'","entry.lama=true","entry.version=null","delete entry.data.groups"]){
+test('new groups still require an owner before attempting a server refresh',()=>{
+  for(const update of ["actor.divisi='admin'","actor.divisi='qc'","S.token=''"]){
     const h=harness();h.run(update+';A.commerceHppGroupOpen(null);');assert.equal(h.c.currentForm,null,update);assert.ok(h.c.messages.length,update);assert.equal(h.c.requests.length,0);
   }
 });
@@ -210,8 +211,8 @@ test('XL save sends only explicitly chosen physical rolls and captured evidence 
   assert.equal(JSON.stringify(h.c.entry.data),before,'opening and saving cannot edit source rolls, production output or cached HPP locally');
 });
 
-test('XL controls reject nonowners and unavailable or stale state before opening',()=>{
-  for(const change of ["actor.divisi='admin'","actor.divisi='qc'","S.token=''","entry.stale=true","entry.loading={}","entry.error='offline'","entry.lama=true","entry.version=null","delete entry.data.groups"]){
+test('XL controls reject nonowners before attempting to refresh the server state',()=>{
+  for(const change of ["actor.divisi='admin'","actor.divisi='qc'","S.token=''"]){
     const h=harness(xlFixture());h.run(change+';A.commerceHppXLOpen('+trigger('model0')+');');
     assert.equal(h.c.currentForm,null,change);assert.equal(h.c.requests.length,0,change);assert.ok(h.c.messages.length,change);
   }
@@ -361,4 +362,81 @@ test('valid shared HPP does not show a warning wall for incomplete followers and
   h.run('delete entry.data.groups[0].inheritedWarnings');assert.match(h.run('commerceHppWarnings(entry.data.groups[0])'),/note warn/,'older server responses keep warnings visible');
   h.run("entry.data.models[0].warnings=['Harga belum lengkap'];entry.data.models[0].inheritedWarnings=['Harga belum lengkap']");
   assert.match(h.run('commerceHppWarnings(entry.data.models[0])'),/note warn/,'individual model warnings remain unchanged');
+});
+
+
+function readiness(h){
+  h.run("var fetches=[],sheets=[];function commerceFetch(module,force){if(entry.loading)return entry.loading;var p=new Promise(function(resolve,reject){fetches.push({module:module,force:force,resolve:resolve,reject:reject});});entry.loading=p;return p;}");
+}
+function finishReadiness(h,data=xlFixture(),version=2){
+  const pending=h.c.fetches.at(-1);h.c.entry.data=structuredClone(data);h.c.entry.version=version;
+  h.c.entry.stale=false;h.c.entry.loading=null;h.c.entry.error='';h.c.entry.lama=0;pending.resolve(h.c.entry.data);
+}
+const openActions=[
+  {code:'A.commerceHppGroupOpen(null)',form:'commerceHppGroupSave'},
+  {code:'A.commerceHppGroupRemove('+trigger('hppg_example')+')',form:'commerceHppGroupRemoveSave'},
+  {code:'A.commerceHppXLOpen('+trigger('model0')+')',form:'commerceHppXLSave'},
+  {code:'A.commerceHppOpen('+trigger('hppg_example')+')',form:'commerceHppSave'}
+];
+
+test('stale HPP actions refresh once and open the requested form from the fresh snapshot',async()=>{
+  for(const action of openActions){
+    const h=harness(xlFixture());readiness(h);h.run('entry.stale=true');
+    const first=h.run(action.code),second=h.run(action.code);await Promise.resolve();
+    assert.equal(h.c.fetches.length,1,action.code);assert.equal(h.c.fetches[0].module,'hpp');assert.equal(h.c.fetches[0].force,true);
+    assert.equal(h.c.currentForm,null);assert.equal(h.c.formOpens,0);assert.equal(h.c.requests.length,0);
+    const data=xlFixture();data.revision='fresh-revision';data.groups[0].nama='Fresh group';finishReadiness(h,data);
+    await Promise.all([first,second]);assert.equal(h.c.formOpens,1,action.code);assert.equal(h.c.currentForm.action,action.form);assert.equal(h.c.currentForm._commerceHppGroupSnapshot.revision,'fresh-revision');assert.equal(h.c.currentForm._commerceHppGroupSnapshot.version,2);
+    assert.equal(h.c.requests.length,0,'opening a form does not write anything');
+  }
+});
+
+test('HPP opening joins an existing load and recovers stale errors or invalid versions',async()=>{
+  for(const state of ['loading','error','invalid-version','old-copy','missing-capability','no-data']){
+    const h=harness(xlFixture());readiness(h);
+    if(state==='loading')h.run("commerceFetch('hpp',true)");
+    if(state==='error')h.run("entry.error='Previous read failed'");
+    if(state==='invalid-version')h.run('entry.version=NaN');
+    if(state==='old-copy')h.run('entry.lama=123');
+    if(state==='missing-capability')h.run('delete entry.data.groups');
+    if(state==='no-data')h.run('entry.data=null');
+    const pending=h.run('A.commerceHppGroupOpen(null)');await Promise.resolve();assert.equal(h.c.fetches.length,1,state);assert.equal(h.c.currentForm,null,state);
+    finishReadiness(h);await pending;assert.equal(h.c.formOpens,1,state);assert.equal(h.c.currentForm.action,'commerceHppGroupSave');
+  }
+});
+
+test('a failed HPP refresh leaves no modal and permits a later successful retry',async()=>{
+  const h=harness(xlFixture());readiness(h);h.run('entry.stale=true');const failed=h.run('A.commerceHppGroupOpen(null)');await Promise.resolve();
+  h.c.entry.loading=null;h.c.entry.error='Connection failed';h.c.fetches[0].reject(new Error('Connection failed'));await Promise.allSettled([failed]);
+  assert.equal(h.c.currentForm,null);assert.equal(h.c.formOpens,0);assert.ok(h.c.messages.some(m=>m.bad));assert.equal(h.c.requests.length,0);
+  const retried=h.run('A.commerceHppGroupOpen(null)');await Promise.resolve();assert.equal(h.c.fetches.length,2);finishReadiness(h);await retried;
+  assert.equal(h.c.formOpens,1);assert.equal(h.c.currentForm.action,'commerceHppGroupSave');
+  const unsupported=harness(xlFixture());readiness(unsupported);unsupported.run('entry.stale=true');const pending=unsupported.run('A.commerceHppGroupOpen(null)');await Promise.resolve();const data=fixture();delete data.groups;finishReadiness(unsupported,data);await Promise.allSettled([pending]);
+  assert.equal(unsupported.c.currentForm,null);assert.ok(unsupported.c.messages.some(m=>m.bad));assert.equal(unsupported.c.requests.length,0);
+});
+
+test('late HPP reads cannot open a form after account, role, navigation or modal changes',async()=>{
+  for(const change of ["S.token='changed'","actor.divisi='admin'","S.tab='po'","S.navigationRevision=1","var sheetRevision=1","sheets.push({id:'new-modal'})","currentForm={values:{},_commerceScope:commerceScope()}"]){
+    for(const action of openActions){
+      const h=harness(xlFixture());readiness(h);h.run('entry.stale=true');const pending=h.run(action.code);await Promise.resolve();h.run(change);const current=h.c.currentForm;
+      finishReadiness(h);await Promise.allSettled([pending]);assert.equal(h.c.currentForm,current,change+' '+action.code);assert.equal(h.c.formOpens,0);assert.equal(h.c.requests.length,0);
+    }
+  }
+});
+
+test('editing cost fields while a membership refresh waits preserves the current form',async()=>{
+  const h=harness(xlFixture());readiness(h);h.run('A.commerceHppOpen('+trigger('hppg_example')+');');
+  h.c.currentForm.values={jahitMode:'manual',hargaJahit:'3000',biayaLain:'500',targetMargin:'30',ketLain:''};const old=h.c.currentForm;
+  h.run('entry.stale=true');const pending=h.run("A.commerceHppGroupOpen({getAttribute:function(){return 'hppg_example';},closest:function(){return currentForm;}})");
+  await Promise.resolve();h.c.currentForm.values.biayaLain='900';finishReadiness(h);await Promise.allSettled([pending]);
+  assert.equal(h.c.currentForm,old);assert.equal(h.c.currentForm.values.biayaLain,'900');assert.equal(h.c.formOpens,1);assert.equal(h.c.requests.length,0);assert.match(h.c.messages.at(-1).text,/Simpan perubahan biaya/);
+});
+
+
+test('switching the requested HPP action during one refresh opens only the latest choice',async()=>{
+  const h=harness(xlFixture());readiness(h);h.run('entry.stale=true');
+  const group=h.run('A.commerceHppGroupOpen(null)');await Promise.resolve();
+  const xl=h.run('A.commerceHppXLOpen('+trigger('model0')+')');await Promise.resolve();
+  assert.equal(h.c.fetches.length,1);finishReadiness(h);await Promise.all([group,xl]);
+  assert.equal(h.c.formOpens,1);assert.equal(h.c.currentForm.action,'commerceHppXLSave');assert.equal(h.c.requests.length,0);
 });

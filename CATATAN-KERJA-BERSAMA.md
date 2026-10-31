@@ -2,9 +2,12 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Perbaikan HPP 1.5.64 sudah dipasang pada server Versi 78; peluncuran tampilan melalui PR cabang `codex/hpp-hanya-acuan-lengkap`.
+Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Pembaruan tampilan HPP menunggu data siap pada cabang `codex/hpp-refresh-ready` dari `main` `783f2c2`; server tetap 1.5.64 Versi 78.
 
 ## 1. Keadaan sekarang
+
+- **Pembaruan tampilan HPP:** klik kelompok, atur anggota, atau tentukan kain XL saat data diperbarui menunggu permintaan yang sedang berjalan lalu membuka formulir sekali. Klik berulang tidak menambah permintaan/formulir; perpindahan halaman, modal, sesi, atau peran membatalkan pembukaan tertunda. Versi cache yang rusak dapat diganti jawaban server sah, sedangkan data server terbaru tidak ditimpa versi lebih lama. Penjagaan revisi saat menyimpan tetap berlaku.
+- **Validasi pembaruan tampilan:** build, pemeriksaan hasil build, dan **1.481 tes lulus** (8 regresi baru). Kasus muat ulang lalu klik kelompok berhasil direproduksi di aplikasi; perbaikan diuji di browser memakai data contoh dan pemuatan tertunda. Tidak mengubah perhitungan HPP maupun data usaha. Versi tetap **1.5.64**, rakitan `20261031-hpp-refresh-ready-1564`; server tidak perlu dipasang ulang.
 
 - **Perbaikan 1.5.64:** label XL saja tidak lagi cukup sebagai acuan kelompok. Hanya pasangan kain dan ongkos potong XL yang lengkap, jumlah pcs sama dan positif, biaya sah, serta tanpa masalah sumber masuk ke pembilang dan pembagi. Anggota XL yang belum lengkap mengikuti acuan sah; tidak menghalangi biaya kelompok. Beberapa acuan lengkap tetap dirata-rata tertimbang. Nama dan pcs acuan aktif tampil langsung; catatan anggota pengikut dilipat dan tetap disertakan dalam ekspor. Pengaturan kelompok dan data produksi/stok/upah tidak diubah.
 - **Validasi 1.5.64:** build, pemeriksaan hasil build, dan **1.473 tes lulus**. Server Kode/Core/Index sebelum pemasangan cocok penuh dengan `main` `ca44d15` (1.5.63). Core/Index rilis dimuat ulang dan cocok penuh setelah disimpan. Deployment yang sama diperbarui ke **Versi 78** pada **31 Oktober 2026, 09.02 WIB**, tanpa mengubah URL/akun/akses. Bootstrap **09.03 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.64`, `needSetup: false`.
@@ -24,11 +27,11 @@ Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Perbaikan HPP 1.5.64 sudah dipas
 - Rilis sebelumnya: server **1.5.61** dipasang pada 24 Oktober dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
 - Versi server dan cabang rilis: **1.5.64**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 78** sudah diverifikasi.
-- Rakitan rilis: `20261031-hpp-acuan-lengkap-1564`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- Rakitan tampilan terbaru: `20261031-hpp-refresh-ready-1564`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
 - Dasar cabang dan pembanding sebelum pemasangan: `main` `ca44d15` (31 Oktober 2026). Seluruh Kode/Core/Index server cocok dengan sumber 1.5.63 setelah normalisasi LF; tidak ditemukan perubahan server di luar repo.
 - Server Apps Script: deployment yang sama diperbarui ke **Versi 78** (31 Okt 2026, **09.02 WIB**). Bootstrap **09.03 WIB** mengonfirmasi server 1.5.64. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
 
-Sidik berikut adalah **server 1.5.64 pada Versi 78** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis.
+Sidik berikut adalah **server 1.5.64 pada Versi 78** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis PR #94. Index server masih rakitan `20261031-hpp-acuan-lengkap-1564`; berbeda dari Index yang dihasilkan pembaruan tampilan berikutnya karena server tidak dipasang ulang.
 
 | Berkas di editor | Sumber di repo | Sidik (panjang + 16 huruf awal sha256, akhir baris LF) |
 |---|---|---|
@@ -112,6 +115,8 @@ Sidik berikut adalah **server 1.5.64 pada Versi 78** yang sudah dimuat ulang dan
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-31 · ChatGPT/Codex · 1.5.64 (tampilan) · Hilangkan siklus permintaan muat ulang ketika tombol kelompok diklik saat pemuatan berjalan. Formulir menunggu satu permintaan bersama; klik berulang, navigasi, sesi/peran, versi cache rusak, dan penolakan versi mundur diuji. Build, pemeriksaan hasil build, dan **1.481 tes lulus**. Uji browser dengan pemuatan tertunda berhasil membuka kelompok dan kelompok baru. Cabang `codex/hpp-refresh-ready` dari `783f2c2`, rakitan `20261031-hpp-refresh-ready-1564`; peluncuran melalui PR cabang tersebut atas izin pemasangan yang sudah diberikan pemilik. Server tetap Versi 78; data usaha tidak diubah.
 
 - 2026-10-31 · ChatGPT/Codex · 1.5.64 · Perbaiki kelompok HPP yang masih kosong saat anggota berlabel XL mempunyai kain/potong belum lengkap: hanya pasangan acuan lengkap dan cocok yang masuk rata-rata. Anggota lain mengikuti, catatan tetap tersedia, dan nama/pcs acuan aktif tampil langsung. Delapan regresi tambahan; build, pemeriksaan hasil build, dan **1.473 tes lulus**. Baseline server cocok dengan `main` `ca44d15`; sumber rilis tersimpan cocok penuh setelah muat ulang. Server **Versi 78**, 09.02 WIB; bootstrap 09.03 WIB mengonfirmasi 1.5.64. Cabang `codex/hpp-hanya-acuan-lengkap`, rakitan `20261031-hpp-acuan-lengkap-1564`; peluncuran tampilan melalui PR cabang tersebut. Tidak mengubah data produksi, stok, upah, atau pengaturan kelompok.
 - 2026-10-30 · ChatGPT/Codex · 1.5.63 · HPP kelompok cukup satu acuan XL lengkap; pilihan rol XL eksplisit untuk catatan lama, khusus HPP tanpa mengubah produksi/stok/upah. Pembacaan cache diuji turun 26 → paling banyak 4 panggilan dan simpan mengembalikan halaman terbaru dari hitungan yang sama. Retur owner/admin disederhanakan menjadi cari/scan, kondisi/jumlah, bukti dalam formulir, impor, serta laporan; cache sesi dan penjagaan unggah/modal dipertahankan. Build, pemeriksaan hasil build, dan **1.465 tes lulus**. Cabang `codex/hpp-acuan-xl-siap` dari `107c8a9`, rakitan `20261030-hpp-retur-1563`. Baseline server 1.5.62 cocok dengan `main` sebelum pemasangan. Server final dipasang pada deployment **Versi 77**, **22.25 WIB**, dengan URL/akun/akses tetap; seluruh sumber penuh cocok setelah muat ulang, termasuk penjagaan sesi unggah terakhir. Bootstrap **22.26 WIB** mengonfirmasi HTTP 200, `ok: true`, `appVersion: 1.5.63`, `needSetup: false`. **Peluncuran tampilan GitHub Pages melalui [PR #93](https://github.com/soldierapparelid/produksi/pull/93) atas izin pemilik.** Pemilihan rol pada data asli belum dilakukan.
