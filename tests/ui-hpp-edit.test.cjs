@@ -154,3 +154,54 @@ test('checking the review is an explicit step with an inline prompt and focus wh
   assert.match(h.json('messages').at(-1).text,/Centang pemeriksaan biaya/);
   h.run('currentForm.values.reviewed=true;recalc(currentForm);');assert.equal(h.run('currentForm.hppReview.hidden'),true);
 });
+
+
+test('automatic sewing shows rounded read-only evidence and never presents its raw mean as an editable field',()=>{
+  const h=hppEditFixture();h.run("rp=function(x){return 'Rp '+Math.round(x).toLocaleString('id-ID');};var m=commerceHppModel('hpp-edit');m.jahit={complete:true,perPcs:23000/7,totalCost:23000,totalPcs:7,source:'Tarif <maklon> tercatat'};m.hargaJahit=23000/7;m.config.value.jahitMode='auto';m.config.value.hargaJahit=23000/7;A.commerceHppOpen({getAttribute:function(){return 'hpp-edit';}});");
+  const form=h.run('lastSheet');
+  assert.match(form,/<div data-commerce-hpp-jahit-manual hidden>/);
+  assert.match(form,/name="hargaJahit" value="3285.71"/,'only a concise starting value is offered when switching to manual');
+  assert.ok(form.includes('<div class="field" data-commerce-hpp-jahit-auto><span>Ongkos jahit otomatis / pcs</span><b class="money">Rp 3.286</b>'));
+  assert.match(form,/Tarif &lt;maklon&gt; tercatat/);
+  assert.match(form,/Rp 23.000 ÷ 7 pcs/);
+  assert.match(form,/dirata-ratakan sesuai jumlah pcs tercatat/);
+  assert.doesNotMatch(form,/3285.714285/);
+  assert.equal(h.run("commerceHppModel('hpp-edit').jahit.perPcs"),23000/7);
+  assert.equal(h.requests.length,0);
+});
+
+test('manual sewing draft survives auto and manual switches while auto keeps the exact recorded mean',()=>{
+  const h=hppEditFixture();h.run("var m=commerceHppModel('hpp-edit');m.jahit.perPcs=23000/7;currentForm.manualSewing={hidden:false};currentForm.autoSewing={hidden:true};var sewingSelect=$;$=function(s,f){if(s==='[data-commerce-hpp-jahit-manual]')return f.manualSewing;if(s==='[data-commerce-hpp-jahit-auto]')return f.autoSewing;return sewingSelect(s,f);};currentForm.values.hargaJahit='3456.78';recalc(currentForm);");
+  assert.equal(h.run('currentForm.manualSewing.hidden'),false);
+  assert.equal(h.run('commerceHppDraft(currentForm).rate'),3456.78);
+  h.run("currentForm.values.jahitMode='auto';recalc(currentForm);");
+  assert.equal(h.run('currentForm.manualSewing.hidden'),true);
+  assert.equal(h.run('currentForm.autoSewing.hidden'),false);
+  assert.equal(h.run('commerceHppDraft(currentForm).rate'),23000/7);
+  assert.equal(h.run('currentForm.values.hargaJahit'),'3456.78');
+  h.run("currentForm.values.jahitMode='manual';recalc(currentForm);");
+  assert.equal(h.run('currentForm.manualSewing.hidden'),false);
+  assert.equal(h.run('currentForm.autoSewing.hidden'),true);
+  assert.equal(h.run('commerceHppDraft(currentForm).rate'),3456.78);
+  h.run("currentForm.values.hargaJahit='0';currentForm.values.jahitMode='auto';recalc(currentForm);currentForm.values.jahitMode='manual';recalc(currentForm);");
+  assert.equal(h.run('commerceHppDraft(currentForm).rate'),0);
+  assert.equal(h.requests.length,0);
+});
+
+test('incomplete automatic sewing remains unknown and does not reuse a stale stored rate as a manual suggestion',()=>{
+  const h=hppEditFixture();h.run("var m=commerceHppModel('hpp-edit');m.jahit={complete:false,perPcs:0,totalCost:0,totalPcs:7,source:'Belum ada tarif jahit'};m.hargaJahit=null;m.config.value={jahitMode:'auto',hargaJahit:9999};A.commerceHppOpen({getAttribute:function(){return 'hpp-edit';}});");
+  const form=h.run('lastSheet');
+  assert.ok(form.includes('data-commerce-hpp-jahit-auto><span>Ongkos jahit otomatis / pcs</span><b class="money">Belum lengkap'));
+  assert.match(form,/name="hargaJahit" value=""/);
+  assert.doesNotMatch(form,/dirata-ratakan sesuai jumlah pcs tercatat/);
+  assert.doesNotMatch(form,/value="9999"/);
+});
+
+test('saving automatic sewing uses the exact evidence despite its rounded manual starting value',()=>{
+  const h=hppEditFixture();h.run("currentForm._commerceModel.jahit.perPcs=23000/7;currentForm.values.jahitMode='auto';currentForm.values.hargaJahit='3285.71';A.commerceHppSave(null);");
+  assert.equal(h.requests.length,1);
+  assert.equal(h.requests[0].action,'saveCommerceHpp');
+  assert.equal(h.requests[0].payload.config.jahitMode,'auto');
+  assert.equal(h.requests[0].payload.config.hargaJahit,23000/7);
+  assert.equal(h.run("commerceHppModel('hpp-edit').config.value.hargaJahit"),8000,'stored and production data are not changed while the request is pending');
+});

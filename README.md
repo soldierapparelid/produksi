@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.66 — Acuan potong dan ongkos jahit HPP
+
+- Baris katalog impor yang belum memiliki riwayat potong tidak lagi membuat hasil potong lengkap dari Produksi terlihat belum tersedia. Catatan yang rusak atau belum memiliki bahan tetap meminta pemeriksaan; acuan XL tetap diperlukan untuk rekomendasi harga.
+- Ongkos jahit otomatis menganggap tarif kosong/nol sebagai belum diketahui. Tarif dapat mengikuti penugasan atau slip hitung yang sudah diterima dan diproses bila seluruh tarif positif pada PO dan maklon yang sama seragam. Slip harus mempunyai identitas, jumlah ukuran, dan bukti proses yang sah; tarif konflik atau slip rusak/duplikat tetap menahan perhitungan. Jumlah hasil hitung tidak ditambahkan ke pembagi penugasan. Penugasan dengan tarif positif berbeda tetap dirata-ratakan menurut jumlah pcs; biaya manual nol tetap diperbolehkan.
+- Mode otomatis menampilkan rupiah yang mudah dibaca, sumber tarif, dan dasar rata-ratanya. Pembulatan hanya untuk tampilan; hitungan memakai nilai tepat. Isian manual muncul ketika mode manual dipilih, dan draf tidak hilang saat berpindah mode.
+- Versi **1.5.66**, rakitan `20261031-hpp-cut-sewing-1566`, cabang `codex/hpp-cut-sewing-sync` dari `main` `cd44a96`. Build, pemeriksaan hasil build, dan **1.512 tes lulus**; alur otomatis/manual diuji di browser dengan data contoh. Perubahan tarif/status slip juga diuji terhadap cache HPP. Pemeriksaan baca langsung di aplikasi memastikan hasil potong terbaca dan tarif otomatis mengikuti slip. Tidak mengubah data produksi, stok, upah, pembayaran, atau pengaturan usaha.
+- Server sudah terpasang pada deployment yang sama, **Versi 81**, **31 Oktober 2026 pukul 19.14 WIB**. Seluruh Kode/Core/Index cocok dengan `main` sebelum pemasangan awal; penyempurnaan tarif slip cocok dengan salinan Versi 80 sebelum ditulis dan dengan hasil build setelah dimuat ulang. Kode/Maintenance tetap. Bootstrap **19.15 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.66`, `needSetup: false`. Peluncuran tampilan melalui [PR #98](https://github.com/soldierapparelid/produksi/pull/98). Rincian pemasangan ada di `CATATAN-KERJA-BERSAMA.md`.
+
 ## Rilis 1.5.65 — Hingga 100 kelompok HPP
 
 - Batas jumlah kelompok HPP naik dari 20 menjadi 100 pada penyimpanan dan pembacaan. Kelompok ke-21 sampai ke-100 tetap tampil setelah dimuat ulang.
