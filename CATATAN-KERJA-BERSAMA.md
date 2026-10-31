@@ -2,10 +2,12 @@
 
 Untuk ChatGPT/Codex dan Claude yang bergantian mengerjakan aplikasi ini. **Baca seluruh berkas ini sebelum mengubah apa pun**, dan perbarui bagian "Keadaan sekarang" serta "Riwayat pekerjaan" setiap selesai.
 
-Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Pilihan kelompok HPP menyembunyikan model OFFLINE pada cabang `codex/hpp-hide-offline` dari `main` `c4e561d`; server tetap 1.5.64 Versi 78.
+Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Batas kelompok HPP naik menjadi 100 pada cabang `codex/hpp-100-groups` dari `main` `bff025f`; server 1.5.65 Versi 79 sudah terpasang.
 
 ## 1. Keadaan sekarang
 
+- **Rilis 1.5.65 — hingga 100 kelompok HPP:** batas saat simpan dan saat membaca konfigurasi sama-sama dinaikkan dari 20 menjadi 100. Kelompok ke-21 dan ke-100 tetap terbaca setelah disimpan/dimuat ulang; kelompok ke-101 ditolak tanpa menulis. Edit/bubarkan tetap tersedia saat mencapai batas. Pengaman ukuran sel konfigurasi 49.000 karakter tetap berlaku, sehingga konfigurasi yang sangat besar ditolak utuh sebelum menulis. Build, pemeriksaan hasil build, dan **1.485 tes lulus**; empat regresi tambahan terbukti gagal dengan batas lama. Tidak mengubah data usaha atau rumus biaya.
+- **Pemasangan 1.5.65:** Core/Index tersimpan dimuat ulang dan cocok penuh dengan rilis. Kode/Maintenance tetap. Deployment yang sama diperbarui ke **Versi 79**, **31 Oktober 2026, 10.48 WIB**. Bootstrap **10.48 WIB** menjawab HTTP 200, `ok: true`, `appVersion: 1.5.65`, `needSetup: false`. Peluncuran tampilan melalui PR cabang `codex/hpp-100-groups`, rakitan `20261031-hpp-100-groups-1565`.
 - **Pilihan anggota HPP:** model dengan series OFFLINE / OFFLINE- tidak ditawarkan sebagai anggota baru. Model reguler tetap tersedia termasuk riwayat PO. Anggota OFFLINE yang sudah tersimpan tetap terlihat saat mengatur kelompok agar dapat dilepas secara sengaja, tanpa hilang ketika hanya mengganti nama. Tidak menghapus PO, stok, atau data HPP. Build, pemeriksaan hasil build, dan **1.481 tes lulus**; pemeriksaan formulir memastikan filter series dan keutuhan anggota lama. Versi tetap **1.5.64**, rakitan `20261031-hpp-hide-offline-1564`; tidak perlu pemasangan server.
 
 - **Pembaruan tampilan HPP:** klik kelompok, atur anggota, atau tentukan kain XL saat data diperbarui menunggu permintaan yang sedang berjalan lalu membuka formulir sekali. Klik berulang tidak menambah permintaan/formulir; perpindahan halaman, modal, sesi, atau peran membatalkan pembukaan tertunda. Versi cache yang rusak dapat diganti jawaban server sah, sedangkan data server terbaru tidak ditimpa versi lebih lama. Penjagaan revisi saat menyimpan tetap berlaku.
@@ -28,18 +30,18 @@ Diperbarui: 31 Oktober 2026 oleh ChatGPT/Codex. Pilihan kelompok HPP menyembunyi
 
 - Rilis sebelumnya: server **1.5.61** dipasang pada 24 Oktober dengan izin pemilik. Cabang `codex/pulihkan-ukuran-riwayat` berasal dari `main` `35110db`; peluncuran tampilan GitHub Pages **1.5.61** dilakukan melalui [PR #89](https://github.com/soldierapparelid/produksi/pull/89). Build dan **1.366 tes lulus**, termasuk pengujian alur tampilan dengan data contoh.
 
-- Versi server dan cabang rilis: **1.5.64**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 78** sudah diverifikasi.
-- Rakitan tampilan terbaru: `20261031-hpp-hide-offline-1564`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
-- Dasar cabang dan pembanding sebelum pemasangan: `main` `ca44d15` (31 Oktober 2026). Seluruh Kode/Core/Index server cocok dengan sumber 1.5.63 setelah normalisasi LF; tidak ditemukan perubahan server di luar repo.
-- Server Apps Script: deployment yang sama diperbarui ke **Versi 78** (31 Okt 2026, **09.02 WIB**). Bootstrap **09.03 WIB** mengonfirmasi server 1.5.64. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
+- Versi server dan cabang rilis: **1.5.65**. `APP_VERSION` di `src/core.js` sama dengan `UI_VERSION` di `index.html`; server deployment **Versi 79** sudah diverifikasi.
+- Rakitan tampilan terbaru: `20261031-hpp-100-groups-1565`. `window.PK_BUILD` di `index.html` sama dengan `RAKITAN` di `sw.js`.
+- Dasar cabang: `main` `bff025f` (31 Oktober 2026). Sebelum pemasangan, Kode/Core cocok dengan sumber 1.5.64; Index cocok penuh dengan salinan terverifikasi Versi 78/PR #94. Selisih Index terhadap main hanya pembaruan tampilan PR #95/#96 yang tercatat di atas; ikut diselaraskan saat rilis 1.5.65. Tidak ada perubahan khusus server yang hilang.
+- Server Apps Script: deployment yang sama diperbarui ke **Versi 79** (31 Okt 2026, **10.48 WIB**). Bootstrap **10.48 WIB** mengonfirmasi server 1.5.65. Salinan pemeriksaan privat di luar repo; jangan dipublikasikan.
 
-Sidik berikut adalah **server 1.5.64 pada Versi 78** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis PR #94. Index server masih rakitan `20261031-hpp-acuan-lengkap-1564`; berbeda dari Index yang dihasilkan pembaruan tampilan berikutnya karena server tidak dipasang ulang.
+Sidik berikut adalah **server 1.5.65 pada Versi 79** yang sudah dimuat ulang dan dibandingkan seluruhnya dengan sumber rilis cabang `codex/hpp-100-groups`. Index server memakai rakitan `20261031-hpp-100-groups-1565`, termasuk pembaruan tampilan PR #95/#96.
 
 | Berkas di editor | Sumber di repo | Sidik (panjang + 16 huruf awal sha256, akhir baris LF) |
 |---|---|---|
 | Kode.gs | `apps-script/Server.gs` | 38162 d72ab735e5f1a288 |
-| Core.gs | `apps-script/Core.gs` | 740090 09346e1a398a657b |
-| Index.html | `apps-script/Index.html` | 1802614 2e755cda342b87ee |
+| Core.gs | `apps-script/Core.gs` | 740093 01f22a0797f8f69a |
+| Index.html | `apps-script/Index.html` | 1805234 094a6a20fab3acd9 |
 | Maintenance.gs | tidak ada di repo, jangan diubah | 136 373dd791f45fca0e |
 
 - Tampilan: GitHub Pages `https://soldierapparelid.github.io/produksi/`. **Repo ini publik.**
@@ -117,6 +119,8 @@ Sidik berikut adalah **server 1.5.64 pada Versi 78** yang sudah dimuat ulang dan
 - Retur paket: uji pertama dengan data asli dilakukan oleh pemilik.
 
 ## 8. Riwayat pekerjaan (entri terbaru di atas)
+
+- 2026-10-31 · ChatGPT/Codex · 1.5.65 · Naikkan batas kelompok HPP 20 → 100 pada simpan dan baca sesuai permintaan pemilik. Regresi 21/100 tersimpan dan dibuka ulang, penolakan 101 tanpa perubahan, edit/bubarkan saat penuh, serta batas sel konfigurasi diuji. Build, pemeriksaan hasil build, dan **1.485 tes lulus**. Core/Index tersimpan cocok penuh setelah muat ulang, Kode/Maintenance tetap. Server **Versi 79**, 10.48 WIB; bootstrap mengonfirmasi 1.5.65. Cabang `codex/hpp-100-groups` dari `bff025f`, rakitan `20261031-hpp-100-groups-1565`; peluncuran melalui PR cabang tersebut. Tidak mengubah data usaha.
 
 - 2026-10-31 · ChatGPT/Codex · 1.5.64 (tampilan) · Sembunyikan model series OFFLINE dari pilihan anggota baru kelompok HPP sesuai permintaan pemilik. Anggota lama tetap bisa dilepas tanpa penghapusan diam-diam saat edit. Build, pemeriksaan hasil build, dan **1.481 tes lulus**; pemeriksaan formulir dengan data contoh lulus. Cabang `codex/hpp-hide-offline` dari `c4e561d`, rakitan `20261031-hpp-hide-offline-1564`; peluncuran melalui [PR #96](https://github.com/soldierapparelid/produksi/pull/96) sesuai permintaan pemilik. Server tetap Versi 78 dan data usaha tidak berubah.
 

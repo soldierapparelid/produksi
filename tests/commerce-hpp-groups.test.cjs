@@ -145,3 +145,59 @@ test('valid fabric and cutting evidence does not wait for individual sewing or c
  for(const name of ['Red','Blue']){const m=out.models.find(m=>m.nama===name);assert.equal(m.jahit.complete,false);assert.equal(m.configSaved,false);assert.equal(m.configured,false);}
  assert.deepEqual(g.referenceModelIds,[modelId('Red'),modelId('Blue')]);assert.equal(g.kain.totalPcs,400);assert.equal(g.kain.totalCost,1100000);assert.equal(g.hppTotal,6700);assert.equal(g.configured,true);
 });
+
+
+function manyGroupsFixture(count,nearCellLimit=false){
+ const f=serverFixture(),config={id:'config',...fixtureInput().config},extraPO=[];
+ function nextGroup(i){const names=['Capacity '+i+' A','Capacity '+i+' B'];return {id:'hppg_capacity_'+i,nama:'Capacity group '+i,modelIds:names.map(modelId),config:null};}
+ for(let i=1;i<=count;i++){
+  const group=nextGroup(i);group.modelIds.forEach((id,j)=>extraPO.push({id:'capacityPO_'+i+'_'+j,series:'Fixture',nama:'Capacity '+i+' '+(j?'B':'A'),ukuranAktif:['M','L','XL']}));
+  if(i<count)config.hppGroups[group.id]=group;
+ }
+ if(nearCellLimit){
+  // Existing individual model settings remain stored when their models join a
+  // group. Exercise the cell guard with valid saved costs, not a huge request.
+  let last;
+  for(let i=0;JSON.stringify(config).length<48650;i++){
+   last=modelId('Retired model '+i);config.modelConfigs[last]=costs({ketLain:''});
+  }
+  config.modelConfigs[last].ketLain='x'.repeat(48900-JSON.stringify(config).length);
+  assert.ok(config.modelConfigs[last].ketLain.length<=300);
+  assert.equal(JSON.stringify(config).length,48900);
+ }
+ f.h.context.capacityConfig=config;f.h.context.capacityPO=extraPO;
+ f.h.run("pkStore_().lock(function(){pkStore_().appendMany('PO',capacityPO);pkStore_().append('CommerceRecord',{id:coreCommerceKey('hpp','config','config'),module:'hpp',kind:'config',parentId:'',data:JSON.stringify(capacityConfig),revision:coreCommerceHash(capacityConfig),dibuat:'2026-10-01',dibuatOleh:'fixture',diubah:'2026-10-01',sourceHash:''});});void 0;");
+ return {...f,nextGroup:nextGroup(count)};
+}
+function groupProductionSnapshot(f){return JSON.stringify(['PO','Potong','StokBahan','SlipKirim','CommerceEvent','CommerceSource','CommerceImport'].map(f.raw));}
+
+for(const total of [21,100])test('HPP group '+total+' is saved and readable after a fresh server request',()=>{
+ const f=manyGroupsFixture(total-1),before=groupProductionSnapshot(f),state=f.state();
+ assert.equal(state.groups.length,total-1);
+ const next=f.nextGroup,saved=f.good('saveCommerceHppGroup',{id:next.id,nama:next.nama,modelIds:next.modelIds,expectedRevision:state.revision,withState:true});
+ assert.equal(saved.commerce.groups.length,total);assert.ok(saved.commerce.groups.some(g=>g.id===next.id));
+ const fresh=f.state();assert.equal(fresh.groups.length,total);assert.deepEqual(fresh.config.hppGroups[next.id].modelIds,next.modelIds.slice().sort());
+ assert.equal(Object.keys(JSON.parse(f.raw('CommerceRecord').find(r=>r.module==='hpp').data).hppGroups).length,total);
+ assert.equal(groupProductionSnapshot(f),before);
+});
+
+test('HPP group 101 is rejected atomically while rename and removal still work at 100',()=>{
+ const f=manyGroupsFixture(100),before=groupProductionSnapshot(f),state=f.state(),records=JSON.stringify(f.raw('CommerceRecord'));
+ assert.equal(state.groups.length,100);
+ const next=f.nextGroup;f.bad('saveCommerceHppGroup',{id:next.id,nama:next.nama,modelIds:next.modelIds,expectedRevision:state.revision},/Maksimal 100 kelompok HPP/);
+ assert.equal(JSON.stringify(f.raw('CommerceRecord')),records);assert.equal(groupProductionSnapshot(f),before);
+ const original=state.config.hppGroups[groupId];
+ f.good('saveCommerceHppGroup',{id:groupId,nama:'Renamed at capacity',modelIds:original.modelIds,expectedRevision:state.revision});
+ const renamed=f.state();assert.equal(renamed.groups.length,100);assert.equal(renamed.config.hppGroups[groupId].nama,'Renamed at capacity');assert.deepEqual(renamed.config.hppGroups[groupId].config,original.config);
+ f.good('saveCommerceHppGroup',{id:groupId,remove:true,expectedRevision:renamed.revision});
+ const removed=f.state();assert.equal(removed.groups.length,99);assert.equal(removed.config.hppGroups[groupId],undefined);assert.equal(removed.config.modelConfigs[modelId('Red')].hargaJahit,7777);
+ assert.equal(groupProductionSnapshot(f),before);
+});
+
+test('the existing 49000 character cell guard rejects an oversized HPP config without partial writes',()=>{
+ const f=manyGroupsFixture(20,true),before=groupProductionSnapshot(f),state=f.state(),records=JSON.stringify(f.raw('CommerceRecord'));
+ assert.equal(state.groups.length,20);const next=f.nextGroup;
+ f.bad('saveCommerceHppGroup',{id:next.id,nama:next.nama,modelIds:next.modelIds,expectedRevision:state.revision},/terlalu panjang/);
+ assert.equal(JSON.stringify(f.raw('CommerceRecord')),records);assert.equal(groupProductionSnapshot(f),before);
+ const after=f.state();assert.equal(after.revision,state.revision);assert.equal(after.groups.length,20);
+});
