@@ -30,10 +30,10 @@ test('personal cost review and conflicting personal manual rates do not replace 
  const out=callPure('coreCommerceHpp',input);assert.equal(out.models.find(m=>m.nama==='Red').configured,false);assert.equal(out.groups[0].configured,true);assert.equal(out.groups[0].hargaJahit,2500);assert.deepEqual(out.groups[0].sourceWarnings,[]);
 });
 
-test('missing or invalid XL prices stop the shared cost instead of dropping the bad member',()=>{
+test('an incomplete XL member inherits a complete reference without adding its costs or pieces',()=>{
  for(const mutation of [i=>i.tables.StokBahan[1].harga=0,i=>i.tables.StokBahan[1].total=1,i=>i.tables.Potong[1].alokasiBahan[0].stokId='missing-roll']){
   const input=fixtureInput();mutation(input);if(input.tables.StokBahan[1].harga===0)input.tables.StokBahan[1].total=0;
-  const g=callPure('coreCommerceHpp',input).groups[0];assert.equal(g.referenceModelIds.length,2);assert.equal(g.kain.totalPcs,400);assert.equal(g.kain.complete,false);assert.equal(g.hppTotal,null);assert.equal(g.configured,false);assert.deepEqual(g.prices,{});assert.ok(g.warnings.some(x=>x.includes('Blue:')));
+  const out=callPure('coreCommerceHpp',input),g=out.groups[0];assert.deepEqual(g.referenceModelIds,[modelId('Red')]);assert.equal(g.kain.totalPcs,100);assert.equal(g.kain.totalCost,200000);assert.equal(g.potong.totalPcs,100);assert.equal(g.potong.totalCost,90000);assert.equal(g.kain.complete,true);assert.equal(g.hppTotal,5800);assert.equal(g.configured,true);assert.ok(g.prices.shop.valid);assert.ok(g.warnings.some(x=>x.includes('Blue:')));assert.equal(out.models.find(m=>m.nama==='Blue').kain.complete,false);
  }
 });
 
@@ -42,8 +42,8 @@ test('group without isolated XL retains an unavailable reference and never reuse
  assert.equal(g.referenceModelIds.length,0);assert.equal(g.kain.totalPcs,0);assert.equal(g.hppTotal,null);assert.equal(g.configured,false);assert.equal(g.configSaved,true);assert.match(g.warnings.join(' '),/Belum ada acuan kain XL/);
 });
 
-test('structural production warnings hold group approval while owner opening notes stay separate from costs',()=>{
- const input=fixtureInput();input.tables.KoreksiRiwayat=[{poId:'poRed'}];let g=callPure('coreCommerceHpp',input).groups[0];assert.equal(g.configured,false);assert.match(g.sourceWarnings.join(' '),/koreksi fisik/);
+test('structural warnings exclude that XL member while owner opening notes stay separate from costs',()=>{
+ const input=fixtureInput();input.tables.KoreksiRiwayat=[{poId:'poRed'}];let g=callPure('coreCommerceHpp',input).groups[0];assert.deepEqual(g.referenceModelIds,[modelId('Blue')]);assert.equal(g.configured,true);assert.equal(g.kain.totalPcs,300);assert.equal(g.hppTotal,7000);assert.deepEqual(g.sourceWarnings,[]);assert.match(g.warnings.join(' '),/Red:.*koreksi fisik/);
  input.tables.KoreksiRiwayat=[];input.tables.Potong.push({id:'opening',poId:'poRed',asal:'koreksi-ukuran',total:150,ukuran:{M:150}});g=callPure('coreCommerceHpp',input).groups[0];assert.equal(g.kain.totalPcs,400);assert.equal(g.configured,true);
 });
 
@@ -120,6 +120,28 @@ test('one valid XL member supplies all fourteen members before the other models 
 test('a non-reference member retains history warnings without blocking the valid shared XL reference',()=>{
  const input=fixtureInput();input.tables.Potong=input.tables.Potong.filter(r=>r.poId==='poRed');input.tables.PO.find(p=>p.id==='poGreen').imporReview=true;input.tables.KoreksiRiwayat=[{poId:'poGreen'}];
  const out=callPure('coreCommerceHpp',input),g=out.groups[0];
- assert.deepEqual(g.referenceModelIds,[modelId('Red')]);assert.equal(g.configured,true);assert.equal(g.hppTotal,5800);assert.deepEqual(g.sourceWarnings,[]);assert.match(g.warnings.join(' '),/Green: PO poGreen masih memerlukan pemeriksaan/);assert.match(g.warnings.join(' '),/Green: Jumlah riwayat memiliki koreksi fisik/);assert.equal(out.models.find(m=>m.nama==='Green').configured,false);
- input.tables.PO.find(p=>p.id==='poRed').imporReview=true;const blocked=callPure('coreCommerceHpp',input).groups[0];assert.equal(blocked.configured,false);assert.match(blocked.sourceWarnings.join(' '),/Red: PO poRed/);assert.deepEqual(blocked.prices,{});
+ assert.deepEqual(g.referenceModelIds,[modelId('Red')]);assert.equal(g.configured,true);assert.equal(g.hppTotal,5800);assert.deepEqual(g.sourceWarnings,[]);assert.match(g.warnings.join(' '),/Green: PO poGreen masih memerlukan pemeriksaan/);assert.match(g.warnings.join(' '),/Green: Jumlah riwayat memiliki koreksi fisik/);assert.match(g.inheritedWarnings.join(' '),/Green: PO poGreen masih memerlukan pemeriksaan/);assert.ok(g.inheritedWarnings.every(w=>g.warnings.includes(w)));assert.equal(out.models.find(m=>m.nama==='Green').configured,false);
+ input.tables.PO.find(p=>p.id==='poRed').imporReview=true;const blocked=callPure('coreCommerceHpp',input).groups[0];assert.equal(blocked.configured,false);assert.equal(blocked.hppTotal,null);assert.equal(blocked.kain.totalPcs,0);assert.deepEqual(blocked.referenceModelIds,[]);assert.match(blocked.warnings.join(' '),/Red: PO poRed/);assert.deepEqual(blocked.prices,{});
+});
+
+test('fabric and cutting counts must match within each member, even if group discrepancies cancel out',()=>{
+ const input=fixtureInput(),raw=callPure('coreCommerceHpp',{...input,config:{...input.config,hppGroups:{}}}).models;
+ raw.find(m=>m.nama==='Red').potong.totalPcs=101;raw.find(m=>m.nama==='Blue').potong.totalPcs=299;
+ const before=JSON.stringify(raw),g=callPure('coreCommerceHppGroups',raw,input.config).groups[0];
+ assert.deepEqual(g.referenceModelIds,[]);assert.equal(g.kain.totalPcs,0);assert.equal(g.potong.totalPcs,0);assert.equal(g.hppTotal,null);assert.equal(g.configured,false);assert.deepEqual(g.prices,{});assert.match(g.warnings.join(' '),/Red:|Blue:/);assert.equal(JSON.stringify(raw),before);
+});
+
+test('an XL label alone never admits missing, invalid or structurally untrusted costs',()=>{
+ const input=fixtureInput(),raw=callPure('coreCommerceHpp',{...input,config:{...input.config,hppGroups:{}}}).models;
+ for(const mutate of [m=>m.kain.complete=false,m=>m.potong.complete=false,m=>m.kain.totalCost=null,m=>m.potong.totalCost=-1,m=>m.kain.totalCost=Number.MAX_SAFE_INTEGER+1,m=>m.kain.totalPcs=0,m=>m.potong.totalPcs=1.5,m=>m.sourceWarnings=['Unresolved source']]){
+  const changed=structuredClone(raw);mutate(changed.find(m=>m.nama==='Blue'));const before=JSON.stringify(changed),g=callPure('coreCommerceHppGroups',changed,input.config).groups[0];
+  assert.deepEqual(g.referenceModelIds,[modelId('Red')]);assert.equal(g.kain.totalPcs,100);assert.equal(g.kain.totalCost,200000);assert.equal(g.potong.totalCost,90000);assert.equal(g.hppTotal,5800);assert.equal(g.configured,true);assert.match(g.warnings.join(' '),/Blue:/);assert.match(g.inheritedWarnings.join(' '),/Blue: Acuan kain dan potong XL/);assert.ok(g.inheritedWarnings.every(w=>g.warnings.includes(w)));assert.equal(JSON.stringify(changed),before);
+ }
+});
+
+test('valid fabric and cutting evidence does not wait for individual sewing or cost approval',()=>{
+ const input=fixtureInput();delete input.settings.upahJahit;input.tables.SlipKirim=[];input.config.modelConfigs={};
+ const out=callPure('coreCommerceHpp',input),g=out.groups[0];
+ for(const name of ['Red','Blue']){const m=out.models.find(m=>m.nama===name);assert.equal(m.jahit.complete,false);assert.equal(m.configSaved,false);assert.equal(m.configured,false);}
+ assert.deepEqual(g.referenceModelIds,[modelId('Red'),modelId('Blue')]);assert.equal(g.kain.totalPcs,400);assert.equal(g.kain.totalCost,1100000);assert.equal(g.hppTotal,6700);assert.equal(g.configured,true);
 });

@@ -313,3 +313,52 @@ test('XL timeout keeps the original roll intent locked until refreshed state con
   await h.run('A.commerceCheck({closest:function(){return currentForm;}})');
   assert.equal(h.c.requests.length,1);assert.equal(h.c.dropped,1);assert.deepEqual(h.json('afterSave[0].payload'),xlIntent());
 });
+
+
+test('shared HPP names only the selected XL reference models and their actual quantities before collapsed membership',()=>{
+  const data=fixture();data.models[0].kain.totalPcs=120;data.models[1].kain.totalPcs=380;data.models[1].kain.complete=false;
+  const h=harness(data),before=JSON.stringify(h.c.entry.data);
+  const out=h.run('commerceHppGroupMembers(entry.data.groups[0])'),visible=out.slice(0,out.indexOf('<details'));
+  assert.match(visible,/Acuan XL yang dipakai/);assert.match(visible,/Oblong Merah · XL 120 pcs/);
+  assert.doesNotMatch(visible,/Oblong Biru|380 pcs|500 pcs/);assert.match(visible,/Semua anggota dan ukuran mengikuti acuan ini/);
+  assert.ok(out.includes('<summary>Anggota kelompok · 2 model</summary>'));assert.equal(JSON.stringify(h.c.entry.data),before);
+  h.c.entry.data.groups[0].referenceModelIds=['model0','model1'];h.c.entry.data.models[1].kain.complete=true;
+  const combined=h.run('commerceHppGroupMembers(entry.data.groups[0])').split('<details')[0];
+  assert.match(combined,/Oblong Merah · XL 120 pcs/);assert.match(combined,/Oblong Biru · XL 380 pcs/);
+});
+
+test('shared HPP reference summary escapes model names and does not invent a quantity for a missing raw member',()=>{
+  const data=fixture();data.models[0].nama='<img src=x onerror=bad>';
+  const h=harness(data);const shown=h.run('commerceHppGroupMembers(entry.data.groups[0])').split('<details')[0];
+  assert.match(shown,/&lt;img src=x onerror=bad&gt; · XL 10 pcs/);assert.doesNotMatch(shown,/<img/);
+  h.c.entry.data.models=h.c.entry.data.models.filter(m=>m.id!=='model0');
+  const fallback=h.run('commerceHppGroupMembers(entry.data.groups[0])').split('<details')[0];
+  assert.match(fallback,/Oblong Merah · XL/);assert.doesNotMatch(fallback,/0 pcs|10 pcs/);
+  h.c.entry.data.groups[0].referenceModelIds=[];
+  const missing=h.run('commerceHppGroupMembers(entry.data.groups[0])').split('<details')[0];
+  assert.match(missing,/Cukup satu anggota dengan acuan XL lengkap/);assert.doesNotMatch(missing,/Acuan XL yang dipakai/);
+});
+
+test('group notes from following members are collapsed while blocking source warnings remain visible',()=>{
+  const data=fixture(),g=data.groups[0];
+  g.inheritedWarnings=['Oblong Biru: Harga kain belum lengkap.','1 anggota mengikuti acuan XL kelompok.','<script>catatan</script>'];
+  g.sourceWarnings=['Ada anggota kelompok yang datanya belum ditemukan.'];
+  g.warnings=[...g.sourceWarnings,...g.inheritedWarnings,'Biaya kelompok belum diperiksa dan disimpan.'];
+  const h=harness(data),before=JSON.stringify(h.c.entry.data),out=h.run('commerceHppWarnings(entry.data.groups[0])');
+  const visible=out.slice(0,out.indexOf('<details')),collapsed=out.slice(out.indexOf('<details'));
+  assert.match(visible,/note warn/);assert.match(visible,/datanya belum ditemukan/);assert.match(visible,/Biaya kelompok belum diperiksa/);
+  assert.doesNotMatch(visible,/Harga kain belum lengkap|anggota mengikuti|catatan/);
+  assert.match(collapsed,/<details class="card"><summary>Catatan anggota yang mengikuti/);assert.doesNotMatch(collapsed,/<details[^>]* open/);
+  assert.match(collapsed,/Harga kain belum lengkap/);assert.match(collapsed,/&lt;script&gt;catatan/);assert.doesNotMatch(collapsed,/<script>/);
+  assert.equal(JSON.stringify(h.c.entry.data),before,'display never deletes the flat warnings used by exports');
+});
+
+test('valid shared HPP does not show a warning wall for incomplete followers and preserves legacy and blocking warnings',()=>{
+  const data=fixture(),g=data.groups[0];g.inheritedWarnings=['Oblong Biru: Belum ada hasil XL.'];g.warnings=g.inheritedWarnings.slice();g.sourceWarnings=[];
+  const h=harness(data);let out=h.run('commerceHppWarnings(entry.data.groups[0])');assert.doesNotMatch(out,/note warn/);assert.match(out,/<details/);
+  h.c.entry.data.groups[0].sourceWarnings=g.inheritedWarnings.slice();out=h.run('commerceHppWarnings(entry.data.groups[0])');
+  assert.match(out,/note warn/);assert.doesNotMatch(out,/<details/,'a source blocker cannot be hidden even if duplicated in inherited notes');
+  h.run('delete entry.data.groups[0].inheritedWarnings');assert.match(h.run('commerceHppWarnings(entry.data.groups[0])'),/note warn/,'older server responses keep warnings visible');
+  h.run("entry.data.models[0].warnings=['Harga belum lengkap'];entry.data.models[0].inheritedWarnings=['Harga belum lengkap']");
+  assert.match(h.run('commerceHppWarnings(entry.data.models[0])'),/note warn/,'individual model warnings remain unchanged');
+});

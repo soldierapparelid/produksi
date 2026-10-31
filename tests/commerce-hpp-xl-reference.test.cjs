@@ -32,7 +32,7 @@ test('ambiguous plans, duplicate or shared rolls, missing XL and unresolved pric
  for(const change of changes){const input=fixture();change(input);assert.equal(run(input).models.find(m=>m.id===modelId).xlReferenceCandidate,null);}
 });
 
-test('changed evidence and forged or duplicate assignments remain blocking references instead of silently inheriting another member',()=>{
+test('changed evidence and forged or duplicate assignments cannot supply an individual XL reference',()=>{
  for(const change of [i=>i.legacy.production[1].potong[0].jumlah=118,i=>i.config.xlReferences[modelId].rollIds=['roll1','roll1'],i=>i.config.xlReferences[modelId].rollIds=['roll1','roll2'],i=>i.config.xlReferences[modelId].rollIds=['outside'],i=>i.config.xlReferences[modelId].confirmed=false]){
   const input=fixture();delete input.config.hppGroups;annotate(input);change(input);const m=run(input).models[0];assert.equal(m.configured,false);assert.equal(m.kain.complete,false);assert.equal(m.basis.ukuran,'XL');assert.match(m.sourceWarnings.join(' '),/Tentukan ulang/);
  }
@@ -58,4 +58,15 @@ test('server saves only HPP settings, enforces owner/revision/evidence, and repl
  const out=f.good('saveCommerceHppXLReference',p);assert.equal(out.commerce.models[0].kain.totalCost,2266000);assert.equal(out.commerce.models[0].configured,true);assert.equal(out.commerce.config.xlReferenceHistory.length,1);assert.equal(out.commerce.config.xlReferenceHistory[0].before,null);assert.equal(f.good('saveCommerceHppXLReference',p).revision,out.revision);assert.equal(f.state().config.xlReferenceHistory.length,1);assert.equal(JSON.stringify(['PO','Potong','StokBahan','SlipKirim','SlipUpah','CommerceSource','CommerceEvent','CommerceImport'].map(f.raw)),before);
  const edit=f.payload();edit.rollIds=['roll2'];const changed=f.good('saveCommerceHppXLReference',edit);assert.equal(changed.commerce.models[0].kain.totalCost,2288000);assert.equal(changed.commerce.config.xlReferenceHistory.length,2);assert.deepEqual(changed.commerce.config.xlReferenceHistory[1].before.rollIds,['roll1']);
  const removed=f.good('saveCommerceHppXLReference',{modelId,remove:true,expectedRevision:changed.revision,withState:true});assert.equal(removed.commerce.models[0].basis.ukuran,undefined);assert.equal(removed.commerce.models[0].kain.totalPcs,238);assert.equal(removed.commerce.config.xlReferenceHistory.length,3);assert.equal(JSON.stringify(['PO','Potong','StokBahan','SlipKirim','SlipUpah','CommerceSource','CommerceEvent','CommerceImport'].map(f.raw)),before);
+});
+
+test('one verified owner XL choice supplies a group despite another member with incomplete XL material',()=>{
+ const input=fixture();input.legacy.production[0].potong[0].jumlah=120;input.legacy.production[0].potong[0].bahanList[0].kg=51;input.legacy.production[0].potong[0].rols[0].kg=25;input.legacy.production[1].potong[0].jumlah=110;input.legacy.cuttingPlans[0].rolls[0].kg=25;input.legacy.stock.pembelian[0].kg=25;input.legacy.stock.pembelian[0].total=2200000;
+ input.tables.PO=Array.from({length:13},(_,i)=>({id:'po'+i,series:'Fixture',nama:'Other '+i}));
+ input.tables.Potong=[{id:'incompleteXL',poId:'po0',total:240,ukuran:{XL:240},tarif:800}];
+ const before=JSON.stringify({legacy:input.legacy,tables:input.tables}),other=run(input).models.filter(m=>m.id!==modelId).map(m=>m.id);input.config.hppGroups[groupId].modelIds=[modelId,...other];annotate(input);
+ let out=run(input),g=out.groups[0],bad=out.models.find(m=>m.nama==='Other 0');
+ assert.equal(bad.basis.ukuran,'XL');assert.equal(bad.kain.complete,false);assert.equal(bad.kain.totalPcs,240);assert.equal(g.memberModels.length,14);assert.deepEqual(g.referenceModelIds,[modelId]);assert.equal(g.kain.totalPcs,110);assert.equal(g.kain.totalCost,2200000);assert.equal(g.potong.totalPcs,110);assert.equal(g.potong.totalCost,99000);assert.equal(g.hppTotal,26900);assert.equal(g.configured,true);assert.match(g.warnings.join(' '),/Other 0:.*bahan/i);assert.equal(JSON.stringify({legacy:input.legacy,tables:input.tables}),before);
+ input.tables.StokBahan=[{id:'fixedRoll',jenis:'beli',bahan:'Other fabric',qty:30,satuan:'kg',harga:100000,total:3000000,stockMode:'roll'}];input.tables.Potong[0].bahanList=[{nama:'Other fabric',qty:30,satuan:'kg'}];input.tables.Potong[0].alokasiBahan=[{stokId:'fixedRoll',qty:30,ukuran:'XL'}];
+ out=run(input);g=out.groups[0];assert.equal(g.referenceModelIds.length,2);assert.equal(g.kain.totalPcs,350);assert.equal(g.kain.totalCost,5200000);assert.equal(g.potong.totalCost,291000);assert.equal(g.hppTotal,5200000/350+291000/350+6000);assert.equal(g.configured,true);
 });
