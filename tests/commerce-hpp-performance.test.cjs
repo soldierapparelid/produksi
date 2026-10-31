@@ -41,3 +41,18 @@ test('marketplace settings calculate a page only when requested and reject incom
  saved=f.good('saveCommerceHppSettings',{pajak:3,expectedRevision:saved.revision});assert.equal(f.h.run('hppCalls'),0);assert.deepEqual(Object.keys(saved),['revision']);
  f.h.run(`pkStore_().lock(function(){pkStore_().append('CommerceImport',{id:'pending',status:'started'});});void 0;`);const before=JSON.stringify(f.h.sheets.CommerceRecord.values),bad=f.call('saveCommerceHppSettings',{pajak:4,expectedRevision:saved.revision,withState:true});assert.equal(bad.ok,false);assert.match(bad.error,/Impor/);assert.equal(JSON.stringify(f.h.sheets.CommerceRecord.values),before);
 });
+
+
+test('HPP reads accepted slip rates in the cached page and responds to rate changes and count cancellation',()=>{
+ const f=fixture();
+ f.h.run("pkStore_().lock(function(){pkStore_().append('SlipKirim',{id:'sendRed',poId:'poRed',maklonId:'worker1',total:100,ukuran:{XL:100},upah:0});pkStore_().append('SlipSetor',{id:'receivedRed',noSlip:'SS-FIXTURE-001',poId:'poRed',maklonId:'worker1',total:10,ukuran:{XL:10},upah:2400,status:'diterima',workflowVersion:2,diprosesOleh:'owner1'});});void 0;");
+ const before=JSON.stringify(f.h.sheets.SlipKirim.values),first=f.state(),warm=f.state();
+ assert.deepEqual(warm,first);const model=warm.models.find(m=>m.nama==='Red');
+ assert.equal(model.hargaJahit,2400);assert.equal(model.jahit.totalPcs,100);assert.equal(model.jahit.totalCost,240000);
+ assert.ok(f.h.events.filter(e=>e[0]==='cache.get').length<=4,'receipt table joins the existing prefetch batch');
+ f.h.run("pkStore_().lock(function(){pkStore_().update('SlipSetor','receivedRed',{upah:2600});});void 0;");
+ assert.equal(f.state().models.find(m=>m.nama==='Red').hargaJahit,2600);
+ f.h.run("pkStore_().lock(function(){pkStore_().update('SlipSetor','receivedRed',{status:'diajukan'});});void 0;");
+ const cancelled=f.state().models.find(m=>m.nama==='Red');assert.equal(cancelled.hargaJahit,null);assert.equal(cancelled.jahit.complete,false);
+ assert.equal(JSON.stringify(f.h.sheets.SlipKirim.values),before,'HPP never copies the rate into dispatch/payroll data');
+});

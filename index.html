@@ -6485,7 +6485,7 @@ return module.exports;}());
 
 /* Public contract:
    coreCommerceHpp({config,legacy:{production,stock,meta,workers,cuttingPlans},
-     tables:{PO,Produk,Potong,SlipKirim,StokBahan,RencanaPotong,KoreksiRiwayat},settings})
+     tables:{PO,Produk,Potong,SlipKirim,SlipSetor,StokBahan,RencanaPotong,KoreksiRiwayat},settings})
    returns JSON-only {models,warnings}. A model has stable legacy id, series,
    nama/sizes/poIds, kain/potong/jahit evidence, config resolution, basis,
    hargaJahit/biayaLain/targetMargin, hppTotal (estimate or null), configured,
@@ -6685,26 +6685,41 @@ function coreCommerceHpp(input) {
     });
     return {xl:!!acuanXL.length,includedCuts:cuts,fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:acuanXL.length?'Catatan bahan Produksi, potongan ukuran XL':'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
   }
+  function sewingPair(r){return String(r.poId||'').trim()&&String(r.maklonId||'').trim()?JSON.stringify([r.poId,r.maklonId]):'';}
+  /* Accepted counts can carry the owner's rate even when an older dispatch
+     never had one. Index once; these receipts contribute rates, never pcs. */
+  var sewingReceiptRates=Object.create(null),sewingReceiptIds=Object.create(null);
+  rows(tables.SlipSetor).forEach(function(r){if(r.id)sewingReceiptIds[r.id]=(sewingReceiptIds[r.id]||0)+1;});
+  rows(tables.SlipSetor).forEach(function(r){
+    var key=sewingPair(r);
+    if(!key||r.status!=='diterima'||ownerOpening(r)||Number(r.workflowVersion)!==2||!String(r.diprosesOleh||'').trim())return;
+    var group=sewingReceiptRates[key]||(sewingReceiptRates[key]={rates:[],rows:[],invalid:false}),q=n(r.total),rate=n(r.upah),sizes=json(r.ukuran,null),actual=0;
+    var valid=!!r.id&&sewingReceiptIds[r.id]===1&&!!String(r.noSlip||'').trim()&&Number.isSafeInteger(q)&&q>0&&rate>0&&Number.isFinite(q*rate)&&q*rate<=Number.MAX_SAFE_INTEGER&&sizes&&typeof sizes==='object'&&!Array.isArray(sizes);
+    if(sizes&&typeof sizes==='object'&&!Array.isArray(sizes))Object.keys(sizes).forEach(function(size){var count=n(sizes[size]);if(!String(size).trim()||!Number.isSafeInteger(count)||count<0)valid=false;else actual+=count;});
+    if(!valid||actual!==q){group.invalid=true;return;}
+    if(group.rates.indexOf(rate)<0)group.rates.push(rate);group.rows.push(r);
+  });
   function nativeSewing(g){
-    var cost=0,pcs=0,warnings=[],seen=Object.create(null),pairRates=Object.create(null),details=[],inferred=0;
-    function pair(r){return String(r.poId||'').trim()&&String(r.maklonId||'').trim()?JSON.stringify([r.poId,r.maklonId]):'';}
+    var cost=0,pcs=0,warnings=[],seen=Object.create(null),pairRates=Object.create(null),details=[],inferred=0,receiptInferred=0;
     /* Imported assignments use zero for an unknown rate. Reuse only a unanimous
        positive rate recorded for this exact PO and worker, never another PO. */
-    g.assignments.forEach(function(r){var key=pair(r),q=n(r.total),rate=n(r.upah);if(key&&Number.isSafeInteger(q)&&q>0&&rate>0){var rates=pairRates[key]||(pairRates[key]=[]);if(rates.indexOf(rate)<0)rates.push(rate);}});
+    g.assignments.forEach(function(r){var key=sewingPair(r),q=n(r.total),rate=n(r.upah);if(key&&Number.isSafeInteger(q)&&q>0&&rate>0){var rates=pairRates[key]||(pairRates[key]=[]);if(rates.indexOf(rate)<0)rates.push(rate);}});
     g.assignments.forEach(function(r){
       if(seen[r.id]){warnings.push('Identitas penugasan jahit ganda.');return;}seen[r.id]=true;
-      var q=n(r.total),rate=n(r.upah),source='tarif-tercatat';
+      var q=n(r.total),rate=n(r.upah),source='tarif-tercatat',sourceReceipts=[];
       if(q===null||q<=0||!Number.isSafeInteger(q)){warnings.push('Jumlah atau tarif penugasan jahit belum lengkap.');return;}pcs+=q;
       if(rate===0||r.upah==null||typeof r.upah==='string'&&!r.upah.trim()){
-        var rates=pairRates[pair(r)]||[];
-        if(rates.length===1){rate=rates[0];source='tarif-penugasan-po-maklon-sama';inferred++;}
+        var key=sewingPair(r),receipts=sewingReceiptRates[key],rates=(pairRates[key]||[]).slice();
+        if(receipts&&receipts.invalid){warnings.push('Tarif hitungan untuk PO dan maklon yang sama belum dapat dipastikan; periksa slip hitung.');return;}
+        (receipts?receipts.rates:[]).forEach(function(value){if(rates.indexOf(value)<0)rates.push(value);});
+        if(rates.length===1){rate=rates[0];inferred++;source='tarif-penugasan-po-maklon-sama';if(receipts&&receipts.rows.length){source='tarif-hitung-po-maklon-sama';sourceReceipts=receipts.rows.map(function(row){return {id:row.id,noSlip:row.noSlip};});receiptInferred++;}}
         else {warnings.push(rates.length?'Tarif jahit penugasan kosong dan tarif PO/maklon berbeda; isi ongkos jahit manual.':'Tarif jahit penugasan kosong; belum ada tarif pasti untuk PO dan maklon yang sama.');return;}
       }
       if(rate===null||rate<=0){warnings.push('Jumlah atau tarif penugasan jahit belum lengkap.');return;}
-      var total=q*rate;cost+=total;details.push({id:r.id,poId:r.poId,maklonId:r.maklonId||'',jumlah:q,tarif:rate,totalCost:total,source:source});
+      var total=q*rate;cost+=total;details.push({id:r.id,poId:r.poId,maklonId:r.maklonId||'',jumlah:q,tarif:rate,totalCost:total,source:source,sourceReceipts:sourceReceipts});
     });
     if(!Number.isSafeInteger(pcs)||!Number.isFinite(cost)||cost>Number.MAX_SAFE_INTEGER)warnings.push('Jumlah atau biaya jahit melampaui batas perhitungan.');
-    if(pcs||g.assignments.length)return {perPcs:pcs?cost/pcs:null,totalPcs:pcs,totalCost:cost,hasEvidence:true,complete:pcs>0&&!warnings.length,warnings:warnings,details:details,source:'Tarif jahit tercatat · rata-rata penugasan'+(inferred?' · tarif kosong mengikuti PO dan maklon yang sama':'')};
+    if(pcs||g.assignments.length)return {perPcs:pcs?cost/pcs:null,totalPcs:pcs,totalCost:cost,hasEvidence:true,complete:pcs>0&&!warnings.length,warnings:warnings,details:details,source:'Tarif jahit tercatat · rata-rata penugasan'+(receiptInferred?' · tarif kosong mengikuti slip hitung PO dan maklon yang sama':inferred?' · tarif kosong mengikuti PO dan maklon yang sama':'')};
     var rates=unique(g.rates.filter(function(x){return x>0;}).map(function(x){return String(x);})).map(Number);if(rates.length===1)return {perPcs:rates[0],totalPcs:0,totalCost:0,complete:!warnings.length,warnings:warnings,source:'Perkiraan tarif jahit saat ini'};
     return {perPcs:null,totalPcs:0,totalCost:0,complete:false,warnings:warnings.concat(rates.length?'Tarif jahit model berbeda; pilih perkiraan manual.':'Tarif jahit belum tersedia.'),source:'Belum ada tarif jahit'};
   }
@@ -7623,7 +7638,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     row=Object.assign({},row,{data:JSON.stringify(data),revision:coreCommerceHash([data,stamp,me.id]),diubah:stamp});checkRows('CommerceRecord',[row]);store.update('CommerceRecord',row.id,row);return reply('nota',row,p,me);};
   /* Read versioned cache entries in one batch rather than two cache RPCs per
      table. Authentication and durable write/import checks still run first. */
-  function hppPrefetch(){if(store.prefetch)store.prefetch(['CommerceRecord','CommerceEvent','CommerceImport','CommerceSource','PO','Produk','Potong','SlipKirim','StokBahan','RencanaPotong','KoreksiRiwayat','Pengaturan']);}
+  function hppPrefetch(){if(store.prefetch)store.prefetch(['CommerceRecord','CommerceEvent','CommerceImport','CommerceSource','PO','Produk','Potong','SlipKirim','SlipSetor','StokBahan','RencanaPotong','KoreksiRiwayat','Pengaturan']);}
   function hppState(row,me,calculated){
     var out=stateOf('hpp',me);out.config=row?coreCommerceCopy(coreCommerceData(row)):{configs:{},modelConfigs:{},marketplace:{},pajak:0};
     ['_lastMutation','_createHash','_createActor'].forEach(function(k){delete out.config[k];});out.revision=row?view(row).revision:'';
@@ -7636,7 +7651,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     store.read('CommerceImport').filter(function(r){return r.status==='complete';}).forEach(function(manifest){var proof=coreCommerceData(manifest),subset=source.filter(function(r){return r.sourceHash===manifest.sourceHash;}).map(function(r){var out={};SCHEMA.CommerceSource.forEach(function(k){out[k]=r[k]===undefined?'':r[k];});return out;}).sort(function(a,b){return a.id.localeCompare(b.id);});if(subset.length!==proof.sourceRows||coreCommerceHash(subset)!==proof.sourceDigest)fail('Snapshot HPP asal tidak utuh atau berubah. Periksa cadangan impor sebelum menghitung.');});
     var manifestHashes={};store.read('CommerceImport').filter(function(r){return r.status==='complete';}).forEach(function(r){manifestHashes[r.sourceHash]=true;});if(source.some(function(r){return !manifestHashes[r.sourceHash];}))fail('Ada snapshot HPP tanpa manifest impor lengkap.');
     source.forEach(function(r){var data=coreCommerceData(r);if(r.kind==='hpp-production')legacy.production.push(data);if(r.kind==='hpp-purchase')legacy.stock.pembelian.push(data);if(r.kind==='hpp-rollinfo')legacy.stock.rolInfo[r.parentId]=data;if(r.kind==='hpp-meta')legacy.meta=data;if(r.kind==='hpp-plan')legacy.cuttingPlans.push(data);});
-    legacy.workers=coreCommerceRows(legacy.meta.tukangJahit||legacy.meta.maklon||{});var input={config:config,legacy:legacy,tables:{},settings:ctx.settings()};['PO','Produk','Potong','SlipKirim','StokBahan','RencanaPotong','KoreksiRiwayat'].forEach(function(s){input.tables[s]=store.read(s);});return input;
+    legacy.workers=coreCommerceRows(legacy.meta.tukangJahit||legacy.meta.maklon||{});var input={config:config,legacy:legacy,tables:{},settings:ctx.settings()};['PO','Produk','Potong','SlipKirim','SlipSetor','StokBahan','RencanaPotong','KoreksiRiwayat'].forEach(function(s){input.tables[s]=store.read(s);});return input;
   }
   actions.getCommerceState=function(p){var me=admin(p,false,true),module=p.module;if(['pembelian','nota','hpp'].indexOf(module)<0)fail('Modul tidak dikenal.');if(module==='hpp')hppPrefetch();var waiting=pending();if(waiting.length)fail('Impor modul belum selesai. Owner perlu melanjutkan file yang sama sebelum modul dipakai.');
     return module==='hpp'?hppState(find('hpp','config','config'),me):stateOf(module,me);
