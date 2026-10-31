@@ -685,7 +685,7 @@ function coreCommerceHppGroups(models,config) {
   var groups=config.hppGroups||{},warnings=[],lookup=Object.create(null),claims=Object.create(null),invalid=Object.create(null);
   models.forEach(function(m){lookup[m.id]=m;});
   if(!groups||typeof groups!=='object'||Array.isArray(groups))return {groups:[],warnings:['Data kelompok HPP tidak terbaca. Model tetap ditampilkan sendiri.']};
-  var keys=Object.keys(groups);if(keys.length>20)return {groups:[],warnings:['Jumlah kelompok HPP melebihi batas. Periksa pengaturan kelompok.']};
+  var keys=Object.keys(groups);if(keys.length>100)return {groups:[],warnings:['Jumlah kelompok HPP melebihi batas. Periksa pengaturan kelompok.']};
   keys.forEach(function(key){
     var g=groups[key],seen=Object.create(null);
     if(!/^hppg_[A-Za-z0-9_-]{1,100}$/.test(key)||!g||g.id!==key||typeof g.nama!=='string'||!g.nama.trim()||g.nama.length>80||!Array.isArray(g.modelIds)||g.modelIds.length<2||g.modelIds.length>100){invalid[key]=true;return;}

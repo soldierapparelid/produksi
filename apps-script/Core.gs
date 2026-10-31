@@ -19,7 +19,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.64';
+var APP_VERSION = '1.5.65';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -6367,7 +6367,7 @@ function coreCommerceHppGroups(models,config) {
   var groups=config.hppGroups||{},warnings=[],lookup=Object.create(null),claims=Object.create(null),invalid=Object.create(null);
   models.forEach(function(m){lookup[m.id]=m;});
   if(!groups||typeof groups!=='object'||Array.isArray(groups))return {groups:[],warnings:['Data kelompok HPP tidak terbaca. Model tetap ditampilkan sendiri.']};
-  var keys=Object.keys(groups);if(keys.length>20)return {groups:[],warnings:['Jumlah kelompok HPP melebihi batas. Periksa pengaturan kelompok.']};
+  var keys=Object.keys(groups);if(keys.length>100)return {groups:[],warnings:['Jumlah kelompok HPP melebihi batas. Periksa pengaturan kelompok.']};
   keys.forEach(function(key){
     var g=groups[key],seen=Object.create(null);
     if(!/^hppg_[A-Za-z0-9_-]{1,100}$/.test(key)||!g||g.id!==key||typeof g.nama!=='string'||!g.nama.trim()||g.nama.length>80||!Array.isArray(g.modelIds)||g.modelIds.length<2||g.modelIds.length>100){invalid[key]=true;return;}
@@ -7164,7 +7164,7 @@ function coreInstallCommerceActions(actions,ctx) {  var store=ctx.store, tables=
     var old=Object.prototype.hasOwnProperty.call(groups,key)?groups[key]:null;
     if(p.remove===true){if(!old)fail('Kelompok HPP tidak ditemukan.');delete groups[key];var removedState=p.withState===true?coreCommerceHpp(hppInput(current)):null;return hppWrite(current,row,me,intent,p,removedState);}
     var name=text(p.nama,80,true);if(!Array.isArray(p.modelIds)||p.modelIds.length<2||p.modelIds.length>100)fail('Pilih 2 sampai 100 model untuk kelompok HPP.');
-    if(!old&&Object.keys(groups).length>=20)fail('Maksimal 20 kelompok HPP.');
+    if(!old&&Object.keys(groups).length>=100)fail('Maksimal 100 kelompok HPP.');
     var available=Object.create(null),seen=Object.create(null);
     var modelIds=p.modelIds.map(function(modelId){modelId=text(modelId,500,true);if(seen[modelId])fail('Model dipilih lebih dari sekali.');seen[modelId]=true;return modelId;}).sort();
     Object.keys(groups).forEach(function(other){if(other===key)return;var g=groups[other];if(!g||!Array.isArray(g.modelIds))fail('Data kelompok HPP perlu diperiksa.');if(coreCommerceLegacyCost.norm(g.nama)===coreCommerceLegacyCost.norm(name))fail('Nama kelompok HPP sudah dipakai.');if(g.modelIds.some(function(member){return !!seen[member];}))fail('Model sudah masuk kelompok HPP lain. Lepaskan dari kelompok asal dahulu.');});

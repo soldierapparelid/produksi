@@ -2,6 +2,12 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.65 — Hingga 100 kelompok HPP
+
+- Batas jumlah kelompok HPP naik dari 20 menjadi 100 pada penyimpanan dan pembacaan. Kelompok ke-21 sampai ke-100 tetap tampil setelah dimuat ulang.
+- Edit dan bubarkan kelompok tetap tersedia saat jumlah kelompok mencapai batas. Pengamanan revisi, hak owner, serta kapasitas data tetap berlaku.
+- Rilis ini tidak mengubah anggota, acuan biaya, maupun data produksi yang sudah tersimpan.
+
 ## Pembaruan tampilan 31 Oktober 2026 — Buka kelompok HPP setelah data siap
 
 - Tombol kelompok dan acuan XL menunggu pemuatan HPP yang sedang berjalan, lalu membuka formulir pilihan sekali setelah data terbaru siap. Klik berulang memakai permintaan yang sama.
