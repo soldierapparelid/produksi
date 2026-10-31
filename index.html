@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261031-hpp-acuan-lengkap-1564';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261031-hpp-refresh-ready-1564';</script>
 <script>
 (function () {
 'use strict';
@@ -9294,7 +9294,7 @@ var TABS = {
 function tabsFor() { var d = me().divisi; return isAdmin() ? TABS.admin : (TABS[d] || TABS.potong); }
 
 /* ---------- lembar bertumpuk ---------- */
-var sheets = [];
+var sheets = [], sheetRevision = 0;
 function sheetHtml(title, body, footer) {
   return '<div class="sheet-h"><h2 class="cut">' + esc(title) + '</h2><button class="icon-btn" data-a="close" aria-label="Tutup">' + ic('x') + '</button></div>' +
     '<div class="sheet-b">' + body + '</div>' + (footer ? '<div class="sheet-f">' + footer + '</div>' : '');
@@ -9317,14 +9317,14 @@ function paintTop() {
 }
 function openSheet(render, opt) {
   var m = $('#modal'); if (!m) return;
-  var node = document.createElement('div'); node.className = 'layer';
+  var node = document.createElement('div'); node.className = 'layer'; sheetRevision++;
   m.appendChild(node);
   var parent=sheets[sheets.length-1], version=parent&&$('[data-form]',parent.node)?parent.dataVersion:S.displayVersion!==undefined?S.displayVersion:S.state&&S.state.ver;
   sheets.push({ render: render, live: !!(opt && opt.live), cls: (opt && opt.cls) || '', onClose: opt && opt.onClose, node: node, dataVersion:version });
   showSheets(); paintTop();
 }
 function dropSheet(i) {
-  var s = sheets[i]; if (!s) return;
+  var s = sheets[i]; if (!s) return; sheetRevision++;
   var wasTop = i === sheets.length - 1;
   sheets.splice(i, 1); if (s.node.parentNode) s.node.parentNode.removeChild(s.node);
   if (s.onClose) s.onClose();
@@ -9332,7 +9332,7 @@ function dropSheet(i) {
   var t = sheets[sheets.length - 1]; if (wasTop && t && t.live) paintTop();
 }
 function closeSheet() { dropSheet(sheets.length - 1); }
-function closeAll() { if(typeof closeSlipPreviews==='function')closeSlipPreviews();while (sheets.length) { var s = sheets.pop(); if (s.node.parentNode) s.node.parentNode.removeChild(s.node); if (s.onClose) s.onClose(); } showSheets(); }
+function closeAll() { if(sheets.length)sheetRevision++;if(typeof closeSlipPreviews==='function')closeSlipPreviews();while (sheets.length) { var s = sheets.pop(); if (s.node.parentNode) s.node.parentNode.removeChild(s.node); if (s.onClose) s.onClose(); } showSheets(); }
 A.close = function (el) {
   var s = sheets[sheets.length - 1]; if (!s) return;
   if (el && el.classList.contains('scrim') && $('[data-form]', s.node)) return;   /* form tidak tertutup karena salah ketuk di luar */
@@ -9400,6 +9400,7 @@ function render() {
   if (!S.state) { root.innerHTML = S.sessionLoad ? sessionLoadingHtml() : gateHtml(); return; }
   var tabs = tabsFor();
   if (!tabs.some(function (t) { return t.id === S.tab; })) S.tab = tabs[0].id;
+  if (S.renderedTab !== S.tab) { S.navigationRevision = (S.navigationRevision || 0) + 1; S.renderedTab = S.tab; }
   var pips = navPips();
   var diLebih = tabs.some(function (t) { return t.id === S.tab && t.lebih; });
   var nav = tabs.map(function (t) {
@@ -11853,11 +11854,15 @@ function commerceSnapBaca(module, entry) {
     if (S.tab === commerceTab(module)) refresh();
   });
 }
+function commerceVersionValid(value) {
+  return (typeof value === 'number' || typeof value === 'string' && /^[0-9]+$/.test(value.trim())) && Number.isSafeInteger(Number(value)) && Number(value) >= 0;
+}
 function commerceApply(module, entry, res) {
   var data = res && (res.data || res);
   if (!res || res.module !== module || !res.actor || res.actor.id !== me().id || res.actor.divisi !== me().divisi || !data || (module==='pembelian'&&!Array.isArray(data.orders)) || (module==='nota'&&!Array.isArray(data.notes)) || (module==='hpp'&&!Array.isArray(data.models))) throw new Error('Data halaman belum lengkap. Muat ulang halaman ini.');
-  /* salinan perangkat selalu kalah dari jawaban server; di antara jawaban server, versi yang lebih baru yang dipakai */
-  if (entry.lama || entry.version === null || Number(res.version) >= Number(entry.version)) { entry.data = data; entry.version = res.version; entry.lama = 0; commerceSnapTulis(module, entry); }
+  if (!commerceVersionValid(res.version)) throw new Error('Versi data halaman belum sah. Coba muat ulang; jika tetap gagal, hubungi owner.');
+  /* salinan perangkat atau metadata rusak diganti respons sah; versi server yang sah tidak boleh mundur */
+  if (entry.lama || !commerceVersionValid(entry.version) || Number(res.version) >= Number(entry.version)) { entry.data = data; entry.version = res.version; entry.lama = 0; commerceSnapTulis(module, entry); }
   if(module==='pembelian'&&S.share)commerceShareCurrent(S.share);
   entry.error = ''; entry.stale = S.state && Number(S.state.ver) > Number(entry.version); return entry.data;
 }
@@ -11865,7 +11870,7 @@ function commerceFetch(module, force) {
   if (['pembelian', 'nota', 'hpp'].indexOf(module) < 0 || !commerceScope()) return Promise.reject(new Error('Halaman ini hanya untuk admin.'));
   var entry = commerceEntry(module), scope = commerceScope();
   if (entry.loading) return entry.loading;
-  if (entry.data && !force && !entry.lama && !entry.stale) return Promise.resolve(entry.data);
+  if (entry.data && commerceVersionValid(entry.version) && !force && !entry.lama && !entry.stale) return Promise.resolve(entry.data);
   entry.tried = true; entry.error = '';
   commerceSnapBaca(module, entry);
   var request = req('getCommerceState', { module: module }).then(function (res) {
@@ -13388,7 +13393,24 @@ function commerceHppGroupCheck(p,data){
   var retry=String(data.revision||'')===String(p.expectedRevision||'');return {complete:false,retry:retry,message:retry?'Perubahan kelompok belum tercatat. Kirim ulang pilihan yang sama.':'Kelompok sudah berubah. Tutup formulir dan periksa HPP terbaru.'};
 }
 function commerceHppGroupFor(id,data){return ((data||commerceData('hpp')).groups||[]).filter(function(g){return g.id===id||(g.modelIds||[]).indexOf(id)>=0;})[0]||null;}
-function commerceHppGroupReady(){var e=commerceEntry('hpp');return !!commerceScope()&&!!e.data&&Array.isArray(e.data.groups)&&!e.stale&&!e.loading&&!e.error&&!e.lama&&e.version!==null&&e.version!==undefined&&Number.isFinite(Number(e.version));}
+function commerceHppGroupReady(){var e=commerceEntry('hpp');return !!commerceScope()&&!!e.data&&Array.isArray(e.data.groups)&&!e.stale&&!e.loading&&!e.error&&!e.lama&&commerceVersionValid(e.version);}
+var commerceHppOpening = null;
+function commerceHppNavigationRevision(){return String(S.navigationRevision||0)+':'+String(typeof sheetRevision==='number'?sheetRevision:0);}
+function commerceHppReadyOpen(el,key,open,ownerOnly){
+  if(!commerceScope()||ownerOnly&&me().divisi!=='owner')return toast('Buka HPP dengan akun '+(ownerOnly?'owner':'admin')+' terlebih dahulu.',true);
+  var form=typeof topForm==='function'?topForm():null,layer=typeof sheets!=='undefined'?sheets[sheets.length-1]||null:null;
+  var intent={key:key,scope:commerceScope(),tab:S.tab,form:form,layer:layer,uiRevision:commerceHppNavigationRevision(),ownerOnly:!!ownerOnly};
+  function current(p){return commerceHppOpening===p&&commerceScope()===p.scope&&S.tab===p.tab&&commerceHppNavigationRevision()===p.uiRevision&&(!p.ownerOnly||me().divisi==='owner')&&(typeof topForm==='function'?topForm():null)===p.form&&(typeof sheets!=='undefined'?sheets[sheets.length-1]||null:null)===p.layer;}
+  if(commerceHppOpening&&commerceHppOpening.key===key&&current(commerceHppOpening))return commerceHppOpening.promise;
+  commerceHppOpening=intent;
+  toast('Memperbarui HPP… formulir akan terbuka setelah data siap.');
+  intent.promise=Promise.resolve().then(function(){if(!current(intent))return null;return commerceFetch('hpp',true);}).then(function(data){
+    if(!data||!current(intent))return;
+    if(!commerceHppGroupReady())throw new Error('Data HPP belum siap. Tunggu pembaruan selesai lalu buka kembali.');
+    commerceHppOpening=null;return open();
+  }).catch(function(error){if(current(intent))toast(error.message||'HPP belum dapat dimuat. Coba lagi sebentar.',true);}).then(function(result){if(commerceHppOpening===intent)commerceHppOpening=null;return result;});
+  return intent.promise;
+}
 function commerceHppGroupSnapshot(){var e=commerceEntry('hpp');return {source:e.data,version:e.version,revision:String((e.data||{}).revision||''),scope:commerceScope()};}
 function commerceHppGroupCurrent(f){
   if(!commerceScope()||me().divisi!=='owner'||!f||f._commerceScope!==commerceScope())throw new Error('Kelompok HPP hanya dapat diubah owner. Buka ulang formulir setelah masuk.');
@@ -13407,7 +13429,8 @@ function commerceHppXLCheck(p,data){
   var retry=String(data.revision||'')===String(p.expectedRevision||'');return {complete:false,retry:retry,message:retry?'Pilihan kain XL belum tercatat. Kirim ulang pilihan yang sama.':'Data acuan berubah. Tutup formulir dan periksa HPP terbaru.'};
 }
 A.commerceHppXLOpen=function(el){
-  if(me().divisi!=='owner'||!commerceHppGroupReady())return toast('Muat ulang HPP dengan akun owner terlebih dahulu.',true);
+  if(!commerceScope()||me().divisi!=='owner')return toast('Acuan XL hanya dapat diatur owner.',true);
+  if(!commerceHppGroupReady())return commerceHppReadyOpen(el,'xl:'+el.getAttribute('data-id'),function(){return A.commerceHppXLOpen(el);},true);
   var editing=el.closest&&el.closest('[data-form]');if(editing&&editing._commerceModel){try{if(commerceHppDraft(editing).changed)return toast('Simpan perubahan biaya dahulu sebelum menentukan kain XL.',true);}catch(e){return toast(e.message,true);}}
   var m=(commerceData('hpp').models||[]).filter(function(r){return r.id===el.getAttribute('data-id');})[0];if(!m)return;
   var candidate=m.xlReferenceCandidate,saved=m.xlReference,selected=saved&&candidate&&saved.evidenceRevision===candidate.evidenceRevision?saved.rollIds:[];
@@ -13449,7 +13472,7 @@ function commerceHppGroupPaint(f){
 }
 A.commerceHppGroupOpen=function(el){
   if(!commerceScope()||me().divisi!=='owner')return toast('Kelompok HPP hanya dapat diatur owner.',true);
-  if(!commerceHppGroupReady())return toast('Muat ulang HPP terlebih dahulu. Kelompok memerlukan data dari server terbaru.',true);
+  if(!commerceHppGroupReady())return commerceHppReadyOpen(el,'group:'+(el&&el.getAttribute('data-id')||''),function(){return A.commerceHppGroupOpen(el);},true);
   var data=commerceData('hpp'),id=el&&el.getAttribute('data-id'),group=id?commerceHppGroupFor(id,data):null;if(id&&!group)return toast('Kelompok tidak ditemukan. Muat ulang HPP.',true);
   var editing=el&&el.closest&&el.closest('[data-form]');if(editing&&editing._commerceModel){try{if(commerceHppDraft(editing).changed)return toast('Simpan perubahan biaya sebelum mengatur anggota kelompok.',true);}catch(e){return toast(e.message,true);}}
   var selected=group?group.modelIds.slice():[],assigned=Object.create(null);(data.groups||[]).forEach(function(g){if(!group||g.id!==group.id)(g.modelIds||[]).forEach(function(k){assigned[k]=g.nama;});});
@@ -13467,7 +13490,7 @@ A.commerceHppGroupSave=function(el){
 };
 A.commerceHppGroupRemove=function(el){
   if(!commerceScope()||me().divisi!=='owner')return toast('Kelompok HPP hanya dapat diatur owner.',true);
-  if(!commerceHppGroupReady())return toast('Muat ulang HPP terlebih dahulu.',true);var g=commerceHppGroupFor(el.getAttribute('data-id'));if(!g)return;
+  if(!commerceHppGroupReady())return commerceHppReadyOpen(el,'remove:'+el.getAttribute('data-id'),function(){return A.commerceHppGroupRemove(el);},true);var g=commerceHppGroupFor(el.getAttribute('data-id'));if(!g)return;
   var f=commerceForm('Bubarkan kelompok HPP','hpp','<h3>'+esc(g.nama)+'</h3><p>'+nf((g.modelIds||[]).length)+' model kembali tampil sendiri dan memakai pengaturan biayanya masing-masing.</p><p class="small muted">PO, stok, dan riwayat produksi tetap tersimpan.</p>','commerceHppGroupRemoveSave','Bubarkan kelompok');f._commerceHppGroup={id:g.id,remove:true};f._commerceHppGroupSnapshot=commerceHppGroupSnapshot();
 };
 A.commerceHppGroupRemoveSave=function(el){var f=topForm();if(!f||f._commerceLocked||!f._commerceHppGroup||!f._commerceHppGroup.remove)return;try{var d=commerceHppGroupCurrent(f);return commerceMutation('hpp','saveCommerceHppGroup',{id:f._commerceHppGroup.id,remove:true,expectedRevision:d.revision||undefined},f,el);}catch(e){toast(e.message,true);}};
@@ -13695,7 +13718,7 @@ A.commerceHppExportPng=function(){var s=S.hppExport;if(!commerceHppExportCurrent
 /* HPP EXPORT END */
 
 A.commerceHppOpen=function(el){var id=el.getAttribute('data-id'),m=commerceHppModel(id);if(!m)return;id=m.id;var data=commerceData('hpp'),cfg=(m.config||{}).value||{};
-  if(m.isGroup&&!commerceHppGroupReady())return toast('Muat ulang HPP untuk membuka acuan kelompok terbaru.',true);
+  if(m.isGroup&&!commerceHppGroupReady())return commerceHppReadyOpen(el,'view:'+id,function(){return A.commerceHppOpen(el);},false);
   if(m.isGroup&&me().divisi!=='owner'){openSheet(function(){return sheetHtml('HPP kelompok','<div class="col"><h3>'+esc(m.nama)+'</h3>'+commerceHppCost(m)+commerceHppWarnings(m)+commerceHppGroupMembers(m)+commerceHppEvidence(m)+'<p class="small muted">Owner dapat mengubah anggota dan biaya bersama.</p></div>');},{cls:'wide'});return;}
   var body=hid('modelId',id)+hid('revision',data.revision||'')+'<h3>'+esc(m.nama)+'</h3><p class="small muted">'+esc(m.series)+' · '+(m.isGroup?'semua anggota dan ukuran':'seluruh ukuran model ini')+'</p>'+commerceHppGroupMembers(m)+'<div data-commerce-hpp-cost>'+commerceHppCost(m)+'</div>'+commerceHppWarnings(m)+commerceHppEvidence(m)+
   '<div class="grid g-2">'+fSelect('Ongkos jahit','jahitMode',[['auto','Tarif jahit dari data'],['manual','Isi biaya per pcs']],cfg.jahitMode||'auto')+fNum('Biaya jahit manual / pcs (Rp)','hargaJahit',cfg.hargaJahit==null?(m.hargaJahit==null?'':m.hargaJahit):cfg.hargaJahit,'step="0.01"')+'</div><div class="grid g-2">'+fNum('Biaya lain / pcs (Rp)','biayaLain',cfg.biayaLain||0,'step="0.01"')+fNum('Target margin (%)','targetMargin',cfg.targetMargin==null?30:cfg.targetMargin,'max="99.99" step="0.01"')+'</div>'+fText('Rincian biaya lain','ketLain',cfg.ketLain,'maxlength="300"','Jangan masukkan ulang kain, potong, atau jahit yang sudah dihitung di atas.')+'<label class="row"><input type="checkbox" name="reviewed"'+(commerceHppSaved(m)?' checked':'')+'>Saya sudah memeriksa isian biaya dan acuan yang tersedia.</label><p class="small warn" data-commerce-hpp-review hidden role="alert">Centang pemeriksaan biaya di atas, lalu tekan Simpan biaya model.</p>'+(commerceHppSaved(m)?'<p class="xs muted">Biaya model ini sudah pernah disimpan. Salah isi? Ubah angkanya lalu tekan Simpan biaya model.</p>':'')+'<div class="note" data-commerce-hpp-live aria-live="polite"></div>'+

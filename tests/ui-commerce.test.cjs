@@ -742,3 +742,26 @@ test('HPP group visibility and export scope follow member PO visibility without 
   h.run("S.sub.hppSemua='1'");assert.equal(h.run("commerceHppExportRows(commerceData('hpp')).length"),1);
   h.run("S.sub.hppSemua='';S.state.settings.poBuang=['po-a']");assert.equal(h.run("commerceHppExportRows(commerceData('hpp')).length"),1);
 });
+
+
+test('a corrupt cached commerce version refreshes from the server without a manual reload',async()=>{
+  for(const invalid of ['undefined','null','NaN','Infinity','-1','1.5','true',"''","'not-a-version'"]){
+    const h=harness();h.seed('hpp',{models:[{id:'obsolete'}],groups:[],revision:'before'});h.run("commerceEntry('hpp').version="+invalid);
+    const pending=h.run("commerceFetch('hpp',false)");assert.equal(h.requests.length,1,invalid+' must not short circuit to the damaged cache');
+    h.requests[0].resolve(reply('hpp',{models:[{id:'fresh'}],groups:[],revision:'after'},11));await pending;
+    assert.equal(h.run("commerceData('hpp').models[0].id"),'fresh',invalid);assert.equal(h.run("commerceEntry('hpp').version"),11);assert.equal(h.run("commerceHppGroupReady()"),true);
+  }
+});
+
+test('commerce rejects invalid incoming versions and preserves a newer valid server snapshot',async()=>{
+  for(const invalid of [undefined,null,NaN,Infinity,-1,1.5,true,'','bad']){
+    const h=harness();h.seed('hpp',{models:[{id:'known'}],groups:[],revision:'known'});const pending=h.run("commerceFetch('hpp',true)");
+    const response=reply('hpp',{models:[{id:'invalid'}],groups:[],revision:'bad'},invalid);response.version=invalid;h.requests[0].resolve(response);
+    await assert.rejects(pending,/versi|lengkap/i);assert.equal(h.run("commerceData('hpp').models[0].id"),'known');assert.equal(h.run("commerceEntry('hpp').version"),10);
+  }
+  const h=harness();h.seed('hpp',{models:[{id:'newer'}],groups:[],revision:'newer'});const pending=h.run("commerceFetch('hpp',true)");
+  h.requests[0].resolve(reply('hpp',{models:[{id:'older'}],groups:[],revision:'older'},9));await pending;
+  assert.equal(h.run("commerceData('hpp').models[0].id"),'newer');assert.equal(h.run("commerceEntry('hpp').version"),10);
+  const next=h.run("commerceFetch('hpp',true)");h.requests[1].resolve(reply('hpp',{models:[{id:'latest'}],groups:[],revision:'latest'},'11'));await next;
+  assert.equal(h.run("commerceData('hpp').models[0].id"),'latest');assert.equal(Number(h.run("commerceEntry('hpp').version")),11);
+});
