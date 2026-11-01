@@ -398,7 +398,24 @@ function coreCommerceHpp(input) {
   /* Only the v2 importer flags archive cycles; older imports mark them in the note. */
   function archivedCycle(p,origin){return origin.arsip===true||(p.asal==='lama'||!!origin.legacyReconciliation)&&/^Arsip\b/.test(String(p.catatan||''));}
   function nativeChoice(saved){return /^native:/.test(String(saved&&saved.planId||''));}
+  function savedXLChoice(g){return cfg.xlReferences&&Object.prototype.hasOwnProperty.call(cfg.xlReferences,g.id)?cfg.xlReferences[g.id]:null;}
+  function livePO(po){return !!po&&po.status!=='batal'&&!archivedCycle(po,json(po.imporSumber,{})||{});}
+  /* A plan's saldo lama has no rolls, so it never blocks choosing among the rolls. */
+  function planSaldo(r){var plan=planById[r.rencanaId],extra=plan?rows(json(plan.legacyBahanList,[])):[];return extra.length?materialTotals(extra):null;}
+  function rollMaterialTotals(r){
+    var totals=materialTotals(nativeMaterials(r)),less=planSaldo(r);
+    if(!totals||!less)return totals;
+    Object.keys(less).forEach(function(key){if(totals[key]===undefined)return;totals[key]-=less[key];if(Math.abs(totals[key])<0.000001)delete totals[key];});
+    return Object.keys(totals).length?totals:null;
+  }
   function xlQty(r){var sizes=json(r.ukuran,{})||{};return sum(Object.keys(sizes).filter(function(k){return String(k).trim().toUpperCase()==='XL';}).map(function(k){return n(sizes[k])||0;}));}
+  function xlOutputs(cuts,selected,batchId){
+    var materials=Object.create(null);
+    selected.forEach(function(r){var key=C.norm(r.bahan)+'|'+r.unit,m=materials[key]||(materials[key]={nama:r.bahan,satuan:r.unit,qty:0});m.qty+=r.qty;});
+    return cuts.filter(function(r){return xlQty(r)>0;}).map(function(r,i){
+      var q=xlQty(r);return Object.assign({},r,{total:q,ukuran:{XL:q},bahanList:i?[]:Object.keys(materials).map(function(k){return materials[k];}),alokasiBahan:i?[]:selected.map(function(a){return {stokId:a.id,qty:a.qty,ukuran:'XL'};}),bahan:'',kg:0,asal:i?'lanjut':'',rencanaId:'',_hppBatchId:batchId});
+    });
+  }
   function noteOwnerOpening(g,r){
     var p=poRows[r.poId], notes=g.ownerOpeningWarnings || (g.ownerOpeningWarnings=[]);
     notes.push('PO '+String(p.noPO || p.id)+' memiliki ukuran yang ditambahkan dari keterangan owner. Biaya kain, potong, dan jahitnya belum diketahui; catatan awal tersebut tidak menjadi acuan rata-rata HPP.');
@@ -471,10 +488,37 @@ function coreCommerceHpp(input) {
     var sizeQty=n(sizes[xlKey[0]]);if(!Number.isSafeInteger(sizeQty)||sizeQty<=0)return null;
     return Object.assign({},r,{total:sizeQty,ukuran:{XL:sizeQty},bahanList:Object.keys(selectedMaterial).map(function(k){return selectedMaterial[k];}),alokasiBahan:selected});
   }
+  /* Every roll of the PO carries a size, so XL is all of its XL rolls over every
+     preparation, whichever plan or continuation happened to record the XL pcs. */
+  function sizedPOCuts(poId,poCuts){
+    var initial=poCuts.filter(function(r){return r.asal!=='lanjut';}),rolls=Object.create(null),weight=Object.create(null),valid=initial.length>1&&livePO(poRows[poId]);
+    if(valid)poCuts.forEach(function(r){
+      var sizes=json(r.ukuran,{})||{},q=n(r.total);
+      if(!Number.isSafeInteger(q)||q<=0||q!==sum(Object.keys(sizes).map(function(k){return n(sizes[k])||0;})))valid=false;
+      if(r.asal==='lanjut'&&(nativeMaterials(r).length||rows(json(r.alokasiBahan,[])).length||n(r.kg)>0))valid=false;
+    });
+    if(valid)initial.forEach(function(r){
+      var cut=sizedNativeCut(r),allocations=rows(json(cut.alokasiBahan,[])),declared=materialTotals(nativeMaterials(cut)),used=Object.create(null),seen=Object.create(null);
+      if(cut._hppPlanSizeMismatch||!allocations.length||!declared){valid=false;return;}
+      allocations.forEach(function(a){
+        var receipt=stockById[a.stokId],size=String(a.ukuran||'').trim().toUpperCase(),q=n(a.qty),u=unit(receipt&&receipt.satuan);
+        if(!receipt||receipt.stockMode!=='roll'||!u||q===null||q<=0||!size||seen[a.stokId]){valid=false;return;}
+        seen[a.stokId]=true;weight[a.stokId]=(weight[a.stokId]||0)+q;if(weight[a.stokId]>(n(receipt.qty)||0)+0.000001)valid=false;
+        var key=C.norm(receipt.bahan)+'|'+u;used[key]=(used[key]||0)+q;
+        if(size==='XL'){var roll=rolls[a.stokId]||(rolls[a.stokId]={id:a.stokId,bahan:receipt.bahan,unit:u,qty:0});roll.qty+=q;}
+      });
+      if(!sameTotals(declared,used))valid=false;
+    });
+    if(!valid)return null;
+    var chosen=xlOutputs(poCuts,Object.keys(rolls).map(function(id){return rolls[id];}),'po:'+poId);
+    return Object.keys(rolls).length&&chosen.length?chosen:null;
+  }
   function nativeXLReferences(g){
     var byPO=Object.create(null),out=[];
     g.nativeCuts.forEach(function(r){(byPO[r.poId]||(byPO[r.poId]=[])).push(r);});
     Object.keys(byPO).forEach(function(poId){
+      var saved=savedXLChoice(g);if(nativeChoice(saved)&&saved.planId==='native:'+poId)return;
+      var sized=sizedPOCuts(poId,byPO[poId]);if(sized){g.sizedPO=true;out=out.concat(sized);return;}
       var poCuts=byPO[poId],initial=poCuts.filter(function(r){return r.asal!=='lanjut';}),groups=initial.map(function(r){return {first:sizedNativeCut(r),cuts:[r]};}),ambiguous=false;
       poCuts.filter(function(r){return r.asal==='lanjut';}).forEach(function(r){
         var matches=r.rencanaId?groups.filter(function(b){return b.first.rencanaId===r.rencanaId;}):groups;
@@ -483,6 +527,9 @@ function coreCommerceHpp(input) {
         if(matches.length!==1){ambiguous=true;return;}matches[0].cuts.push(r);
       });
       if(ambiguous)return;
+      /* XL rolls in a batch without XL output mean the XL cloth is spread over
+         preparations; any single batch would understate it. */
+      if(groups.some(function(b){return !sum(b.cuts.map(xlQty))&&(b.first._hppPlanSizeMismatch||rows(json(b.first.alokasiBahan,[])).some(function(a){return String(a.ukuran||'').trim().toUpperCase()==='XL';}));})){g.xlSpread=true;return;}
       groups.forEach(function(b){
         if(b.cuts.length===1){var single=nativeXLReference(b.first);if(single)out.push(single);return;}
         var sizes=Object.create(null),valid=true;
@@ -507,13 +554,14 @@ function coreCommerceHpp(input) {
      The owner then names the XL rolls, like the legacy selector below. Until a
      choice is saved the rolls are only offered: no quantity or cost changes. */
   function ownerXLChoice(g,legacyChoice,price){
-    var saved=cfg.xlReferences&&Object.prototype.hasOwnProperty.call(cfg.xlReferences,g.id)?cfg.xlReferences[g.id]:null,pos=unique(g.nativeCuts.filter(function(r){return xlQty(r)>0;}).map(function(r){return r.poId;}));
-    var poId=pos.length===1?pos[0]:'',po=poRows[poId],cuts=g.nativeCuts.filter(function(r){return r.poId===poId;}),rolls=[],seen=Object.create(null),candidate=null;
+    var saved=savedXLChoice(g),pos=unique(g.nativeCuts.filter(function(r){return xlQty(r)>0;}).map(function(r){return r.poId;}));
+    var poId=nativeChoice(saved)?String(saved.planId).slice(7):pos.length===1?pos[0]:'',po=poRows[poId],cuts=g.nativeCuts.filter(function(r){return r.poId===poId;}),rolls=[],seen=Object.create(null),candidate=null;
     var valid=!!po&&po.status!=='batal'&&!archivedCycle(po,json(po.imporSumber,{})||{})&&!g.xlReferenceCandidate&&!(legacyChoice.xl&&legacyChoice.xl.complete)&&typeof coreLegacyHash==='function'&&g.warnings.every(function(w){return (g.archiveNotes||[]).indexOf(w)>=0;});
     if(valid)cuts.forEach(function(r){
-      var sizes=json(r.ukuran,{})||{},q=n(r.total),allocations=rows(json(r.alokasiBahan,[])),list=nativeMaterials(r),declared=materialTotals(list),actual=Object.create(null);
+      var sizes=json(r.ukuran,{})||{},q=n(r.total),allocations=rows(json(r.alokasiBahan,[])),list=nativeMaterials(r),declared=materialTotals(list),rollOnly=rollMaterialTotals(r),actual=Object.create(null);
       if(!Number.isSafeInteger(q)||q<=0||q!==sum(Object.keys(sizes).map(function(k){return n(sizes[k])||0;}))){valid=false;return;}
       if(r.asal==='lanjut'){if(allocations.length||list.length||n(r.kg)>0)valid=false;return;}
+      if(!allocations.length&&declared&&sameTotals(declared,planSaldo(r)))return;
       if(!allocations.length||!declared){valid=false;return;}
       allocations.forEach(function(a){
         var id=String(a.stokId||''),receipt=stockById[id],amount=n(a.qty),u=unit(receipt&&receipt.satuan),rate=receipt?price(receipt):null,size=String(a.ukuran||'').trim().toUpperCase();
@@ -521,9 +569,9 @@ function coreCommerceHpp(input) {
         seen[id]=true;var key=C.norm(receipt.bahan)+'|'+u;actual[key]=(actual[key]||0)+amount;
         rolls.push({id:id,label:String(receipt.rollLabel||'Rol '+(rolls.length+1))+(size?' · jatah '+size:' · belum dibagi ukuran'),bahan:String(receipt.bahan||''),unit:u,qty:amount,harga:rate,totalCost:amount*rate});
       });
-      if(!sameTotals(declared,actual))valid=false;
+      if(!sameTotals(declared,actual)&&!sameTotals(rollOnly,actual))valid=false;
     });
-    if(valid&&rolls.length>1){
+    if(valid&&rolls.length>1&&sum(cuts.map(xlQty))>0){
       var proof={schema:2,modelId:g.id,poId:poId,cuts:cuts.map(function(r){return {id:r.id,ukuran:json(r.ukuran,{}),total:r.total,asal:r.asal||'',rencanaId:r.rencanaId||''};}),rolls:rolls.map(function(r){return {id:r.id,bahan:r.bahan,unit:r.unit,qty:r.qty};})};
       candidate={planId:'native:'+poId,evidenceRevision:coreLegacyHash(proof),totalPcs:sum(cuts.map(xlQty)),rolls:rolls};
       g.xlReferenceCandidate=candidate;
@@ -532,18 +580,15 @@ function coreCommerceHpp(input) {
     if(!(saved.confirmed===true&&candidate&&saved.planId===candidate.planId&&saved.evidenceRevision===candidate.evidenceRevision&&Array.isArray(saved.rollIds)&&saved.rollIds.length>0&&saved.rollIds.length<rolls.length&&unique(saved.rollIds).length===saved.rollIds.length&&saved.rollIds.every(function(id){return typeof id==='string'&&!!seen[id];}))){
       g.warnings.push('Acuan kain XL yang ditentukan owner tidak cocok lagi dengan riwayat. Tentukan ulang kain XL.');return null;
     }
-    var selected=rolls.filter(function(r){return saved.rollIds.indexOf(r.id)>=0;}),materials=Object.create(null);
-    selected.forEach(function(r){var key=C.norm(r.bahan)+'|'+r.unit,m=materials[key]||(materials[key]={nama:r.bahan,satuan:r.unit,qty:0});m.qty+=r.qty;});
-    return cuts.filter(function(r){return xlQty(r)>0;}).map(function(r,i){
-      var q=xlQty(r);return Object.assign({},r,{total:q,ukuran:{XL:q},bahanList:i?[]:Object.keys(materials).map(function(k){return materials[k];}),alokasiBahan:i?[]:selected.map(function(a){return {stokId:a.id,qty:a.qty,ukuran:'XL'};}),bahan:'',kg:0,asal:i?'lanjut':'',rencanaId:'',_hppBatchId:'owner:'+poId});
-    });
+    return xlOutputs(cuts,rolls.filter(function(r){return saved.rollIds.indexOf(r.id)>=0;}),'owner:'+poId);
   }
   function nativeCosts(g,legacyChoice){
     if(!g.nativeCuts.length)return null;
     /* A pure XL batch is the model reference. Weight observations by their pcs,
        never average per-batch prices equally or allocate mixed cloth to XL alone.
        Continuations share the material on the first cut and stay together. */
-    var acuanXL=nativeXLReferences(g),ownerXL=acuanXL.length?null:ownerXLChoice(g,legacyChoice,price);if(ownerXL)acuanXL=ownerXL;
+    /* Rolls read from labels stay open to an owner choice: a label on a used plan cannot be edited. */
+    var acuanXL=nativeXLReferences(g),ownerXL=!acuanXL.length||g.sizedPO||nativeChoice(savedXLChoice(g))?ownerXLChoice(g,legacyChoice,price):null;if(ownerXL)acuanXL=acuanXL.filter(function(r){return livePO(poRows[r.poId]);}).concat(ownerXL);
     var cuts=acuanXL.length?acuanXL:g.nativeCuts;
     var pcs=0,fabricCost=0,cutCost=0,warnings=[],cutWarnings=[],details=[],cutDetails=[];
     function warn(s){warnings.push(s);}
@@ -565,7 +610,18 @@ function coreCommerceHpp(input) {
       });
       Object.keys(declared).forEach(function(key){var d=declared[key],left=d.qty-(allocated[key] || 0);if(left< -0.000001){warn('Jumlah rol melebihi bahan pada hasil potong '+r.id+'.');return;}if(left<=0.000001)return;var rate=average(d.nama,d.unit),material=effectivePrices&&effectivePrices.materialMap[key],fixed=material&&material.units[d.unit];if(rate===null)warn('Harga pembelian '+d.nama+' ('+d.unit+') belum lengkap.');else fabricCost+=left*rate;details.push({cutId:r.id,jenis:d.nama,unit:d.unit,qty:left,avgHarga:rate,totalCost:rate===null?null:left*rate,priceSource:fixed&&fixed.materialOverride?'harga-jenis-bahan':'rata-rata-pembelian',priceCorrectionId:fixed&&fixed.materialOverride?fixed.correctionId:''});});
     });
-    return {xl:!!acuanXL.length,ownerXL:!!ownerXL,includedCuts:cuts,fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:ownerXL?'Kain XL ditentukan owner dari rol tercatat':acuanXL.length?'Catatan bahan Produksi, potongan ukuran XL':'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
+    return {xl:!!acuanXL.length,ownerXL:!!ownerXL,sized:!!acuanXL.length&&cuts.every(function(r){var labels=rows(json(r.alokasiBahan,[]));return r.asal==='lanjut'||labels.length>0&&labels.every(function(a){return String(a.ukuran||'').trim().toUpperCase()==='XL';});}),includedCuts:cuts,fabric:{perPcs:pcs?fabricCost/pcs:null,totalPcs:pcs,totalCost:fabricCost,complete:pcs>0&&!warnings.length,warnings:unique(warnings),details:details,source:ownerXL?'Kain XL ditentukan owner dari rol tercatat':acuanXL.length?'Catatan bahan Produksi, potongan ukuran XL':'Catatan bahan Produksi'},cutting:{perPcs:pcs?cutCost/pcs:null,totalPcs:pcs,totalCost:cutCost,complete:pcs>0&&!cutWarnings.length,warnings:unique(cutWarnings),details:cutDetails,source:'Tarif potong tercatat'}};
+  }
+  /* Rolls labelled for XL, or an owner choice, on a complete record outrank old XL
+     output with no usable fabric. An archived cycle never stands in as that record. */
+  function noFabricXL(xl){
+    return !(xl.details||[]).length&&!xl.totalCost&&(xl.warnings||[]).every(function(w){return w==='Ada hasil potong tanpa rincian bahan.'||w==='Belum ada biaya kain yang dapat dihitung.';})&&(xl.includedEntries||[]).every(function(row){var e=row.entry;return !rows(e.bahanList).length&&!rows(e.rols).length&&!String(e.jenisBahan||'').trim()&&!(n(e.kiloan)>0);});
+  }
+  function ownReference(native,legacyChoice){
+    if(!native||!native.xl)return false;
+    if(native.ownerXL)return true;
+    if(legacyChoice.xl&&!noFabricXL(legacyChoice.xl))return false;
+    return native.sized&&native.fabric.complete&&native.includedCuts.every(function(r){return livePO(poRows[r.poId]);});
   }
   function sewingPair(r){return String(r.poId||'').trim()&&String(r.maklonId||'').trim()?JSON.stringify([r.poId,r.maklonId]):'';}
   /* Accepted counts can carry the owner's rate even when an older dispatch
@@ -732,6 +788,7 @@ function coreCommerceHpp(input) {
     var readyPlans=rows(tables.RencanaPotong).filter(function(p){return g.poIds.includes(p.poId)&&p.status==='siap'&&!rows(tables.Potong).some(function(r){return r.rencanaId===p.id&&!ownerOpening(r);});});
     if(readyPlans.length){provisional=true;notes.push('Masih ada bahan yang disiapkan; rata-rata dapat berubah setelah hasil potong bertambah.');}
     if(legacyCost&&legacyCost._hppAssignedEntries||native&&native.ownerXL)notes.push('Kain khusus XL ditentukan owner dari rol tercatat; jumlah produksi dan stok tidak diubah.');
+    else if(native&&native.sized)notes.push('Kain XL dibaca dari rol bertanda ukuran XL.');
     if(provisional)notes.push('Angka ini sementara berdasarkan hasil yang sudah tercatat.');
     return {sizes:Object.keys(sizes).sort().map(function(size){return {size:size,jumlah:sizes[size]};}),totalPcs:kain.totalPcs,totalKg:qtyByUnit.kg||0,qtyByUnit:qtyByUnit,yieldByUnit:yieldByUnit,verifiedRollCount:Object.keys(rolls).length,fullRollCount:fullRollCount,fullRollPcs:fullRollPcs,pcsPerFullRoll:fullRollCount?fullRollPcs/fullRollCount:null,rolls:Object.keys(rolls).map(function(key){return rolls[key];}),rollGroups:rollGroups,provisional:provisional,notes:notes};
   }
@@ -739,12 +796,12 @@ function coreCommerceHpp(input) {
   rows(tables.Potong).filter(function(c){return !ownerOpening(c);}).forEach(function(c){rows(json(c.alokasiBahan,[])).forEach(function(a){var key='native:'+a.stokId;allRollUsage[key]=(allRollUsage[key]||0)+(n(a.qty)||0);});});
   legacyModels.forEach(function(model){(model.ledger||[]).forEach(function(row){rows(row.entry.rols).forEach(function(a){var key='legacy:'+a.purchaseId;allRollUsage[key]=(allRollUsage[key]||0)+(n(a.kiloan==null?a.kg:a.kiloan)||0);});});});
   var models=Object.keys(groups).sort().map(function(id){
-    var g=groups[id],legacyChoice=legacyXLSelection(g,legacyReference(g)),native=nativeCosts(g,legacyChoice),ownerXL=!!(native&&native.ownerXL),pakaiXL=!!(legacyChoice.xl||native&&native.xl),lc=ownerXL?null:pakaiXL?legacyChoice.xl:legacyChoice.all,nativeReference=pakaiXL&&!(native&&native.xl)?null:native,lp=lc?C.cutting(g.legacy,legacy.meta || {},lc):null,ls=g.legacy?C.sewing(g.legacy,legacy.workers || []):null,ns=nativeSewing(g),kain=evidence([lc,nativeReference&&nativeReference.fabric]),potong=evidence([lp,nativeReference&&nativeReference.cutting]);
+    var g=groups[id],legacyChoice=legacyXLSelection(g,legacyReference(g)),native=nativeCosts(g,legacyChoice),ownRef=ownReference(native,legacyChoice),pakaiXL=!!(legacyChoice.xl||native&&native.xl),lc=ownRef?null:pakaiXL?legacyChoice.xl:legacyChoice.all,nativeReference=pakaiXL&&!(native&&native.xl)?null:native,lp=lc?C.cutting(g.legacy,legacy.meta || {},lc):null,ls=g.legacy?C.sewing(g.legacy,legacy.workers || []):null,ns=nativeSewing(g),kain=evidence([lc,nativeReference&&nativeReference.fabric]),potong=evidence([lp,nativeReference&&nativeReference.cutting]);
     /* A clean catalog-only legacy row must not hide the current native rate. */
     if(ns.totalPcs)ls=liveLegacySewing(g,ls);
     var jahit=ns.totalPcs||ns.hasEvidence?(ls&&(ls.totalPcs||ls.capped&&ls.warnings.length)?evidence([ls,ns]):ns):(ls&&ls.hasEvidence?ls:ns),ci=C.config({id:id,members:g.members},cfg),value=ci.value,mode=value&&value.jahitMode || (value?'manual':'auto');
-    /* An archived cycle gives nothing to a reference the owner took from another PO. */
-    if(ownerXL)g.warnings=g.warnings.filter(function(w){return (g.archiveNotes||[]).indexOf(w)<0;});
+    /* An archived cycle gives nothing to a reference taken from another PO. */
+    if(ownRef)g.warnings=g.warnings.filter(function(w){return (g.archiveNotes||[]).indexOf(w)<0;});
     var sourceWarnings=g.warnings.slice();
     if(mode!=='auto'&&mode!=='manual')g.warnings.push('Pilihan ongkos jahit tidak valid.');
     var hargaJahit=mode==='auto'?(jahit.complete?jahit.perPcs:null):n(value&&value.hargaJahit),biayaLain=value?n(value.biayaLain===undefined?0:value.biayaLain):0,margin=value?n(value.targetMargin===undefined?30:value.targetMargin):30;
@@ -761,10 +818,11 @@ function coreCommerceHpp(input) {
     if(total!==null&&(!Number.isFinite(total)||total>Number.MAX_SAFE_INTEGER)){total=null;warnings.push('Total HPP melampaui batas perhitungan.');}
     if(biayaLain===null)warnings.push('Biaya lain belum valid.');if(margin===null||margin>=100)warnings.push('Target margin harus nol sampai kurang dari 100%.');
     if(!pakaiXL)warnings.push('Belum ada hasil XL dengan bahan terpisah. HPP masih perkiraan seluruh hasil; rekomendasi harga menunggu acuan XL.');
+    if(!pakaiXL&&g.xlSpread&&!g.xlReferenceCandidate)warnings.push('Rol XL tersebar di beberapa persiapan, tetapi kainnya belum bisa dihitung atau dipilih. Periksa bahan PO ini: rol dipakai PO lain atau tidak punya rincian rol.');
     var configSaved=false;if(ci.source==='model'&&ci.complete){try{coreCommerceHppConfig(value);configSaved=true;}catch(invalidConfig){}}
     var ready=pakaiXL&&configSaved&&basisReviewed&&total!==null&&margin!==null&&margin<100&&!g.warnings.length,prices={};
     Object.keys(cfg.marketplace || {}).forEach(function(key){var mp=cfg.marketplace[key] || {},price=n(value&&value.hargaJual&&value.hargaJual[key]);if(!ready)return;prices[key]=coreCommercePriceQuote({hpp:total,price:price===null?0:price,margin:margin,fee:n(mp.fee),tax:n(cfg.pajak),fixed:mp.fixedPerPcs===undefined?0:n(mp.fixedPerPcs)});});
-    kain.basis=basis;kain.observasi=observations(g,lc,nativeReference,kain,pakaiXL);basis.provisional=kain.observasi.provisional;if(ownerXL&&legacyChoice.xl&&legacyChoice.xl.totalPcs)kain.observasi.notes.push('Hasil XL lama '+legacyChoice.xl.totalPcs+' pcs tanpa rincian bahan tidak ikut acuan ini.');
+    kain.basis=basis;kain.observasi=observations(g,lc,nativeReference,kain,pakaiXL);basis.provisional=kain.observasi.provisional;if(ownRef&&legacyChoice.xl&&legacyChoice.xl.totalPcs)kain.observasi.notes.push('Hasil XL lama '+legacyChoice.xl.totalPcs+' pcs tanpa rincian bahan tidak ikut acuan ini.');
     return {id:id,series:g.series,nama:g.nama,namaBarang:g.nama,sizes:unique(g.sizes).sort(),poIds:unique(g.poIds),xlReferenceCandidate:g.xlReferenceCandidate,xlReference:g.xlReference,kain:summary(kain),potong:summary(potong),jahit:summary(jahit),config:ci,basis:basis,hargaJahit:hargaJahit,biayaLain:biayaLain,targetMargin:margin,hppTotal:total,configSaved:configSaved,configured:ready,complete:ready,sourceWarnings:sourceWarnings,warnings:unique(warnings),prices:prices};
   });
   var grouped=coreCommerceHppGroups(models,cfg);

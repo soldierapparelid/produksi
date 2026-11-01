@@ -3,7 +3,8 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const root=path.resolve(__dirname,'..'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
 function part(a,b){const p=html.indexOf(a),q=html.indexOf(b,p+a.length);assert.ok(p>=0&&q>p,a);return html.slice(p,q);}
 function ui(){const c=vm.createContext({console});vm.runInContext(fs.readFileSync(path.join(root,'src/core.js'),'utf8'),c);vm.runInContext(`
- var A={},C={},R={},actor={id:'owner',divisi:'owner'},requests=[],messages=[],closed=0,rendered='',D={po:{},produk:{product:{id:'product',nama:'Kaos',series:'Seri'}}};
+ var A={},C={},R={},actor={id:'owner',divisi:'owner'},requests=[],messages=[],closed=0,rendered='',D={po:{},produk:{product:{id:'product',nama:'Kaos',series:'Seri'}}},asked=null,askedGo=null;
+ function confirmBox(o,fn){asked=o;askedGo=fn;}function setTimeout(fn){fn();}function labelled(id,qty,uk){var r=choice(id,qty);r.meta={'[data-roll-uk]':{value:uk}};return r;}
  var stock=[{kunci:'katun',nama:'Katun',satuan:'kg',saldo:30,tersedia:25,legacyTersedia:10},{kunci:'rib',nama:'Rib',satuan:'kg',saldo:4,tersedia:4,legacyTersedia:0}];
  var rolls=[{id:'rollA',bahan:'Katun',satuan:'kg',qty:8,tersedia:5,invoice:'BON-A',rollLabel:'Rol 1'},{id:'rollB',bahan:'Katun',satuan:'kg',qty:10,tersedia:10,invoice:'BON-A',rollLabel:'Rol 2'},{id:'rollC',bahan:'Rib',satuan:'kg',qty:4,tersedia:4,invoice:'BON-B',rollLabel:'Rol 1'}];
  var S={state:{po:[],users:[],produk:[],stokRol:rolls,stokRingkas:stock,rencanaPotong:[],settings:{ukuran:['M']}},tab:'po',f:{},sub:{}},sheet={};
@@ -33,7 +34,45 @@ test('product and custom new PO default to preparing materials later, with stock
 test('new PO requires explicitly checked active sizes and sends no target quantity with the same material reservation',async()=>{
  const h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product')");const shown=h.run('rendered');assert.match(shown,/Ukuran aktif/);assert.doesNotMatch(shown,/data-po-active-size="[^"]+" checked|data-size=|Target per ukuran/);
  h.run('form.activeSizes=[];A.poSave(button)');assert.equal(h.run('requests.length'),0);assert.match(h.run('messages[messages.length-1]'),/Pilih minimal satu ukuran/);
- h.run("form.activeSizes=['M','XL']");const done=h.run('A.poSave(button)');await Promise.resolve();assert.deepEqual(h.json('requests[0].payload.po.ukuranAktif'),['M','XL']);assert.deepEqual(h.json('requests[0].payload.po.ukuran'),{});assert.equal(h.run('requests[0].payload.po.total'),undefined);assert.equal(h.run('requests[0].action'),'savePOWithRencana');assert.equal(h.run('requests[0].payload.rencana.alokasiBahan.length'),2);h.resolve(0,{po:{id:'newpo001'},rencana:{id:'newpo001_cut'},pending:false});await done;
+ h.run("form.activeSizes=['M','XL'];form.choices=[labelled('rollA',5,'M'),labelled('rollC',2,'XL')]");const done=h.run('A.poSave(button)');await Promise.resolve();assert.equal(h.run('asked'),null);assert.deepEqual(h.json('requests[0].payload.po.ukuranAktif'),['M','XL']);assert.deepEqual(h.json('requests[0].payload.po.ukuran'),{});assert.equal(h.run('requests[0].payload.po.total'),undefined);assert.equal(h.run('requests[0].action'),'savePOWithRencana');assert.equal(h.run('requests[0].payload.rencana.alokasiBahan.length'),2);h.resolve(0,{po:{id:'newpo001'},rencana:{id:'newpo001_cut'},pending:false});await done;
+});
+
+test('a new PO asks once about rolls without a size, then saves them as chosen',async()=>{
+ const h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product');form.activeSizes=['M','XL'];form.choices=[labelled('rollA',5,'M'),labelled('rollC',2,'')]");
+ h.run('A.poSave(button)');assert.equal(h.run('requests.length'),0);assert.match(h.run('asked.title'),/belum dibagi ukuran/);assert.match(h.run('asked.text'),/1 rol masih "semua"/);
+ const done=h.run('askedGo()');await Promise.resolve();assert.equal(h.run('requests.length'),1);assert.equal(h.run('requests[0].action'),'savePOWithRencana');assert.deepEqual(h.json('requests[0].payload.rencana.alokasiBahan'),[{stokId:'rollA',qty:5,ukuran:'M'},{stokId:'rollC',qty:2}]);h.resolve(0,{po:{id:'newpo001'},rencana:{id:'newpo001_cut'},pending:false});await done;
+});
+
+test('one active size needs no label, saldo lama asks nothing, and a size outside the PO is refused',async()=>{
+ let h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product');form.activeSizes=['M'];form.choices=[choice('rollA',5)]");h.run('A.poSave(button)');await Promise.resolve();assert.equal(h.run('asked'),null);assert.equal(h.run('requests.length'),1);
+ h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product');form.activeSizes=['M','XL'];form.choices=[labelled('rollA',5,'L')]");h.run('A.poSave(button)');assert.equal(h.run('requests.length'),0);assert.equal(h.run('asked'),null);assert.match(h.run('messages[messages.length-1]'),/Rol ditandai ukuran L/);
+});
+
+test('a form asks again only when more rolls lose their size after an answer',async()=>{
+ const h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product');form.activeSizes=['M','XL'];form.choices=[labelled('rollA',5,'')]");
+ h.run('A.poSave(button)');assert.equal(h.run('asked.text').includes('1 rol'),true);h.run('asked=null;form._rollUkOk=1;form.choices=[labelled('+"'rollA'"+',5,\'\'),labelled('+"'rollC'"+',2,\'\')]');
+ h.run('A.poSave(button)');assert.equal(h.run('requests.length'),0);assert.equal(h.run('asked.text').includes('2 rol'),true);
+});
+
+test('the PO sizes decide the reminder even when the form offers fewer, and rows with no select are not counted',()=>{
+ const h=ui();h.run("D.po.po1={id:'po1',status:'aktif',ukuranAktif:['M','XL'],ukuran:{}};form.values.poId='po1';function poUkuranAktif(){return ['M','XL'];}form.activeSizes=[];form.meta['[data-roll-picker]']={getAttribute:function(k){return k==='data-uk'?'XL':'';}};form.choices=[labelled('rollA',5,'')]");
+ assert.deepEqual(h.json('rollUkuranAktif(form)'),['M','XL']);assert.equal(h.run('rollUkuranBelum(form,rollUkuranAktif(form))'),1);
+ h.run("form.choices=[choice('rollA',5)]");assert.equal(h.run('rollUkuranBelum(form,rollUkuranAktif(form))'),0);
+});
+
+test('sizes the roll rule refuses get no hint and no select',()=>{
+ const h=ui();const shown=h.run("rollPickerHtml([],'','','',['ANAK (S)','ANAK (M)'])");assert.doesNotMatch(shown,/Isi kolom Ukuran/);assert.match(shown,/data-uk=""/);
+});
+
+test('sizes the roll rule refuses are not offered, and a saved label stays',()=>{
+ const h=ui();const list=h.run("rollChoicesHtml('Katun',[{stokId:'rollA',qty:5,ukuran:'L'}],'',['M','ANAK (S)','UKURAN KHUSUS BESAR','L'])");
+ assert.doesNotMatch(list,/ANAK|KHUSUS/);assert.match(list,/value="M"/);assert.match(list,/value="L" selected/);
+});
+
+test('a new PO offers a size on each roll and the summary counts what is not divided',()=>{
+ const h=ui();h.run("S.state.settings.ukuran=['S','M','L','XL'];openPO('','product')");assert.match(h.run('rendered'),/data-uk="S,M,L,XL"/);assert.match(h.run('rendered'),/Isi kolom Ukuran tiap rol/);
+ h.run("form.activeSizes=['M','XL'];form.choices=[labelled('rollA',5,'XL'),labelled('rollC',2,'')];rollPickerRecalc(form)");const line=h.run("form.meta['[data-roll-summary]'].textContent");assert.match(line,/XL 1 rol/);assert.match(line,/1 rol belum dibagi ukuran/);
+ h.run("form.activeSizes=['XL'];rollPickerRecalc(form)");assert.doesNotMatch(h.run("form.meta['[data-roll-summary]'].textContent"),/belum dibagi/);
 });
 
 test('legacy target editor preserves recorded quantities while selected-size production offers no unselected extras',async()=>{
