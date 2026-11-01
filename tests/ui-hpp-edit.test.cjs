@@ -119,6 +119,87 @@ test('a saved provisional model stays saved, checked, and clean while simulation
   assert.match(h.json('messages').at(-1).text,/Lengkapi/);
 });
 
+const riwayatKain={perPcs:23958.3,totalPcs:216,totalCost:5175000,bahan:[{nama:'Dryfit Embos <Hitam>',satuan:'kg',qty:51.75,total:5175000}],poNo:['PO-1','PO-2','PO-3','PO-4'],tanpaHarga:[]};
+function hppNoCloth(extra){
+  const h=hppEditFixture();h.context.extra=JSON.stringify(extra);h.run("function satuanPendek(x){return x;}var m=commerceHppModel('hpp-edit');m.configured=false;m.configSaved=false;m.hppTotal=null;m.hargaKain=null;m.hargaPotong=null;m.kainData=null;m.potongData=null;m.sumberKain='';m.sumberPotong='';m.kain={complete:false,perPcs:null,warnings:['Rincian bahan hasil potong c3 belum lengkap.']};m.potong={complete:false,perPcs:null};m.warnings=['Rincian bahan hasil potong c3 belum lengkap.','Isi ongkos jahit dahulu.'];m.config={value:{}};Object.assign(m,JSON.parse(extra));");
+  return h;
+}
+const biayaTersimpan={config:{value:{jahitMode:'manual',hargaJahit:8000,biayaLain:50000,targetMargin:30,ketLain:'Packing',costSchema:2,costsReviewed:true}}};
+const kotakKain="var kotak={get value(){return currentForm.values.kainManual;},set value(v){currentForm.values.kainManual=String(v);}},fokus=0,potongKotak={type:'number',focus:function(){fokus++;}},sebelumnya=$;$=function(s,f){if(s==='[name=\"kainManual\"]')return kotak;if(s==='[name=\"potongManual\"]')return potongKotak;return sebelumnya(s,f);};currentForm._commerceModel=commerceHppModel('hpp-edit');";
+const tekan="A.commerceHppPakaiRiwayat({closest:function(){return currentForm;}});";
+test('a model with no cloth figure shows the offer with its source and leaves the box empty',()=>{
+  const h=hppNoCloth({kainRiwayat:riwayatKain}),out=h.run("commerceHppManualFields(commerceHppModel('hpp-edit'),{})");
+  assert.match(out,/name="kainManual"[^>]*value=""/);assert.match(out,/Belum ada data XL lengkap/);assert.match(out,/data-hpp-riwayat/);assert.match(out,/Dryfit Embos &lt;Hitam&gt; 51\.75 kg ÷ 216 pcs = Rp23958\.3 \/ pcs/);assert.match(out,/PO-1, PO-2, PO-3 dan 1 PO lain/);assert.match(out,/data-a="commerceHppPakaiRiwayat"/);
+  assert.equal(h.run("commerceHppModel('hpp-edit').hargaKain"),null,'the offer stays an offer until saved');
+});
+test('an untouched form with an offer is not an edit: nothing is saved with it and the XL and member buttons stay open',()=>{
+  const h=hppNoCloth({kainRiwayat:riwayatKain,...biayaTersimpan,hargaJahit:8000,biayaLain:50000});h.run("currentForm._commerceModel=commerceHppModel('hpp-edit');");
+  assert.equal(h.run('commerceHppDraft(currentForm).changed'),false);assert.equal(h.run('commerceHppDraft(currentForm).kainManual'),null);
+  h.run('A.commerceHppSave(null);');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.kainManual,undefined);
+});
+test('Pakai angka ini fills the box, previews as a change, and saves only through the normal save',()=>{
+  const h=hppNoCloth({kainRiwayat:riwayatKain});h.run(kotakKain+tekan);
+  assert.equal(h.run('currentForm.values.kainManual'),'23958');assert.equal(h.run('fokus'),1,'the cursor moves on to cutting');assert.equal(h.requests.length,0);
+  assert.equal(h.run('commerceHppDraft(currentForm).dirty'),true);assert.equal(h.run('commerceHppDraft(currentForm).kain'),23958);assert.match(h.run('currentForm.hppCost.innerHTML'),/Isi manual/);
+  h.run("currentForm.values.potongManual='1500';recalc(currentForm);");assert.match(h.run('currentForm.hppPreview.innerHTML'),/belum disimpan/);
+  h.run('A.commerceHppSave(null);');assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.kainManual,23958);assert.equal(h.requests[0].payload.config.potongManual,1500);
+});
+test('the button does nothing without an offer or while a save is running',()=>{
+  let h=hppNoCloth({});h.run(kotakKain+tekan);assert.equal(h.run('currentForm.values.kainManual'),undefined);
+  h=hppNoCloth({kainRiwayat:riwayatKain});h.run(kotakKain+'currentForm._commerceLocked=true;'+tekan);assert.equal(h.run('currentForm.values.kainManual'),undefined);
+  h=hppNoCloth({kainRiwayat:riwayatKain,hargaKain:30000,sumberKain:'manual'});h.run(kotakKain+tekan);assert.equal(h.run('currentForm.values.kainManual'),undefined);
+});
+test('clearing the box after pressing saves no manual cloth',()=>{
+  const h=hppNoCloth({kainRiwayat:riwayatKain});h.run(kotakKain+tekan+"currentForm.values.kainManual='';A.commerceHppSave(null);");
+  assert.equal(h.requests.length,1);assert.equal(h.requests[0].payload.config.kainManual,undefined);
+});
+test('a group preview uses the member parts the server will use once a figure is typed',()=>{
+  const h=hppNoCloth({isGroup:true,kainAnggota:20000,potongAnggota:900,sourceWarnings:[]});
+  h.run("currentForm._commerceModel=commerceHppModel('hpp-edit');");assert.equal(h.run('commerceHppDraft(currentForm).kain'),null,'no typed figure: the server keeps waiting');assert.equal(h.run('commerceHppDraft(currentForm).potong'),null);
+  h.run("currentForm.values.kainManual='30000';");const d=h.json('commerceHppDraft(currentForm)');assert.equal(d.kain,20000);assert.equal(d.potong,900);assert.equal(d.model.sumberKain,'data');assert.equal(d.model.sumberPotong,'data');
+});
+test('a group preview counts a member part and a typed figure together as ready',()=>{
+  const h=hppNoCloth({isGroup:true,potongAnggota:900,sourceWarnings:[],hargaJahit:8000,biayaLain:0});h.run("currentForm._commerceModel=commerceHppModel('hpp-edit');currentForm.values.kainManual='25000';currentForm.values.biayaLain='0';");
+  const d=h.json('commerceHppDraft(currentForm)');assert.equal(d.potong,900);assert.equal(d.model.hppTotal,33900);assert.equal(d.recommendationReady,true);
+  const k=hppNoCloth({isGroup:true,kainAnggota:20000,sourceWarnings:[],hargaJahit:8000,biayaLain:0});k.run("currentForm._commerceModel=commerceHppModel('hpp-edit');currentForm.values.potongManual='1500';currentForm.values.biayaLain='0';");
+  const e=k.json('commerceHppDraft(currentForm)');assert.equal(e.kain,20000);assert.equal(e.model.sumberPotong,'manual');assert.equal(e.recommendationReady,true);
+});
+test('under a hold a typed cloth figure on an XL basis stays a preview unless every part is typed',()=>{
+  const h=hppNoCloth({tahanManual:true,basis:{ukuran:'XL'},potongData:900,hargaPotong:900,hargaJahit:8000,biayaLain:0});h.run("currentForm._commerceModel=commerceHppModel('hpp-edit');currentForm.values.kainManual='20000';currentForm.values.biayaLain='0';");
+  assert.equal(h.run('commerceHppDraft(currentForm).recommendationReady'),false);
+  h.run("commerceHppModel('hpp-edit').tahanManual=false;");assert.equal(h.run('commerceHppDraft(currentForm).recommendationReady'),true);
+});
+test('under a hold, cloth from data stays a preview too',()=>{
+  const h=hppNoCloth({basis:{ukuran:'XL'},kain:{complete:true,perPcs:20000},kainData:20000,hargaKain:20000,sumberKain:'data',potong:{complete:true,perPcs:900},potongData:900,hargaPotong:900,sumberPotong:'data',hargaJahit:8000,biayaLain:0,sourceWarnings:['PO lama masih memerlukan pemeriksaan riwayat.']});h.run("currentForm._commerceModel=commerceHppModel('hpp-edit');currentForm.values.biayaLain='0';");
+  assert.equal(h.run('commerceHppDraft(currentForm).recommendationReady'),false);
+  h.run("commerceHppModel('hpp-edit').sourceWarnings=[];");assert.equal(h.run('commerceHppDraft(currentForm).recommendationReady'),true);
+});
+test('a saved manual figure is kept and never replaced by the past-cuts figure',()=>{
+  const h=hppNoCloth({kainRiwayat:riwayatKain,hargaKain:30000,sumberKain:'manual'});
+  const out=h.run("commerceHppManualFields(commerceHppModel('hpp-edit'),{kainManual:30000})");assert.match(out,/name="kainManual"[^>]*value="30000"/);assert.doesNotMatch(out,/data-hpp-riwayat/);
+});
+test('a cloth with no price or unit is named and nothing is offered',()=>{
+  const h=hppNoCloth({kainRiwayat:{perPcs:null,totalPcs:0,totalCost:0,bahan:[],poNo:[],tanpaHarga:['Drayfit Puma <Merah>']}});
+  const out=h.run("commerceHppManualFields(commerceHppModel('hpp-edit'),{})");assert.match(out,/name="kainManual"[^>]*value=""/);assert.match(out,/Catatan potong lama memakai Drayfit Puma &lt;Merah&gt;, tetapi harga atau satuannya belum ada/);assert.doesNotMatch(out,/data-hpp-riwayat/);
+  assert.match(h.run("commerceHppWarnings(commerceHppModel('hpp-edit'),true)"),/Rincian bahan hasil potong/,'no figure means the cloth warning stays');
+});
+test('a hold stays on screen beside an offer, whatever part it came from',()=>{
+  const tahan='Acuan kain XL yang ditentukan owner tidak cocok lagi dengan riwayat. Tentukan ulang kain XL.',h=hppNoCloth({kainRiwayat:riwayatKain,kain:{complete:false,perPcs:null,warnings:[tahan]},sourceWarnings:[tahan],warnings:[tahan]});
+  assert.match(h.run("commerceHppWarnings(commerceHppModel('hpp-edit'),true)"),/Tentukan ulang kain XL/);
+});
+test('warnings and evidence stay as they are beside an offer',()=>{
+  const kain={complete:false,perPcs:null,warnings:['Rincian bahan hasil potong c3 belum lengkap.'],details:[{jenis:'Katun',qty:2,unit:'kg',avgHarga:1000,totalCost:2000}]},h=hppNoCloth({kain,kainRiwayat:riwayatKain});
+  h.run("A.commerceHppOpen({getAttribute:function(){return 'hpp-edit';}});");const form=h.run('lastSheet');assert.match(form,/data-hpp-riwayat/);assert.match(form,/Rincian bahan hasil potong/);assert.match(form,/Lengkapi harga dan pemakaian/);
+});
+test('recorded cuts that only lack a separate XL say so, keep the average, and offer the XL choice',()=>{
+  const h=hppNoCloth({hargaKain:28000,sumberKain:'perkiraan',hargaPotong:1800,sumberPotong:'perkiraan',kain:{complete:true,perPcs:28000},potong:{complete:true,perPcs:1800},kainRiwayat:riwayatKain,xlReferenceCandidate:{planId:'native:p',rolls:[]}});
+  const out=h.run("commerceHppManualFields(commerceHppModel('hpp-edit'),{})");assert.match(out,/Data potong sudah ada, tetapi kain XL belum terpisah/);assert.match(out,/rata-rata semua ukuran, boleh dipakai dulu/);assert.match(out,/tekan Tentukan kain XL/);assert.doesNotMatch(out,/Belum ada data XL lengkap/);assert.doesNotMatch(out,/data-hpp-riwayat/);assert.match(out,/name="kainManual"[^>]*value=""/);
+  assert.match(h.run("commerceHppCost(commerceHppModel('hpp-edit'))"),/Rata-rata semua ukuran/);
+  h.run("commerceHppModel('hpp-edit').xlReference={planId:'native:p'}");assert.match(h.run("commerceHppManualFields(commerceHppModel('hpp-edit'),{})"),/tekan Ubah kain acuan XL/);
+  h.run("var model=commerceHppModel('hpp-edit');delete model.xlReference;S.state.me.divisi='admin';");const admin=h.run("commerceHppManualFields(model,{})");assert.match(admin,/minta owner menentukan kain XL/);assert.doesNotMatch(admin,/tekan/);
+  h.run("S.state.me.divisi='owner';delete model.xlReferenceCandidate");assert.doesNotMatch(h.run("commerceHppManualFields(model,{})"),/Tentukan kain XL/);
+});
+
 test('valid manual and other costs can be saved before cloth and cutting evidence are complete',()=>{
   const h=hppEditFixture();h.run("var m=commerceHppModel('hpp-edit');m.configured=false;m.configSaved=true;m.kain={complete:false,perPcs:null};m.potong={complete:false,perPcs:null};m.hppTotal=null;currentForm.values.biayaLain='5000';recalc(currentForm);A.commerceHppSave(null);");
   assert.match(h.run('currentForm.hppPreview.innerHTML'),/HPP belum lengkap/);

@@ -377,7 +377,7 @@ test('the HPP list leaves out models whose PO was deleted and shows the automati
   h.run("S.state.settings={poBuang:['p2'],poSembunyi:['p3','p4']};");
   let body=h.run('VIEWS.hpp()');
   assert.match(body,/<b>Ada<\/b>/);assert.match(body,/<b>ArsipAdaPotong<\/b>/);assert.ok(!body.includes('<b>Dihapus</b>')&&!body.includes('<b>TanpaPO</b>')&&!body.includes('<b>ArsipKosong</b>'));
-  assert.match(body,/3 model \/ kelompok dari PO yang sudah dihapus atau diarsipkan tidak ditampilkan/);assert.match(body,/<b>± Rp13800 \/ pcs<\/b><br><span class="chip warn">Periksa biaya/,'cloth + cutting + sewing + other costs, before the review');
+  assert.match(body,/3 model \/ kelompok belum punya PO, atau PO-nya sudah dihapus atau diarsipkan, jadi tidak ditampilkan/);assert.match(body,/<b>± Rp13800 \/ pcs<\/b><br><span class="chip warn">Periksa biaya/,'cloth + cutting + sewing + other costs, before the review');
   h.run("S.sub.hppSemua='1';");body=h.run('VIEWS.hpp()');assert.match(body,/<b>Dihapus<\/b>/);assert.match(body,/Sembunyikan lagi/);
   assert.match(html,/dihitung dari potongan ukuran '\+esc\(basis\.ukuran\)\+' saja/);
 });
