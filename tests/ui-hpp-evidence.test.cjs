@@ -10,6 +10,11 @@ test('partial or shared rolls do not present invented full-roll yield and incomp
  const m=model();m.kain.complete=false;m.kain.observasi.provisional=true;delete m.kain.observasi.pcsPerFullRoll;m.kain.observasi.notes=['Rol ini dipakai bersama ukuran lain.'];
  const out=draw(m);assert.match(out,/Lengkapi harga dan pemakaian/);assert.match(out,/Rata-rata pcs per rol tampil setelah/);assert.match(out,/Acuan sementara/);assert.match(out,/dipakai bersama ukuran lain/);assert.doesNotMatch(out,/Hasil rol penuh|Rp880000 ÷/);
 });
+test('a temporary reference says why it is temporary',()=>{
+ const m=model();m.kain.observasi.provisional=true;assert.match(draw(m),/Acuan sementara: masih ada bahan disiapkan/);
+ delete m.basis.ukuran;let out=draw(m);assert.match(out,/Acuan sementara: rata-rata semua ukuran, belum khusus XL/);assert.doesNotMatch(out,/perlu dilengkapi/);
+ m.kain.complete=false;assert.match(draw(m),/Acuan sementara: masih ada harga atau pemakaian yang perlu dilengkapi/);
+});
 test('HPP evidence handles absent observations and escapes material and source notes',()=>{
  assert.doesNotThrow(()=>draw({kain:{}}));const m=model();m.kain.details[0].jenis='<img onerror=bad>';m.kain.observasi.notes=['<script>bad</script>'];const out=draw(m);assert.match(out,/&lt;img/);assert.match(out,/&lt;script/);assert.doesNotMatch(out,/<img|<script>/);
 });
