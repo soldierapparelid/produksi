@@ -440,3 +440,27 @@ test('switching the requested HPP action during one refresh opens only the lates
   assert.equal(h.c.fetches.length,1);finishReadiness(h);await Promise.all([group,xl]);
   assert.equal(h.c.formOpens,1);assert.equal(h.c.currentForm.action,'commerceHppXLSave');assert.equal(h.c.requests.length,0);
 });
+
+test('offline series stay out of the HPP list and summary, even with Tampilkan on, and no data is touched',()=>{
+  const h=harness(),data={groups:[],models:[{id:'a',nama:'A',series:'OFFLINE-KA DEDEN BOGOR',poIds:[]},{id:'b',nama:'B',series:' offline ',poIds:[]},{id:'c',nama:'C',series:'OFFLINE',poIds:[]},{id:'d',nama:'D',series:'GHOST OPS',poIds:[]},{id:'e',nama:'E',series:'OFFLINERS',poIds:[]}]};
+  h.c.dataUji=JSON.stringify(data);h.run('var dataUji=JSON.parse(dataUji);');
+  assert.deepEqual(h.json('commerceHppDisplayModels(dataUji).map(function(m){return m.id;})'),['d','e']);
+  assert.equal(h.run('dataUji.models.length'),5,'the data keeps every model');
+});
+test('an offline model that was put in a group stays with its group',()=>{
+  const h=harness(),data={groups:[{id:'hppg_x',isGroup:true,nama:'X',modelIds:['a','b']}],models:[{id:'a',series:'OFFLINE-KA',poIds:[]},{id:'b',series:'GHOST',poIds:[]}]};
+  h.c.dataUji=JSON.stringify(data);h.run('var dataUji=JSON.parse(dataUji);');
+  assert.deepEqual(h.json('commerceHppDisplayModels(dataUji).map(function(m){return m.id;})'),['hppg_x']);
+});
+test('a group row with no PO photo uses the product photo of a member',()=>{
+  const h=harness();h.run("var D={po:{},produk:{p1:{id:'p1',nama:'SINGLET GYM HITAM',series:'COMBAT CORE',gambar:'v1'},p2:{id:'p2',nama:'LAIN',series:'COMBAT CORE'}}};gambarRef=function(o){return o&&o.gambar?{id:o.id,ver:o.gambar}:null;};thumb=function(o){return '<span data-img=\"'+o.id+'\"></span>';};");
+  assert.match(h.run("commerceHppThumb({isGroup:true,nama:'Singlet',series:'Kelompok HPP',poIds:[],memberModels:[{nama:'LAIN',series:'COMBAT CORE'},{nama:'singlet gym hitam',series:'combat core'}]})"),/data-img="p1"/);
+  assert.doesNotMatch(h.run("commerceHppThumb({isGroup:true,nama:'SINGLET GYM HITAM',series:'COMBAT CORE',poIds:[],memberModels:[]})"),/data-img/,'a group does not match by its own name');
+  assert.match(h.run("commerceHppThumb({nama:'SINGLET GYM HITAM',series:'COMBAT CORE',poIds:[]})"),/data-img="p1"/);
+  assert.doesNotMatch(h.run("commerceHppThumb({nama:'Tanpa Foto',series:'COMBAT CORE',poIds:[]})"),/data-img/);
+});
+
+test('disbanding a group counts only the members that return, and names the offline ones',()=>{
+  const h=harness();h.run('A.commerceHppGroupRemove('+trigger('hppg_example')+');');assert.match(h.c.lastSheet,/2 model kembali tampil sendiri/);assert.doesNotMatch(h.c.lastSheet,/seri OFFLINE/);
+  const k=harness();k.run("entry.data.groups[0].memberModels[1].series='OFFLINE-KA UJI';A.commerceHppGroupRemove("+trigger('hppg_example')+");");assert.match(k.c.lastSheet,/1 model kembali tampil sendiri/);assert.match(k.c.lastSheet,/1 model seri OFFLINE tidak tampil lagi di HPP/);
+});
