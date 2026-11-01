@@ -10,6 +10,7 @@ Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur p
 - Model yang sudah punya data potong tetapi kain XL belum terpisah kini menulis "Rata-rata semua ukuran" dan menjelaskan pilihannya, bukan "Belum ada data XL lengkap".
 
 - Versi **1.5.71**, rakitan `20261101-kain-riwayat-1571`, dari `main` `b6d5bd5`. Build, pemeriksaan hasil build, dan **1.638 tes lulus** (37 tes baru). Selain tawaran dan angka pratinjau kelompok, hasil HPP sama persis dengan 1.5.70 pada 12.000 kasus acak. Alur tombol dicoba di browser dengan kode server asli di atas data contoh.
+- Server terpasang pada deployment yang sama, **Versi 86**, **1 November 2026 pukul 17.41 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.71`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang.
 
 ## Rilis 1.5.70 — Isi manual kain dan potong, daftar kain untuk admin
 
