@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.71 — Angka kain sementara dari potong lama
+
+- Model atau kelompok yang belum punya angka kain menawarkan angka sementara dari hasil potong lamanya sendiri, termasuk PO lama dan arsip. Formulir menulis angka dan sumbernya; tombol **Pakai angka ini** memasukkannya ke Kain / pcs, lalu owner mengisi potong dan jahit dan menyimpan. Tanpa tombol itu tidak ada yang terisi, dan data XL lengkap tetap mengalahkan angka ini.
+- Baris potong lama dibaca hati-hati: baris ikut pcs bila melanjutkan potongan (`lanjut`), bila kainnya berberat, atau bila hanya menyebut kain yang berberat di baris lain PO yang sama dan tidak punya rol sendiri. Baris lain tidak ikut pcs: tanpa nama kain, punya rol tanpa berat, atau menyebut kain lain. Ejaan Drayfit, Squba, dan Htam dicocokkan ke nama pembelian. Kain yang harga atau satuannya belum ada disebut namanya di formulir.
+- Kelompok yang salah satu anggotanya punya data kain XL, walau masih ditahan, tidak diberi tawaran angka.
+- Model yang sudah punya data potong tetapi kain XL belum terpisah kini menulis "Rata-rata semua ukuran" dan menjelaskan pilihannya, bukan "Belum ada data XL lengkap".
+
+- Versi **1.5.71**, rakitan `20261101-kain-riwayat-1571`, dari `main` `b6d5bd5`. Build, pemeriksaan hasil build, dan **1.638 tes lulus** (37 tes baru). Selain tawaran dan angka pratinjau kelompok, hasil HPP sama persis dengan 1.5.70 pada 12.000 kasus acak. Alur tombol dicoba di browser dengan kode server asli di atas data contoh.
+
 ## Rilis 1.5.70 — Isi manual kain dan potong, daftar kain untuk admin
 
 - Model atau kelompok yang belum punya data XL lengkap boleh dibiarkan kosong, atau diisi Kain / pcs dan Potong / pcs dari catatan offline. Begitu data XL lengkap, HPP otomatis memakai data; isian manual tetap tersimpan tetapi tidak dipakai. Tiap biaya menulis asalnya: Dari data XL, Isi manual, atau Perkiraan.
