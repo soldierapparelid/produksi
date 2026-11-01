@@ -2,6 +2,16 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.69 — Kain per ukuran terbaca dari persiapan bahan
+
+- Kolom Ukuran tiap rol sekarang ada di semua jalur persiapan: Siapkan bahan potong, Tambah kain, PO baru, dan catat potong langsung oleh owner. Rol yang masih "semua" pada PO berukuran banyak diingatkan sekali sebelum disimpan. Ringkasan persiapan menghitung rol yang belum dibagi, dan detail PO menampilkan "Kain per ukuran" dari semua persiapan.
+- Bila semua rol sebuah PO berukuran, HPP menjumlahkan rol XL dari semua persiapan, masing-masing dengan bahan dan harganya sendiri, siapa pun yang mencatat hasil XL-nya. Sebelumnya satu persiapan bisa terbaca sebagai seluruh kain XL dan tetap ditandai lengkap.
+- Rol XL di persiapan tanpa hasil XL tidak lagi menghasilkan acuan sebagian. Bila ada rol yang belum berukuran, owner memilih lewat "Tentukan kain XL". Pilihan ini juga terbuka pada PO yang rolnya sudah berukuran, karena ukuran pada persiapan yang sudah dipakai tidak bisa diubah, dan pilihan owner mengalahkan pembacaan otomatis untuk PO itu. Bila kainnya tidak bisa dihitung maupun dipilih, HPP menuliskan sebabnya.
+- Rol bertanda XL pada catatan lengkap menggantikan XL lama hanya bila XL lama itu benar-benar tidak punya data kain. XL lama yang punya kain tetap dihitung bersama dan peringatannya tetap menahan. PO batal, PO arsip, dan PO yang masih ditinjau tidak menjadi sumber acuan.
+
+- Versi **1.5.69**, rakitan `20261101-kain-per-ukuran-1569`, dari `main` `2f1d90e`. Build, pemeriksaan hasil build, dan **1.583 tes lulus** (36 tes baru). Dua putaran pemeriksaan independen dengan data contoh menemukan cacat pada rancangan awal; yang terkonfirmasi sudah diperbaiki sebelum pemasangan.
+- Server terpasang pada deployment yang sama, **Versi 84**, **1 November 2026 pukul 13.44 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.69`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang.
+
 ## Rilis 1.5.68 — Kain acuan XL dari PO dengan rol campuran
 
 - PO yang hasil XL-nya memakai rol bersama ukuran lain, atau tersebar di dua persiapan, sekarang bisa memakai "Tentukan kain XL": owner memilih rol yang benar-benar dipakai XL, lalu HPP menghitung kain dan potong hanya untuk pcs XL. Sebelum dipilih tidak ada angka yang berubah. Pilihan ini hanya pengaturan HPP; hasil potong, stok, upah, dan pembayaran tidak berubah, dan pilihan dapat dihapus.
