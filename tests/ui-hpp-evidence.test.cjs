@@ -13,3 +13,8 @@ test('partial or shared rolls do not present invented full-roll yield and incomp
 test('HPP evidence handles absent observations and escapes material and source notes',()=>{
  assert.doesNotThrow(()=>draw({kain:{}}));const m=model();m.kain.details[0].jenis='<img onerror=bad>';m.kain.observasi.notes=['<script>bad</script>'];const out=draw(m);assert.match(out,/&lt;img/);assert.match(out,/&lt;script/);assert.doesNotMatch(out,/<img|<script>/);
 });
+test('no evidence shows nothing, a prepared plan says so, and a shared roll counts once',()=>{
+ assert.equal(draw({kain:{}}),'');assert.match(draw({kain:{observasi:{rencanaSiap:1}}}),/Bahan sudah disiapkan/);
+ const m=model();m.kain.details=[{jenis:'Katun',unit:'kg',qty:10,avgHarga:88000,totalCost:880000,sourceId:'r1'},{jenis:'Katun',unit:'kg',qty:5,avgHarga:88000,totalCost:440000,sourceId:'r1'},{jenis:'Embos',unit:'kg',qty:5,avgHarga:90000,totalCost:450000,sourceId:'r2'}];
+ const out=draw(m);assert.match(out,/Katun · 1 rol · 15 kg × Rp88000/);assert.match(out,/Embos · 1 rol · 5 kg × Rp90000/);assert.match(out,/Rp1320000/);
+});
