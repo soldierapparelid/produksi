@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.70 — Isi manual kain dan potong, daftar kain untuk admin
+
+- Model atau kelompok yang belum punya data XL lengkap boleh dibiarkan kosong, atau diisi Kain / pcs dan Potong / pcs dari catatan offline. Begitu data XL lengkap, HPP otomatis memakai data; isian manual tetap tersimpan tetapi tidak dipakai. Tiap biaya menulis asalnya: Dari data XL, Isi manual, atau Perkiraan.
+- Layar HPP menampilkan satu baris per kain: nama, jumlah rol, kg × harga, dan total, lalu dibagi pcs XL. Model yang bahannya sudah disiapkan tetapi belum dipotong menulis "Bahan sudah disiapkan". Rincian tiap rol tetap ada di bagian lipatan.
+- Tahanan riwayat tetap berlaku selama sebagian biaya masih berasal dari catatan yang ditahan; catatan PO arsip tidak menahan isian manual. Di kelompok, anggota yang kain XL-nya lengkap mengalahkan isian manual walau tarif potongnya kosong. Unduhan ringkasan menulis asal kain dan potong.
+
+- Versi **1.5.70**, rakitan `20261101-hpp-manual-1570`, dari `main` `ed0cb37`. Build, pemeriksaan hasil build, dan **1.601 tes lulus** (18 tes baru). Tanpa isian manual hasilnya sama persis dengan 1.5.69 pada 6.000 kasus acak. Alur dua kain, isi manual, dan perpindahan otomatis ke data dicoba di browser dengan kode server asli di atas data contoh.
+- Server terpasang pada deployment yang sama, **Versi 85**, **1 November 2026 pukul 14.48 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.70`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang.
+
 ## Rilis 1.5.69 — Kain per ukuran terbaca dari persiapan bahan
 
 - Kolom Ukuran tiap rol sekarang ada di semua jalur persiapan: Siapkan bahan potong, Tambah kain, PO baru, dan catat potong langsung oleh owner. Rol yang masih "semua" pada PO berukuran banyak diingatkan sekali sebelum disimpan. Ringkasan persiapan menghitung rol yang belum dibagi, dan detail PO menampilkan "Kain per ukuran" dari semua persiapan.
