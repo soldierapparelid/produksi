@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261101-kain-riwayat-1571';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261101-hpp-offline-1572';</script>
 <script>
 (function () {
 'use strict';
@@ -501,7 +501,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.71';
+var APP_VERSION = '1.5.72';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -8636,7 +8636,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.71';
+var UI_VERSION = '1.5.72';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -13631,14 +13631,14 @@ function commerceHppLive(f,kotak){
 }
 R.commerce=function(f){if(f._commerceHppGroup){commerceHppGroupPaint(f);return;}if(f._commerceBatch){commerceBatchPaint(f);return;}if(f._commerceReceipt){commerceReceiptAmountPaint(f);return;}if(f._commerceGroupOrders){commerceGroupAmountPaint(f);return;}var hppLive=$('[data-commerce-hpp-live]',f);if(hppLive)return commerceHppLive(f,hppLive);var target=$('[data-commerce-total]',f);if(!target)return;try{var nota=f.getAttribute('data-module')==='nota';if(nota)commerceNotaSizeSync(f);var v=formVals(f),total,qty;if(nota)total=commerceNotaTotals(commerceNotaValues(f),commerceNumber(v.discountPercent,'Diskon tambahan',false,100),commerceNumber(v.shipping,'Ongkir',true)).total;else{qty=commerceOrderValues(f).reduce(function(n,r){return n+r.jumlah;},0);total=qty*commerceNumber(v.hargaSatuan,'Harga satuan',true);}target.textContent=(nota?'Total ':'Total seluruh varian: '+nf(qty)+' pcs · ')+rp(total)+(v.dp!==undefined?' · Sisa '+rp(Math.max(0,total-Number(v.dp||0)))+(Number(v.dp)>total?' · Kembalian '+rp(Number(v.dp)-total):''):'')+(nota&&f._commerceOriginal&&Number(f._commerceOriginal.totalPaid)>0?' · Sudah dibayar '+rp(f._commerceOriginal.totalPaid)+' · Sisa '+rp(Math.max(0,total-Number(f._commerceOriginal.totalPaid))):'');}catch(e){target.textContent=e.message;}};
 
-/* foto model HPP diambil dari foto PO atau produk produksi yang sama (yang sudah ada di perangkat); biaya yang
-   sudah diketahui ditulis langsung di daftar seperti tabel HPP di aplikasi sebelumnya */
+/* foto model HPP diambil dari foto PO atau produk produksi yang sama (yang sudah ada di perangkat), kelompok dari
+   produk anggotanya; biaya yang sudah diketahui ditulis langsung di daftar seperti tabel HPP di aplikasi sebelumnya */
 function commerceHppThumb(m) {
   var kosong = '<span class="thumb">' + esc(inisial(m.nama)) + '</span>';
   if (typeof D === 'undefined' || typeof thumb !== 'function' || typeof gambarRef !== 'function') return kosong;
   var sumber = null;
   (m.poIds || []).some(function (k) { var po = D.po[k]; if (po && gambarRef(po)) { sumber = po; return true; } return false; });
-  if (!sumber) Object.keys(D.produk || {}).some(function (k) { var p = D.produk[k]; if (p && p.gambar && String(p.nama || '').toUpperCase() === String(m.nama || '').toUpperCase() && String(p.series || '').toUpperCase() === String(m.series || '').toUpperCase()) { sumber = p; return true; } return false; });
+  if (!sumber) (m.isGroup ? m.memberModels || [] : [m]).some(function (t) { return Object.keys(D.produk || {}).some(function (k) { var p = D.produk[k]; if (p && p.gambar && String(p.nama || '').toUpperCase() === String(t.nama || '').toUpperCase() && String(p.series || '').toUpperCase() === String(t.series || '').toUpperCase()) { sumber = p; return true; } return false; }); });
   return sumber ? thumb(sumber) : kosong;
 }
 function commerceHppRingkas(m) {
@@ -13652,10 +13652,12 @@ function commerceHppTampil(models){
   return models.filter(function(m){return m.isGroup?(m.modelIds||[]).some(function(id){var member=raw.filter(function(r){return r.id===id;})[0];return member&&visible(member);}):visible(m);});
 }
 /* Groups are a saved owner choice. Individual source models stay intact. */
+/* Seri OFFLINE adalah pesanan luar: tidak ikut daftar, unduhan, atau pilihan anggota HPP. Datanya tetap ada. */
+function commerceHppOffline(m){return /^OFFLINE(?:-|$)/i.test(String(m&&m.series||'').trim());}
 function commerceHppDisplayModels(data){
   data=data||{};var assigned=Object.create(null),groups=(data.groups||[]).filter(function(g){return g&&g.isGroup&&Array.isArray(g.modelIds);});
   groups.forEach(function(g){g.modelIds.forEach(function(id){assigned[id]=true;});});
-  return groups.concat((data.models||[]).filter(function(m){return !assigned[m.id];}));
+  return groups.concat((data.models||[]).filter(function(m){return !assigned[m.id]&&!commerceHppOffline(m);}));
 }
 function commerceHppSearch(m){return [m.nama,m.series].concat((m.memberModels||[]).reduce(function(a,r){return a.concat(r.nama,r.series);},[]));}
 function commerceHppCostCheck(p,data){
@@ -13754,7 +13756,7 @@ A.commerceHppGroupOpen=function(el){
   var data=commerceData('hpp'),id=el&&el.getAttribute('data-id'),group=id?commerceHppGroupFor(id,data):null;if(id&&!group)return toast('Kelompok tidak ditemukan. Muat ulang HPP.',true);
   var editing=el&&el.closest&&el.closest('[data-form]');if(editing&&editing._commerceModel){try{if(commerceHppDraft(editing).changed)return toast('Simpan perubahan biaya sebelum mengatur anggota kelompok.',true);}catch(e){return toast(e.message,true);}}
   var selected=group?group.modelIds.slice():[],assigned=Object.create(null);(data.groups||[]).forEach(function(g){if(!group||g.id!==group.id)(g.modelIds||[]).forEach(function(k){assigned[k]=g.nama;});});
-  var available=(data.models||[]).filter(function(m){return !assigned[m.id]&&(selected.indexOf(m.id)>=0||!/^OFFLINE(?:-|$)/i.test(String(m.series||'').trim()));}),visible=commerceHppTampil(available).map(function(m){return m.id;});
+  var available=(data.models||[]).filter(function(m){return !assigned[m.id]&&(selected.indexOf(m.id)>=0||!commerceHppOffline(m));}),visible=commerceHppTampil(available).map(function(m){return m.id;});
   available=available.slice().sort(function(a,b){return (selected.indexOf(b.id)>=0?1:0)-(selected.indexOf(a.id)>=0?1:0)||(visible.indexOf(b.id)>=0?1:0)-(visible.indexOf(a.id)>=0?1:0)||String(a.nama).localeCompare(String(b.nama));});
   var body=fText('Nama kelompok','nama',group?group.nama:'','maxlength="80" placeholder="Contoh: Oblong reguler"')+'<p class="small muted">Pilih minimal 2 model dengan bahan, pola, sablon, dan ongkos yang setara. Bahan tebal atau pengerjaan berbeda dibuat kelompok sendiri.</p>'+fText('Cari model atau series','groupQuery','','placeholder="Cari anggota kelompok"')+'<b data-hpp-member-count>'+nf(selected.length)+' model dipilih</b><div class="col gap-s" style="max-height:44vh;overflow:auto">'+available.map(function(m){return '<label class="card row gap-s" data-hpp-member-row><input type="checkbox" data-hpp-member value="'+esc(m.id)+'"'+(selected.indexOf(m.id)>=0?' checked':'')+'>'+commerceHppThumb(m)+'<span class="grow"><b>'+esc(m.nama)+'</b><br><span class="small muted">'+esc(m.series)+' · '+esc((m.sizes||[]).join(', '))+(visible.indexOf(m.id)<0?' · Riwayat PO':'')+'</span></span></label>';}).join('')+'<p class="small muted" data-hpp-member-empty hidden>Tidak ada model yang cocok.</p></div>'+(Object.keys(assigned).length?'<p class="small muted">'+nf(Object.keys(assigned).length)+' model sudah mengikuti kelompok lain.</p>':'')+'<p class="small muted">Setelah menyimpan anggota, periksa dan simpan biaya bersama. Pengaturan biaya masing-masing model tetap tersimpan.</p>';
   var f=commerceForm(group?'Atur anggota kelompok':'Kelompok HPP baru','hpp',body,'commerceHppGroupSave','Simpan anggota');f._commerceHppGroup={id:group?group.id:'hppg_'+newId()};f._commerceHppChoices=available;f._commerceHppGroupSnapshot=commerceHppGroupSnapshot();commerceHppGroupPaint(f);
@@ -13769,7 +13771,7 @@ A.commerceHppGroupSave=function(el){
 A.commerceHppGroupRemove=function(el){
   if(!commerceScope()||me().divisi!=='owner')return toast('Kelompok HPP hanya dapat diatur owner.',true);
   if(!commerceHppGroupReady())return commerceHppReadyOpen(el,'remove:'+el.getAttribute('data-id'),function(){return A.commerceHppGroupRemove(el);},true);var g=commerceHppGroupFor(el.getAttribute('data-id'));if(!g)return;
-  var f=commerceForm('Bubarkan kelompok HPP','hpp','<h3>'+esc(g.nama)+'</h3><p>'+nf((g.modelIds||[]).length)+' model kembali tampil sendiri dan memakai pengaturan biayanya masing-masing.</p><p class="small muted">PO, stok, dan riwayat produksi tetap tersimpan.</p>','commerceHppGroupRemoveSave','Bubarkan kelompok');f._commerceHppGroup={id:g.id,remove:true};f._commerceHppGroupSnapshot=commerceHppGroupSnapshot();
+  var offline=(g.memberModels||[]).filter(function(r){return commerceHppOffline(r);}).length,f=commerceForm('Bubarkan kelompok HPP','hpp','<h3>'+esc(g.nama)+'</h3><p>'+nf((g.modelIds||[]).length-offline)+' model kembali tampil sendiri dan memakai pengaturan biayanya masing-masing.'+(offline?' '+nf(offline)+' model seri OFFLINE tidak tampil lagi di HPP.':'')+'</p><p class="small muted">PO, stok, dan riwayat produksi tetap tersimpan.</p>','commerceHppGroupRemoveSave','Bubarkan kelompok');f._commerceHppGroup={id:g.id,remove:true};f._commerceHppGroupSnapshot=commerceHppGroupSnapshot();
 };
 A.commerceHppGroupRemoveSave=function(el){var f=topForm();if(!f||f._commerceLocked||!f._commerceHppGroup||!f._commerceHppGroup.remove)return;try{var d=commerceHppGroupCurrent(f);return commerceMutation('hpp','saveCommerceHppGroup',{id:f._commerceHppGroup.id,remove:true,expectedRevision:d.revision||undefined},f,el);}catch(e){toast(e.message,true);}};
 /* perkiraan HPP sebelum biaya diperiksa: kain + potong + jahit (+ biaya lain) dari catatan produksi */
@@ -13992,7 +13994,7 @@ A.commerceHppExportOpen=function(el) {
     if(scope!==commerceScope())throw new Error('Sesi berubah. Buka kembali HPP.');
     var entry=commerceEntry('hpp');if(entry.stale)throw new Error('HPP sedang diperbarui. Muat ulang lalu coba lagi.');
     var rows=commerceHppExportRows(data);if(!rows.length)return toast('Tidak ada model yang cocok untuk diunduh.',true);
-    var lingkup=(S.sub.hppSemua==='1'?'Semua model / kelompok, termasuk PO dihapus / arsip':'Model / kelompok yang tampil di halaman HPP')+(S.f.q?' · Pencarian: '+S.f.q:' · Tanpa pencarian');
+    var lingkup=(S.sub.hppSemua==='1'?'Semua model / kelompok selain seri OFFLINE, termasuk PO dihapus / arsip':'Model / kelompok yang tampil di halaman HPP')+(S.f.q?' · Pencarian: '+S.f.q:' · Tanpa pencarian');
     S.hppExport={scope:scope,source:data,version:entry.version,rows:rows,page:0,preview:'',imageError:'',fileDate:todayYmd(),meta:{tanggal:new Date().toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})+' WIB',lingkup:lingkup,catatan:(data.warnings||[]).join(' ')}};
     openSheet(commerceHppExportSheet,{cls:'wide',live:true});
   })).catch(quiet);
