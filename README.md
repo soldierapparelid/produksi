@@ -2,6 +2,15 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.68 — Kain acuan XL dari PO dengan rol campuran
+
+- PO yang hasil XL-nya memakai rol bersama ukuran lain, atau tersebar di dua persiapan, sekarang bisa memakai "Tentukan kain XL": owner memilih rol yang benar-benar dipakai XL, lalu HPP menghitung kain dan potong hanya untuk pcs XL. Sebelum dipilih tidak ada angka yang berubah. Pilihan ini hanya pengaturan HPP; hasil potong, stok, upah, dan pembayaran tidak berubah, dan pilihan dapat dihapus.
+- Pilihan owner menggantikan hasil XL lama yang tidak punya rincian bahan, dan PO arsip di model yang sama tidak lagi menahan acuan dari PO lain. Riwayat lamanya tetap tersimpan dan disebut di catatan acuan. Bila hasil potong atau rol PO berubah, pilihan gugur dan HPP meminta pilihan baru.
+- Anggota kelompok yang belum pernah di-PO tidak lagi menahan ongkos jahit otomatis kelompok. Anggota yang sudah berproduksi dengan tarif kosong, atau riwayat jahit rusak, tetap menahan.
+
+- Versi **1.5.68**, rakitan `20261101-hpp-xl-rol-1568`, dari `main` `ad3bf4e`. Build, pemeriksaan hasil build, dan **1.547 tes lulus** (11 tes baru).
+- Server terpasang pada deployment yang sama, **Versi 83**, **1 November 2026 pukul 11.27 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.68`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang.
+
 ## Rilis 1.5.67 — Penugasan pindah, tarif potong nol, dan riwayat impor di HPP
 
 - Penugasan impor yang dipindah atau diisi ulang tidak lagi terhitung dua kali. Snapshot lama hanya dihitung sebanyak penugasan yang masih hidup di tabel, per maklon, dan hanya bila PO impor itu sudah punya slip baru. Pcs yang benar-benar baru tetap ditambahkan. Tarif rata-rata dan pembagi "÷ pcs" sekarang mengikuti jumlah penugasan yang sebenarnya.
