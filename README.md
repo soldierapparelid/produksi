@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.72 — Model offline keluar dari HPP, foto kelompok
+
+- Seri `OFFLINE` tidak lagi muncul di daftar HPP maupun Unduh ringkasan, juga saat Tampilkan aktif. Datanya tetap ada; aturan yang sama sudah dipakai pemilih anggota kelompok. Model offline yang sudah menjadi anggota kelompok tetap ikut kelompoknya.
+- Baris kelompok tanpa foto PO kini memakai foto produk anggotanya.
+
+- Versi **1.5.72**, rakitan `20261101-hpp-offline-1572`, dari `main` `f0750ab`. Build, pemeriksaan hasil build, dan **1.642 tes lulus** (4 tes baru).
+- Server terpasang pada deployment yang sama, **Versi 87**, **1 November 2026 pukul 18.27 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.72`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang.
+
 ## Rilis 1.5.71 — Angka kain sementara dari potong lama
 
 - Model atau kelompok yang belum punya angka kain menawarkan angka sementara dari hasil potong lamanya sendiri, termasuk PO lama dan arsip. Formulir menulis angka dan sumbernya; tombol **Pakai angka ini** memasukkannya ke Kain / pcs, lalu owner mengisi potong dan jahit dan menyimpan. Tanpa tombol itu tidak ada yang terisi, dan data XL lengkap tetap mengalahkan angka ini.
