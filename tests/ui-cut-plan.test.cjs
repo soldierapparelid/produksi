@@ -179,6 +179,13 @@ test('owner can release a blocked unused reservation without exposing cutting or
  evaluate(c,"form.values={id:'plan',poId:'po',revision:'rev1'};function confirmBox(o,cb){cancelTask=cb(el);}var cancelTask;A.rencanaPotongCancel()");assert.equal(c.calls[0].action,'saveRencanaPotong');assert.equal(c.calls[0].payload.rencana.status,'batal');assert.equal(c.calls[0].payload.expectedRevision,'rev1');assert.deepEqual(plain(c.calls[0].payload.rencana.bahanList),plain(c.plan.bahanList));c.calls[0].resolve({});await c.cancelTask;assert.equal(c.closed,1);
  evaluate(c,"plan.status='terpakai';rendered='';A.rencanaPotongReview(el)");assert.equal(c.rendered,'');assert.match(c.messages.at(-1),/telah dipakai/);assert.doesNotMatch(evaluate(c,'rencanaPotongPanel(po)'),/data-a="rencanaPotongReview"/);
 });
+test('the PO shows cloth per size over all preparations, and nothing while no roll has a size',()=>{
+ const c=ui();vm.runInContext("var a=[{stokId:'r1',qty:25,ukuran:'XL'},{stokId:'r2',qty:24,ukuran:'M'}],b=[{stokId:'r3',qty:26,ukuran:'XL'},{stokId:'r4',qty:25}];function row(id,list,bahan){return {id:id,poId:'po',status:'terpakai',dibuat:'2026-10-01',bahanList:JSON.stringify([{nama:bahan,qty:list.reduce(function(n,x){return n+x.qty;},0),satuan:'kg'}]),alokasiBahan:JSON.stringify(list),rincianRol:JSON.stringify(list.map(function(x,i){return {stokId:x.stokId,qty:x.qty,bahan:bahan,satuan:'kg',ukuran:x.ukuran||'',invoice:'I',rollLabel:'Rol '+(i+1)};})),rol:list.length,legacyBahanList:'[]'};}",c);
+ const shown=vm.runInContext("poMaterialSizesHtml([row('p1',a,'Embos'),row('p2',b,'Scuba')])",c);
+ assert.match(shown,/Kain per ukuran/);assert.match(shown,/<b>XL<\/b> · Embos 1 rol · 25 kg \+ Scuba 1 rol · 26 kg/);assert.match(shown,/<b>M<\/b> · Embos 1 rol · 24 kg/);assert.match(shown,/<b>Belum dibagi ukuran<\/b> · Scuba 1 rol · 25 kg/);
+ assert.equal(vm.runInContext("poMaterialSizesHtml([row('p3',[{stokId:'r9',qty:25}],'Scuba')])",c),'');
+});
+
 test('uncertain plan save requires read-only status check before a new form',async()=>{
   const c=ui();evaluate(c,`actor.divisi='owner';form.values={id:'plan',poId:'po',revision:'rev1',rol:'2'};form.rows=[{values:{nama:'Rib',qty:'1'}}];`);
   const p=evaluate(c,'A.rencanaPotongSave(el)');c.calls[0].reject(Object.assign(new Error('Jawaban belum diterima'),{uncertain:true}));await p;
