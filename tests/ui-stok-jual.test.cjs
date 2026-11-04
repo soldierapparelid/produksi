@@ -245,12 +245,35 @@ test('a size ordered but never cut uses the PO date, and the new PO button cover
 });
 test('every QC detail counts as movement, and a QC row without sizes takes the sizes of its count',()=>{
   const c=ui();waktu(c);seed(c);c.lama=hariLalu(60);c.setor=hariLalu(40);c.qc=hariLalu(2);
-  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30};S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}];S.state.setor=[{id:'ss1',poId:'po1',tanggal:setor,status:'diterima',ukuran:{M:30}}]");
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30,qcPerbaikan:30};S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}];S.state.setor=[{id:'ss1',poId:'po1',tanggal:setor,status:'diterima',ukuran:{M:30}}]");
   assert.equal(ukuranM(c).st,'perlu');
   run(c,"S.state.qc=[{poId:'po1',setorId:'ss1',tanggal:qc,ukuran:'{}',offlineUkuran:'{\"M\":10}'}]");assert.equal(ukuranM(c).st,'jalan','an offline-only QC moved the size');
   run(c,"S.state.qc=[{poId:'po1',setorId:'ss1',tanggal:qc,ukuran:{},perbaikanUkuran:{M:-4}}]");assert.equal(ukuranM(c).st,'jalan','a repair QC that took pieces back moved the size');
   run(c,"S.state.qc=[{poId:'po1',setorId:'ss1',tanggal:qc,total:10}]");assert.equal(ukuranM(c).st,'jalan','a QC row with only a total uses the sizes of its count');
   run(c,"S.state.qc=[{poId:'po1',setorId:'tidak-ada',tanggal:qc,total:10}]");assert.equal(ukuranM(c).st,'perlu','a QC row that names no size and no known count moves nothing');
+});
+/* 1.5.74: counted pieces whose QC was never entered are finished goods (they usually go straight into BigSeller). */
+test('counted pieces without a QC record are listed as finished goods to check in BigSeller and do not hold back a new PO',()=>{
+  const c=ui();waktu(c);seed(c);c.baru=hariLalu(2);
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30};S.state.setor=[{id:'ss1',poId:'po1',tanggal:baru,status:'diterima',ukuran:{M:30}}]");
+  let m=ukuranM(c);assert.equal(m.st,'perlu','stock is thin and nothing is being made any more');assert.equal(m.p,null);assert.equal(m.j.length,1);assert.equal(m.j[0].pcs,30);
+  let view=run(c,'VIEWS.stokjual()');assert.match(view,/<b>Perlu PO:<\/b> M · XL<\/div><div class="small muted"><b>Sudah jadi, cek BigSeller:<\/b> M 30 \(PO-1\)<\/div>/);assert.match(view,/data-a="poOpen" data-id="po1"/,'the PO stays one tap away to record its QC');
+  /* part counted, part still at the tailor: only the tailor part is production */
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:12}");m=ukuranM(c);assert.equal(m.st,'jalan');assert.equal(m.p.jalan,18);assert.equal(m.j[0].pcs,12);
+  assert.match(run(c,'VIEWS.stokjual()'),/<b>Sedang diproduksi:<\/b> M 18<\/div><div class="small muted"><b>Sudah jadi, cek BigSeller:<\/b> M 12 \(PO-1\)<\/div>/);
+  /* pieces sent back for repair are still being made; recorded QC finishes the rest */
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30,qcOk:20,qcPerbaikan:4}");m=ukuranM(c);assert.equal(m.st,'jalan');assert.equal(m.p.jalan,4);assert.equal(m.j[0].pcs,6);
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30,qcOk:30}");m=ukuranM(c);assert.equal(m.j,null);assert.equal(m.p,null);
+  /* plenty of stock: the finished goods are still mentioned instead of "Stok aman" */
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30};S.sj.link['SA-UJI-KBD-HJ'].batas=1;S.state.po[0]._belum=[];S.sub.sj='semua'");view=run(c,'VIEWS.stokjual()');
+  assert.match(view,/Kaos Uji Hijau[\s\S]*Sudah jadi, cek BigSeller:<\/b> M 30 \(PO-1\)/);assert.match(view,/Keduanya tidak menahan Perlu PO/);
+});
+test('a stuck size names the stages that are really left once the counted pieces are split off',()=>{
+  const c=ui();waktu(c);seed(c);c.lama=hariLalu(60);
+  run(c,"S.state.po[0].agg.ukuran.M={potong:100,kirim:80,terima:80,sisaMaklon:0};S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:100}}];S.state.setor=[{id:'ss1',poId:'po1',tanggal:lama,status:'diterima',ukuran:{M:80}}]");
+  let m=ukuranM(c);assert.equal(m.j[0].pcs,80);assert.equal(m.m[0].pcs,20);assert.equal(m.m[0].tahap,'belum ke penjahit','the twenty pieces were cut and never given to a tailor');
+  run(c,"S.state.po[0].agg.ukuran.M={potong:100,kirim:100,terima:60,sisaMaklon:30,diajukan:10}");m=ukuranM(c);assert.equal(m.m[0].tahap,'di penjahit, menunggu hitung');
+  run(c,"S.state.po[0].agg.ukuran.M={potong:100,kirim:100,terima:100,qcOk:90,qcPerbaikan:10}");m=ukuranM(c);assert.equal(m.m[0].tahap,'diperbaiki');
 });
 test('a size not cut yet is dated by the latest PO edit or cloth preparation, so adding it to a PO does not leave it stuck',()=>{
   const c=ui();waktu(c);seed(c);c.lama=hariLalu(40);c.baru=hariLalu(1);

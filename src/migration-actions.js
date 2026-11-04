@@ -18,6 +18,7 @@ function coreInstallMigrationActions(actions, ctx) {
         if (TYPES[key] === 'num') value = coreNum(value);
         else if (TYPES[key] === 'bool') value = value === true || /^(true|ya|1)$/i.test(String(value));
         else value = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+        if (name === 'PO' && key === 'tutupSisa' && value === '') return;   /* 1.5.74: kolom baru yang kosong tidak mengubah cadangan migrasi lama */
         out[key] = value;
       });
       return out;

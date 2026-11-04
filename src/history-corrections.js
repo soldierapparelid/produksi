@@ -149,7 +149,7 @@ function coreInstallHistoryCorrections(actions, ctx) {
   }
   function missingHash(context, omitEntry) {
     var po = {}, source = Object.assign({},coreMap(context.po.imporSumber)); delete source.ownerSizeCorrections;
-    Object.keys(context.po).forEach(function (key) { if (key !== 'tuntasPada') po[key] = context.po[key]; }); po.imporSumber = JSON.stringify(source);
+    Object.keys(context.po).forEach(function (key) { if (key !== 'tuntasPada' && !(key === 'tutupSisa' && !context.po[key])) po[key] = context.po[key]; });   /* 1.5.74: kolom baru yang masih kosong tidak mengubah sidik pemulihan lama */ po.imporSumber = JSON.stringify(source);
     var data = {po:po};
     scopeTables.forEach(function (table) { data[table] = store.read(table).filter(function (row) { return row.poId === po.id && (!omitEntry || row.id !== omitEntry.rows[table]); }).slice().sort(function (a,b) { return String(a.id).localeCompare(String(b.id)); }); });
     return coreLegacyHash(data);
