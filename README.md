@@ -2,6 +2,19 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.75 — Alur produksi dirapikan dari pemeriksaan data
+
+Owner meminta seluruh alur diperiksa. 30 aturan cek dijalankan hanya-baca ke data asli; kelemahan aplikasi yang ditemukan diperbaiki di sini.
+
+- **Penjagaan:** PO tidak bisa ditutup (batal/selesai) selama ada laporan setor yang menunggu dihitung, dan tidak bisa dibatalkan selama barang masih di penjahit (pakai Tutup sisa PO lama). Divisi pegawai yang sudah punya catatan kerja hanya bisa diganti ke peran yang cocok dengan catatannya. Admin wajib memilih tukang potong saat mencatat potong.
+- **Alur:** ukuran yang semua barangnya ditolak saat jahit dianggap beres. Hitungan yang upah jahitnya masih 0 boleh diberi harga pertama walau sudah di-QC, selama belum dibayar dan QC-nya bukan QC gabungan beberapa hitungan; Beranda hanya menawarkan Atur harga yang akan diterima. Stok & PO ulang membaca jahitan PO lama yang tidak punya catatan potong. Kalau barang sudah punya PO yang belum dipotong, ukuran yang tipis ditulis "Belum masuk PO-xxx" dengan tombol "Tambah M ke PO-xxx", bukan "Perlu PO", supaya tidak terbaca harus membuat PO kedua.
+- **Data aplikasi lama:** hasil perbaikan untuk QC lama tanpa hitungan asal bisa diisi (QC v0 tidak menambah upah karena setoran lama sudah dihitung penuh). Owner bisa mencocokkan pembayaran lama yang ditahan di menu Upah: "Sudah lunas" (paling banyak sejumlah pcs yang dibayar pembayaran itu) atau "Belum dibayar" (tahanan dilepas); keputusan dicatat di sheet baru `CocokBayarLama`.
+- **BigSeller:** Input BigSeller kini pilihan. Tidak lagi dihitung sebagai pekerjaan tertunda; saran Tandai selesai muncul begitu produksi tuntas; ubin Beranda baru "Bisa ditutup".
+- Tidak diubah: ukuran di luar daftar PO tetap ditolak, karena di data asli ukuran itu memang ditutup oleh migrasi data lama.
+
+- Versi **1.5.75**, rakitan `20261104-rapi-alur-1575`, dari `main` `8b759cd`. Build, pemeriksaan hasil build, dan **1.701 tes lulus**.
+- Server terpasang pada deployment yang sama, **Versi 90**, **4 November 2026 pukul 18.12 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.75`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang.
+
 ## Rilis 1.5.74 — Tutup sisa PO lama, barang sudah jadi di Stok & PO ulang
 
 - Owner mendapat tombol **Tutup sisa PO lama** di lembar PO aktif yang produksinya belum tuntas. Formulir menulis sisa per tahap (belum dipotong, belum ke penjahit, di penjahit, sudah dihitung tanpa QC, dalam perbaikan), meminta alasan dan centang, lalu hanya mengubah status PO menjadi selesai. Potong, penugasan, setoran, QC, BigSeller, slip, dan upah tidak berubah. Alasannya disimpan di kolom baru `tutupSisa` pada baris PO, tampil di lembar PO, dan tidak dikirim ke penjahit, tukang potong, atau QC. Tombol ditolak selama masih ada laporan setor yang menunggu dihitung, bahan potong yang disiapkan, atau upah yang sedang ditahan karena catatan PO itu perlu diperiksa. **Aktifkan lagi** menghapus tandanya, dan sisanya kembali menjadi kerjaan berjalan.
