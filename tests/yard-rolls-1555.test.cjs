@@ -14,6 +14,7 @@ function fixture() {
   const setup = h.request('setupOwner',{nama:'Measured roll fixture',pin:'1234'});
   assert.equal(setup.ok,true,setup.error);
   const token = setup.data.token;
+  h.run("pkStore_().lock(function(){pkStore_().append('Pegawai',{id:'yardcutter01',nama:'Yard Cutter',divisi:'potong',aktif:true});});");
   const call = (action,payload={}) => { h.cold(); return h.request(action,{token,workflowVersion:2,...payload}); };
   const good = (action,payload={}) => { const r=call(action,payload); assert.equal(r.ok,true,r.error); return r.data?.data ?? r.data; };
   const bad = (action,payload,pattern) => { const r=call(action,payload); assert.equal(r.ok,false); if(pattern)assert.match(r.error,pattern); return r; };
@@ -27,7 +28,7 @@ function fixture() {
     if(!raw('PO').some(r=>r.id===poId))good('savePO',{deferMaterial:true,po:{newId:poId,nama:'Yard fixture',series:'Fixture',jenis:'stok',ukuran:{},ukuranAktif:['XL']}});
     return good('saveRencanaPotong',{rencana:{id,poId,alokasiBahan:allocations}});
   };
-  const cut = (plan,id='yard-roll-cut') => ({potong:{id,rencanaId:plan.id,expectedRencanaRevision:plan.revision,tanggal:'2026-10-20',ukuran:{XL:50}}});
+  const cut = (plan,id='yard-roll-cut') => ({potong:{id,userId:'yardcutter01',rencanaId:plan.id,expectedRencanaRevision:plan.revision,tanggal:'2026-10-20',ukuran:{XL:50}}});
   const correction = (id,physical,requestId='yard-roll-count') => {
     const r=roll(id); return {id:requestId,stokId:id,fisik:physical,satuan:r.satuan,expectedSaldo:r.saldo,expectedCorrectionId:r.correctionRevision,expectedSourceRevision:r.sourceRevision,catatan:'Count fixture'};
   };
