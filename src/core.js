@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.73';
+var APP_VERSION = '1.5.74';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -23,7 +23,7 @@ var WORKFLOW_VERSION = 2;
 var SCHEMA = {
   Pegawai:   ['id','nama','divisi','pin','token','gagal','kunci','hp','catatan','aktif','dibuat'],
   Produk:    ['id','nama','series','gambar','tarifPotong','tarifJahit','catatan','aktif','dibuat'],
-  PO:        ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','ukuran','total','bahan','catatan','gambar','status','dibuat','dibuatOleh','diubah','selesaiPada','asal','imporVersion','imporReview','imporSumber','tuntasPada','ukuranAktif','mutationHash','mutationActor','mutationImage','mutationImageHash'],
+  PO:        ['id','noPO','jenis','produkId','nama','series','pelanggan','deadline','ukuran','total','bahan','catatan','gambar','status','dibuat','dibuatOleh','diubah','selesaiPada','asal','imporVersion','imporReview','imporSumber','tuntasPada','ukuranAktif','mutationHash','mutationActor','mutationImage','mutationImageHash','tutupSisa'],
   Potong:    ['id','poId','userId','tanggal','ukuran','total','bahan','kg','rol','tarif','upahId','catatan','dibuat','bahanList','asal','rencanaId','alokasiBahan','requestHash','requestActor','mutationHash','mutationActor'],
   RencanaPotong:['id','poId','bahanList','rol','catatan','status','dibuat','dibuatOleh','diubah','revision','alokasiBahan','poDraft','legacyBahanList'],
   SlipKirim: ['id','noSlip','poId','maklonId','tanggal','target','ukuran','total','upah','catatan','dibuatOleh','dibuat','asal','requestHash','requestActor','mutationHash','mutationActor'],
@@ -1114,6 +1114,9 @@ function createCore(store, env) {
   }
   function sumMaps(maps) { var out = {}; maps.forEach(function (m) { Object.keys(m).forEach(function (s) { out[s] = (out[s] || 0) + coreNum(m[s]); }); }); return out; }
   function ensureComplete(po) { var w = workflow()[po.id]; if (!w || !w.complete) fail('PO belum selesai: hitungan, QC, atau perbaikan masih tersisa.'); }
+  /* PO lama yang ditutup owner (1.5.74): tandanya di kolom tutupSisa baris PO itu, sah selama PO masih selesai sejak
+     tanggal penutupan yang sama. Dibuka lagi atau diselesaikan biasa: kolomnya dikosongkan dalam penulisan yang sama. */
+  function tutupSisa(po) { var m = po ? coreParseJSON(po.tutupSisa, null) : null; return !!(m && typeof m === 'object' && po.status === 'selesai' && m.tanggal && m.tanggal === po.selesaiPada); }
   function ensureSetorCapacity(po, who, good, bad, excludeId) {
     var assigned = {}, used = {}, keys = sumMaps([good, bad]); poClean(po);
     store.read('SlipKirim').forEach(function (r) { if (r.poId === po.id && r.maklonId === who) assigned = sumMaps([assigned, coreMap(r.ukuran)]); });
@@ -1282,7 +1285,7 @@ function createCore(store, env) {
     }
 
     /* Workers receive only the size projection, never raw source identities or migration evidence. */
-    po.forEach(function (p) { delete p.imporSumber; });
+    po.forEach(function (p) { delete p.imporSumber; delete p.tutupSisa; });   /* alasan penutupan PO hanya untuk owner/admin */
     out.users = allUsers.map(function (u) { return publicUser(u, false); });
     out.produk = produk.map(function (r) {
       var o = { id: r.id, nama: r.nama, series: r.series, gambar: r.gambar, aktif: r.aktif };
@@ -1777,7 +1780,7 @@ function createCore(store, env) {
       var hasProduction = store.read('Potong').concat(store.read('SlipKirim'), store.read('SlipSetor'), store.read('QC')).some(function (r) { return r.poId === rec.id; });
       if (hasProduction && priorSizes && activeSizes && JSON.stringify(priorSizes.ukuran) !== JSON.stringify(activeSizes.ukuran)) fail('Ukuran aktif PO yang sudah berjalan tidak boleh diganti.');
       if (hasProduction && Object.keys(coreMap(rec.ukuran)).sort().join('|') !== Object.keys(ukuran).sort().join('|')) fail('Ukuran PO yang sudah berjalan tidak boleh diganti.');
-      if (status === 'selesai') ensureComplete(rec);
+      if (status === 'selesai' && !tutupSisa(rec)) ensureComplete(rec);
       var noPO = teks(po.noPO, 30).trim() || rec.noPO;
       for (var i = 0; i < rows.length; i++) if (rows[i].noPO === noPO && rows[i].id !== rec.id) fail('Nomor PO ' + noPO + ' sudah dipakai.');
       common.noPO = noPO;
@@ -1803,6 +1806,7 @@ function createCore(store, env) {
       if (hasGambar && store.fresh) store.fresh('Gambar');
       var previousImage = hasGambar ? findRow('Gambar',rec.id) : null;
       Object.assign(common,proof,{mutationImage:String(rec.gambar || ''),mutationImageHash:hasGambar ? coreHash(String(previousImage ? previousImage.data : '')) : ''});
+      if ((status === 'aktif' && rec.status !== 'aktif') || (status === 'selesai' && rec.status === 'aktif')) common.tutupSisa = '';
       store.update('PO', rec.id, common);
       return withGambar(rec);
     }
@@ -1851,6 +1855,7 @@ function createCore(store, env) {
     if (p.status === 'selesai') ensureComplete(rec);
     var patch = { status: p.status, diubah: nowIso(), selesaiPada: p.status === 'aktif' ? '' : (rec.status !== 'aktif' && rec.selesaiPada ? rec.selesaiPada : today()) };
     if (p.status === 'aktif' && rec.status !== 'aktif') patch.tuntasPada = '';
+    if (p.status !== rec.status && p.status !== 'batal') patch.tutupSisa = '';   /* dibuka lagi atau selesai biasa */
     store.update('PO', rec.id, Object.assign(patch,proof));
     return findRow('PO', rec.id);
   };
@@ -1879,6 +1884,39 @@ function createCore(store, env) {
     if (JSON.stringify(peta).length > 45000) fail('Daftar ukuran yang dilepas sudah terlalu panjang.');
     st.poUkuranLepas = peta; store.setSettings(st);
     return { ok: true, ukuran: kini };
+  };
+  /* Tutup sisa PO lama (1.5.74): owner menutup PO aktif yang sisanya sudah tidak ada (barang lama yang sudah habis,
+     atau tidak pernah dicatat sampai QC). Yang berubah hanya baris PO itu: status menjadi selesai dan alasannya di kolom
+     tutupSisa, dalam satu penulisan. Potong, penugasan, setoran, QC, BigSeller, slip, dan upah tidak diubah. PO selesai tidak menerima
+     produksi baru, jadi sisanya tidak dihitung lagi. Aktifkan lagi menghapus tandanya. */
+  actions.tutupSisaPO = function (p) {
+    var me = auth(p); if (me.divisi !== 'owner') fail('Hanya owner yang boleh menutup sisa PO lama.');
+    ['PO','Potong','RencanaPotong','SlipKirim','SlipSetor','QC'].forEach(function (sheet) { if (store.fresh) store.fresh(sheet); });
+    var rec = findRow('PO', String(p.id || '')); if (!rec) fail('PO tidak ditemukan.');
+    var reqId = idOk(p.reqId), alasan = teks(p.alasan, 400).replace(/\s+/g, ' ').trim();
+    if (!reqId) fail('Identitas permintaan tidak sah. Buka kembali formulir.');
+    if (alasan.length < 5) fail('Tulis alasan menutup PO ini (minimal 5 huruf).');
+    if (alasan.length > 200) fail('Alasan terlalu panjang (maksimal 200 huruf).');
+    var ada = coreParseJSON(rec.tutupSisa, null);
+    if (ada && ada.id === reqId) {
+      if (ada.oleh !== me.id || ada.alasan !== alasan) fail('Permintaan ini sudah tersimpan dengan isi berbeda. Muat ulang data.');
+      if (rec.status === 'selesai') return { ok: true, replayed: true, po: rec, tutup: ada };
+    }
+    if (typeof coreMissingSizePending === 'function' && coreMissingSizePending(rec)) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
+    if (rec.status !== 'aktif') fail('Hanya PO aktif yang bisa ditutup.');
+    var proof = mutationProof('tutupSisaPO', p, { id: rec.id, reqId: reqId, alasan: alasan }, me);
+    if (checkRevision('PO', rec, p.expectedRevision, proof)) fail('Status PO sudah berubah. Muat ulang data.');
+    ensureNoPendingCutPlan(rec.id);
+    if (store.read('SlipSetor').some(function (r) { return r.poId === rec.id && r.status === 'diajukan'; })) fail('Masih ada laporan setor yang menunggu dihitung di PO ini. Hitung atau tolak dulu laporan itu.');
+    var w = workflow()[rec.id]; if (w && w.complete) fail('Produksi PO ini sudah tuntas. Pakai Tandai selesai.');
+    /* Upah yang ditahan karena catatan PO ini perlu diperiksa tetap ditahan: sebagian masalah hanya dihitung selama PO
+       aktif, jadi alur dihitung ulang seolah PO sudah selesai dan penutupan ditolak bila ada upah yang lepas. */
+    var calon = store.read('PO').map(function (r) { return r.id === rec.id ? Object.assign(copy(r), { status: 'selesai', selesaiPada: today() }) : r; });
+    var sesudah = validateWorkers(coreWorkflow(calon, store.read('Potong'), store.read('SlipKirim'), store.read('SlipSetor'), store.read('QC'), store.read('Gudang'), legacyExtras()))[rec.id];
+    if (payroll().some(function (r) { return r.poId === rec.id && upahDitahan(w, r) && !upahDitahan(sesudah, r); })) fail('Upah di PO ini masih ditahan sampai catatannya diperiksa owner: ' + ((w.blockingIssues || []).concat(w.issues)[0] || 'catatan PO') + ' Periksa dulu, baru tutup PO.');
+    var tanda = { id: reqId, alasan: alasan, oleh: me.id, pada: nowIso(), tanggal: today() };
+    store.update('PO', rec.id, Object.assign({ status: 'selesai', diubah: nowIso(), selesaiPada: tanda.tanggal, tutupSisa: JSON.stringify(tanda) }, proof));
+    return { ok: true, po: findRow('PO', rec.id), tutup: tanda };
   };
   function ensureNoPendingCutPlan(poId) {
     if (typeof coreCutPlanRows !== 'function') return;
@@ -3238,7 +3276,7 @@ function createCore(store, env) {
         o.token = ''; o.gagal = 0; o.kunci = ''; o.aktif = true;
       }
       if (sheet === 'Produk' || sheet === 'PO') o.gambar = '';
-      if (sheet === 'PO') o.tuntasPada = ''; /* Completion time is observed by this server, never backdated by import. */
+      if (sheet === 'PO') { o.tuntasPada = ''; o.tutupSisa = ''; } /* Completion time is observed by this server, never backdated by import; a closure comes only from the owner's Tutup sisa PO lama. */
       if (SCHEMA[sheet].indexOf('asal') >= 0) o.asal = 'lama';
       existing[o.id] = 1; add.push(o);
     });
@@ -3364,7 +3402,7 @@ function createCore(store, env) {
     var proposed = coreWorkflow(isi('PO'), isi('Potong'), isi('SlipKirim'), isi('SlipSetor'), isi('QC'), isi('Gudang'), { gudangLama: isi('GudangLama'), settlements: store.read('LegacySettlement'), historyCorrections: store.read('KoreksiRiwayat'), ukuranLepas: settings().poUkuranLepas });
     var touched = {}; sheets.forEach(function (sheet) { data[sheet].forEach(function (r) { if (sheet === 'PO') touched[r.id] = true; else if (r.poId) touched[r.poId] = true; }); });
     Object.keys(touched).forEach(function (id) { var w = proposed[id]; if (w && w.issues.length) fail('Tidak jadi dipindahkan: ' + w.issues[0]); });
-    isi('PO').forEach(function (r) { if (touched[r.id] && r.status === 'selesai' && (!proposed[r.id] || !proposed[r.id].complete)) fail('Tidak jadi dipindahkan: PO ' + r.noPO + ' ditandai selesai tetapi proses produksinya belum lengkap.'); });
+    isi('PO').forEach(function (r) { if (touched[r.id] && r.status === 'selesai' && !tutupSisa(r) && (!proposed[r.id] || !proposed[r.id].complete)) fail('Tidak jadi dipindahkan: PO ' + r.noPO + ' ditandai selesai tetapi proses produksinya belum lengkap.'); });
     var karIds = {}; isi('Karyawan').forEach(function (k) { karIds[k.id] = 1; });
     if (isi('GajiHarian').some(function (g) { return !karIds[g.karyawanId]; })) fail('Tidak jadi dipindahkan: ada catatan gaji untuk karyawan yang tidak ada di data baru. Tidak ada yang diubah.');
     var s = p.pengaturan; var nextSettings = null;
@@ -3538,6 +3576,7 @@ function createCore(store, env) {
   WRITE.hapusStokBahan = 1;
   WRITE.savePrintHistory = 1;
   WRITE.saveMissingSizeCorrection = 1;
+  WRITE.tutupSisaPO = 1;
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
@@ -3552,7 +3591,7 @@ function createCore(store, env) {
     var fn = actions[action];
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
-    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
+    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, tutupSisaPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
     if ((contractAction[action] || COMMERCE_WRITE[action] || action === 'getMissingSizeCorrection' || action === 'saveMissingSizeCorrection' || action === 'getHapusStokBahan' || action === 'hapusStokBahan' || action === 'getPrintHistory' || action === 'savePrintHistory') && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {
@@ -3571,9 +3610,9 @@ function createCore(store, env) {
         if (!(action === 'login' && payload.deferState === true) && durableMigrationStatus() && ['applyLegacyMigration','recoverLegacyMigration','login','logout','changePin'].indexOf(action) < 0) fail('Pemulihan riwayat belum selesai. Owner harus memulihkan cadangan jurnal sebelum mengubah data.');
         /* A failed multi-table owner correction keeps its durable intent. Pause
            conflicting history/PO maintenance until that same request resumes. */
-        if (typeof coreMissingSizePending === 'function' && ['savePO','setStatusPO','arsipPO','buangPO','importRows','gantiImpor','mulaiDariNol','applyLegacyMigration','recoverLegacyMigration','saveHistoryCorrection','saveUser'].indexOf(action) >= 0) {
+        if (typeof coreMissingSizePending === 'function' && ['savePO','setStatusPO','tutupSisaPO','arsipPO','buangPO','importRows','gantiImpor','mulaiDariNol','applyLegacyMigration','recoverLegacyMigration','saveHistoryCorrection','saveUser'].indexOf(action) >= 0) {
           if (store.fresh) store.fresh('PO');
-          var targetPo = action === 'savePO' ? payload.po && payload.po.id : ['setStatusPO','arsipPO','buangPO'].indexOf(action) >= 0 ? payload.id : action === 'saveHistoryCorrection' ? payload.poId : '';
+          var targetPo = action === 'savePO' ? payload.po && payload.po.id : ['setStatusPO','tutupSisaPO','arsipPO','buangPO'].indexOf(action) >= 0 ? payload.id : action === 'saveHistoryCorrection' ? payload.poId : '';
           if (store.read('PO').some(function (row) { return (!targetPo || row.id === targetPo) && coreMissingSizePending(row); })) fail('Pemulihan ukuran belum selesai. Lanjutkan pemulihan yang sama.');
         }
         if (GLOBAL_VERSION_WRITE[action]) {
