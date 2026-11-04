@@ -275,6 +275,15 @@ test('a stuck size names the stages that are really left once the counted pieces
   run(c,"S.state.po[0].agg.ukuran.M={potong:100,kirim:100,terima:60,sisaMaklon:30,diajukan:10}");m=ukuranM(c);assert.equal(m.m[0].tahap,'di penjahit, menunggu hitung');
   run(c,"S.state.po[0].agg.ukuran.M={potong:100,kirim:100,terima:100,qcOk:90,qcPerbaikan:10}");m=ukuranM(c);assert.equal(m.m[0].tahap,'diperbaiki');
 });
+/* 1.5.75b: the owner extends the PO deadline when goods are still at the tailor; that keeps them in production */
+test('pieces at a tailor whose PO deadline is still ahead are in production, not stuck; a passed deadline does not help',()=>{
+  const c=ui();waktu(c);seed(c);c.lama=hariLalu(84);c.depan=hariLalu(-38);c.lewat=hariLalu(40);
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,sisaMaklon:30};S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}];S.state.kirim=[{poId:'po1',tanggal:lama,target:lama,ukuran:{M:30}}]");
+  let m=ukuranM(c);assert.equal(m.st,'perlu');assert.equal(m.m[0].tahap,'di penjahit');
+  assert.match(run(c,'VIEWS.stokjual()'),/Masih dikerjakan\? Perpanjang deadline PO-nya, nanti tidak dihitung macet\./);
+  run(c,"S.state.po[0].deadline=depan");m=ukuranM(c);assert.equal(m.st,'jalan','the deadline ahead keeps the size yellow');assert.equal(m.m,null);assert.equal(m.p.jalan,30);
+  run(c,"S.state.po[0].deadline=lewat");m=ukuranM(c);assert.equal(m.st,'perlu','a deadline that passed long ago does not keep it in production');assert.equal(m.m[0].sejak,c.lewat);
+});
 test('a size not cut yet is dated by the latest PO edit or cloth preparation, so adding it to a PO does not leave it stuck',()=>{
   const c=ui();waktu(c);seed(c);c.lama=hariLalu(40);c.baru=hariLalu(1);
   run(c,"S.state.po[0]._belum=['XL'];S.state.po[0].dibuat=lama+'T08:00:00.000Z';S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}]");

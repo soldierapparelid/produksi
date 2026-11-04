@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261104-rapi-alur-1575';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261104-deadline-1575b';</script>
 <script>
 (function () {
 'use strict';
@@ -15572,7 +15572,9 @@ function sjProduksi(produkId, gerak) {
       ada = true;
       if (jadi) (out.jadi[s] || (out.jadi[s] = [])).push({ po: po, pcs: jadi });
       if (!jalan && !antre) return;
-      var sejak = g[s] || (antre ? awal : ''), lama = /^\d{4}-\d{2}-\d{2}$/.test(sejak) ? -selisihHari(sejak) : null;
+      /* 1.5.75b: deadline PO yang belum lewat berarti barangnya masih ditunggu: dihitung sedang diproduksi, bukan macet */
+      var batasPO = /^\d{4}-\d{2}-\d{2}$/.test(String(po.deadline || '')) ? String(po.deadline) : '';
+      var sejak = [g[s] || (antre ? awal : ''), batasPO].filter(Boolean).sort().pop() || '', lama = /^\d{4}-\d{2}-\d{2}$/.test(sejak) ? -selisihHari(sejak) : null;
       if (lama !== null && lama >= SJ_MACET) { (out.macet[s] || (out.macet[s] = [])).push({ po: po, pcs: jalan, sejak: sejak, tahap: sjTahapUkuran(a, antre && !jalan) }); return; }
       var u = out.uk[s] || (out.uk[s] = { jalan: 0, antre: false }); u.jalan += jalan; if (antre) u.antre = true;
     });
@@ -15604,7 +15606,7 @@ function sjKartu(r) {
     (antre.length ? '<div class="small muted"><b>Antre potong:</b> ' + antre.map(nama).join(' · ') + '</div>' : '') +
     (jalan.length ? '<div class="small muted"><b>Sedang diproduksi:</b> ' + jalan.map(function (u) { return nama(u) + ' ' + nf(u.p.jalan); }).join(' · ') + '</div>' : '') +
     (jadi.length ? '<div class="small muted"><b>Sudah jadi, cek BigSeller:</b> ' + jadi.map(function (u) { return u.j.map(function (x) { return nama(u) + ' ' + nf(x.pcs) + ' (' + esc(x.po.noPO || 'PO') + ')'; }).join(' · '); }).join(' · ') + '</div>' : '') +
-    (macet.length ? '<div class="small warn"><b>Macet, cek PO:</b> ' + macet.map(function (u) { return u.m.map(function (x) { return nama(u) + (x.pcs > 0 ? ' ' + nf(x.pcs) : '') + ' ' + x.tahap + ' sejak ' + tgl(x.sejak) + ' (' + esc(x.po.noPO || 'PO') + ')'; }).join(' · '); }).join(' · ') + '</div>' : '') +
+    (macet.length ? '<div class="small warn"><b>Macet, cek PO:</b> ' + macet.map(function (u) { return u.m.map(function (x) { return nama(u) + (x.pcs > 0 ? ' ' + nf(x.pcs) : '') + ' ' + x.tahap + ' sejak ' + tgl(x.sejak) + ' (' + esc(x.po.noPO || 'PO') + ')'; }).join(' · '); }).join(' · ') + '<br><span class="xs muted">Masih dikerjakan? Perpanjang deadline PO-nya, nanti tidak dihitung macet.</span></div>' : '') +
     (!perlu.length && !antre.length && !jalan.length && !macet.length && !jadi.length ? '<div class="small muted">Stok aman</div>' : '');
   var tombol = l.sembunyi ? '<button class="btn sm" data-a="sjSembunyi" data-k="' + k + '">Tampilkan lagi</button>' :
     !r.pr ? '<button class="btn sm pri" data-a="sjHubung" data-k="' + k + '">Hubungkan</button><button class="btn sm ghost" data-a="sjSembunyi" data-k="' + k + '">Sembunyikan</button>' :
@@ -15621,7 +15623,7 @@ VIEWS.stokjual = function () {
   var d = sjData(), sub = S.sub.sj || 'perlu';
   /* hubungan yang baru ada di perangkat ini (dibuat sebelum 1.5.42, atau kiriman terakhir gagal) dikirim ke server */
   if (typeof isAdmin === 'function' && isAdmin() && (d.kotor || (!d.srv && Object.keys(d.link).length))) { d.kotor = true; sjKirim(); }
-  var kepala = '<div class="head"><div class="grow"><h1>Stok &amp; PO ulang</h1><div class="sub">Stok BigSeller dicocokkan dengan PO yang jalan. Merah: perlu PO. Kuning: ukuran itu sudah di-PO atau sedang diproduksi (dipotong, di penjahit, menunggu hitung, atau diperbaiki). Yang sudah dihitung tetapi QC-nya belum dicatat ditulis Sudah jadi, cek BigSeller. Produksi yang ' + SJ_MACET + ' hari tidak bergerak ditulis macet. Keduanya tidak menahan Perlu PO.</div></div>' +
+  var kepala = '<div class="head"><div class="grow"><h1>Stok &amp; PO ulang</h1><div class="sub">Stok BigSeller dicocokkan dengan PO yang jalan. Merah: perlu PO. Kuning: ukuran itu sudah di-PO atau sedang diproduksi (dipotong, di penjahit, menunggu hitung, atau diperbaiki). Yang sudah dihitung tetapi QC-nya belum dicatat ditulis Sudah jadi, cek BigSeller. Produksi yang ' + SJ_MACET + ' hari tidak bergerak dan deadline PO-nya sudah lewat ditulis macet. Keduanya tidak menahan Perlu PO.</div></div>' +
     '<label class="btn pri">' + ic('up') + (d.stok ? 'Perbarui stok' : 'Unggah stok BigSeller') + '<input type="file" accept=".xlsx" data-c="sjFile" hidden></label></div>';
   if (!d.stok) return kepala + '<div class="card">' + emptyBox('Belum ada data stok. Di BigSeller buka Pergudangan > Rincian Stok > Impor & Ekspor, ekspor ke Excel, lalu unggah file .xlsx itu di sini.') + '</div>';
   var rows = sjHitung(), n = { perlu: 0, jalan: 0, aman: 0, lepas: 0, sembunyi: 0 };
