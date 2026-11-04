@@ -24,7 +24,7 @@ test('the owner sees per PO how much is inspected and which sizes are done, part
   assert.match(view,/<h3>Progres QC<\/h3><span class="chip warn">140 pcs belum QC<\/span>/);
   assert.match(view,/<b>Polo &lt;b><\/b> <span class="small muted">PO-A<\/span><\/span><span class="small">Sudah QC 160 dari 270 pcs · belum 110 pcs<\/span>/);
   assert.match(view,/<span class="chip ok"><b>M<\/b> beres<\/span><span class="chip warn"><b>L<\/b> 60\/120<\/span><span class="chip "><b>XL<\/b> 0\/50<\/span>/);
-  assert.match(view,/<span class="small">Belum mulai QC · 30 pcs sudah dihitung<\/span>/);assert.match(view,/data-a="poOpen" data-id="a">Lihat<\/button>/);
+  assert.match(view,/<span class="small">30 pcs belum masuk BigSeller<\/span>/);assert.match(view,/data-a="poOpen" data-id="a">Lihat<\/button>/);
   /* more than six POs: the rest is behind one tap */
   for(let i=0;i<7;i++){c.D.po['x'+i]={id:'x'+i,nama:'Tambahan '+i,noPO:'PO-X'+i};c.batches.push(batch('x'+i,'2026-10-13',{M:5},{M:5}));}
   let panjang=vm.runInContext('berandaQC()',c);assert.equal(panjang.split('data-a="poOpen"').length-1,6);assert.match(panjang,/data-a="sub" data-k="qcAll" data-v="1">Tampilkan semua · 3 PO lagi/);

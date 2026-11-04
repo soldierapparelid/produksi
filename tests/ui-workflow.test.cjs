@@ -88,9 +88,9 @@ test('dashboard shows all sixty counted pieces as ready for QC while the rest of
   vm.runInContext(between('VIEWS.beranda =', 'function tglPanjang('), c);
   assert.deepEqual(json(c, 'qcBalance(po)'), { ready: 60, waiting: 0, readyUkuran: { M: 10, L: 50 }, waitingUkuran: {} });
   const view = vm.runInContext('VIEWS.beranda()', c);
-  assert.match(view, /data-id="po:qc"><span class="label">Siap QC<\/span><span class="v">60<\/span>/);
+  assert.match(view, /data-id="po:qc:stok"><span class="label">Belum masuk BigSeller<\/span><span class="v">60<\/span>/);
   assert.doesNotMatch(view, /menunggu seluruh PO lengkap|QC-nya tertahan/);
-  assert.match(view, /title="Siap QC: 60"/);
+  assert.match(view, /title="Belum masuk BigSeller: 60"/);
   assert.match(vm.runInContext('qcEntryButton(po)', c), /class="btn pri" data-a="qcOpen"[^>]*>Input QC/);
   vm.runInContext(`S.state.setor=[];counts.length=0;po.workflow=coreWorkflow([po],cuts,assignments,counts,[],[]).p;`, c);
   assert.match(vm.runInContext('qcEntryButton(po)', c), /disabled title="Belum ada setoran yang sudah dihitung dan menunggu QC">QC belum siap/);

@@ -327,7 +327,7 @@ test('PO detail hides unavailable QC controls but retains repair work and folds 
   assert.match(detail,/<details class="small"><summary>Kelola ukuran<\/summary>/);
   assert.match(detail,/<details><summary class="small muted">Alur hitung &amp; QC<\/summary>/);
   assert.doesNotMatch(detail,/Hitung fisik dan pemeriksaan QC adalah tahap terpisah/);
-  assert.equal((detail.match(/qcEntryButton\(po, true\)/g)||[]).length,2);
+  assert.equal((detail.match(/qcEntryButton\(po, true(, true)?\)/g)||[]).length,2);
 });
 
 test('1542b: every cutter card says which sizes must be cut, without opening the PO',()=>{
