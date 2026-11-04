@@ -1,6 +1,24 @@
 # Soldier Produksi
 
-Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
+Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; untuk PO stok, tombol OK owner/admin mencatat QC dan masuk BigSeller sekaligus (1.5.76). Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
+
+## Rilis 1.5.76 — Tombol "OK, sudah QC & masuk BigSeller"
+
+Owner meminta langkah Input BigSeller yang terpisah dihapus. Sesudah setoran dihitung, lembar PO menulis "Harus catat BigSeller" dan PO berstatus QC. Owner atau admin menekan satu tombol, lalu QC dan BigSeller tercatat bersama.
+
+- **Tombol OK (owner dan admin saja):** per slip hitung di lembar PO. Formulirnya sudah terisi OK sebanyak sisa slip; isian Reject dan Perbaikan tetap ada. Server `qcMasukBigSeller` mencatat QC dengan aturan Input QC. Untuk PO stok, jumlah OK langsung tercatat masuk BigSeller sebagai baris Gudang dengan id `qbs_` turunan id QC, dalam permintaan yang sama. Kirim ulang aman. Pesanan hanya mencatat QC.
+- **Upah:** tetap mengikuti OK QC, sama persis dengan Input QC. Baris BigSeller tidak dipakai upah.
+- **Daftar di lembar PO:** "Belum masuk BigSeller" (sudah dihitung, menunggu OK), "Sudah QC, belum masuk BigSeller" (OK dari Input QC staf QC, hasil perbaikan, atau catatan lama, dengan tombol Catat masuk BigSeller), dan "Sudah QC & masuk BigSeller". Tombol Input BigSeller yang terpisah dihapus.
+- **Hapus QC hasil OK:** baris BigSeller otomatisnya ikut terhapus, supaya OK yang diulang tidak tercatat dua kali.
+- **Beranda:** ubin "Belum masuk BigSeller" hanya menghitung PO stok dan membuka daftar PO stok tahap QC. Pesanan yang menunggu OK ditulis terpisah. Tahap PO: "QC · belum masuk BigSeller" (stok) atau "QC · menunggu OK" (pesanan).
+- Tidak diubah: divisi QC tetap memakai Input QC; barang offline dan hasil perbaikan tetap lewat Input QC.
+
+- Versi **1.5.76**, rakitan `20261104-ok-bigseller-1576`, dari `main` `02c62b2` (1.5.75b). Build, pemeriksaan hasil build, dan **1.718 tes lulus**.
+- Server dan tampilan harus dipasang bersama karena ada aksi server baru.
+
+## Pembaruan tampilan 1.5.75b — Deadline PO sebagai tanda masih diproduksi
+
+- Stok & PO ulang memakai deadline PO yang belum lewat sebagai tanggal acuan, jadi barang di penjahit dihitung "Sedang diproduksi", bukan Macet. Baris Macet memberi petunjuk "Masih dikerjakan? Perpanjang deadline PO-nya". Rakitan `20261104-deadline-1575b`, [PR #109](https://github.com/soldierapparelid/produksi/pull/109), `main` `02c62b2`; server tidak berubah.
 
 ## Rilis 1.5.75 — Alur produksi dirapikan dari pemeriksaan data
 
