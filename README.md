@@ -2,6 +2,14 @@
 
 Aplikasi produksi untuk owner/admin, tukang potong, maklon jahit, dan QC. Alur produksinya: PO → potong → penugasan jahit → setor → hitung/terima → QC → perbaikan bila perlu → stok gudang. Upah mengikuti jumlah yang berhak dibayar dari hitungan/QC; pencatatan BigSeller adalah administrasi terpisah. Stok bahan, gaji harian, kasbon, dan impor backup aplikasi lama berada di aplikasi yang sama.
 
+## Rilis 1.5.73 — Produksi macet tidak menahan PO ulang
+
+- Di layar Stok & PO ulang, ukuran yang produksinya 30 hari tidak bergerak (potong, tugas jahit, setoran, QC, atau target jahit) tidak lagi dihitung sedang diproduksi. Bila stok BigSeller tipis, ukuran itu merah Perlu PO, dan kartunya menulis "Macet, cek PO" dengan tahap, tanggal, dan nomor PO. Catatan PO tidak diubah.
+- Jahitan yang target setornya belum lewat tidak dianggap macet. Setoran yang ditolak tidak dihitung sebagai gerak. QC dihitung dari semua rinciannya (lolos, offline, reject, perbaikan) atau dari ukuran setorannya. Ukuran yang belum dipotong memakai tanggal terbaru dari PO dibuat, PO diubah, atau persiapan bahan.
+
+- Versi **1.5.73**, rakitan `20261104-stok-macet-1573`, dari `main` `4e9898f`. Build, pemeriksaan hasil build, dan **1.647 tes lulus** (5 tes baru).
+- Server terpasang pada deployment yang sama, **Versi 88**, **4 November 2026 pukul 12.16 WIB**; bootstrap menjawab HTTP 200 dan `appVersion: 1.5.73`. Kode/Maintenance tetap. Sidik Core/Index di editor cocok dengan hasil build setelah dimuat ulang. Proyek Apps Script kini terbuka di akun Google urutan kedua (`/u/1/`).
+
 ## Rilis 1.5.72 — Model offline keluar dari HPP, foto kelompok
 
 - Seri `OFFLINE` tidak lagi muncul di daftar HPP maupun Unduh ringkasan, juga saat Tampilkan aktif. Datanya tetap ada; aturan yang sama sudah dipakai pemilih anggota kelompok. Model offline yang sudah menjadi anggota kelompok tetap ikut kelompoknya.

@@ -213,3 +213,52 @@ test('1542b: a second BigSeller file only replaces the stock numbers; links, own
   assert.deepEqual(hasil,{'SA-UJI-KBD-HJ':['Kaos Uji Hijau',0,'M:200:aman:7 L:3:perlu:7 XL:0:perlu:7'],'SA-UJI-TOP-HT':['',1,'58:90:aman:10'],'SA-UJI-BRU-HT':['',0,'M:1:perlu:10']},'still linked to the same item with its own level; only the numbers are new; an item that left the file is gone and a new one waits to be linked');
   const view=run(c,'VIEWS.stokjual()');assert.match(view,/Kaos Uji Hijau<\/div><div class="xs muted">SA-UJI-KBD-HJ · UJI · lagi laku/);assert.match(view,/\[Belum dihubungkan 1\]/);assert.match(view,/\[Disembunyikan 1\]/);assert.doesNotMatch(view,/Barang satuan/);
 });
+
+/* 1.5.73: production that has not moved for 30 days no longer holds back "Perlu PO". */
+const hariLalu=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+function waktu(c){run(c,"function selisihHari(ymd){var m=String(ymd||'').match(/^(\\d{4})-(\\d{2})-(\\d{2})/);if(!m)return null;var a=new Date(+m[1],+m[2]-1,+m[3]),n=new Date(),b=new Date(n.getFullYear(),n.getMonth(),n.getDate());return Math.round((a-b)/86400000);}function tgl(s){return 'tgl:'+s;}");}
+const ukuranM=c=>plain(run(c,'sjHitung()')).filter(r=>r.k==='SA-UJI-KBD-HJ')[0].uk.filter(u=>u.s==='M')[0];
+test('production that has not moved for 30 days no longer holds back a new PO, and the card says where it stopped',()=>{
+  const c=ui();waktu(c);seed(c);c.lama=hariLalu(45);run(c,"S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}]");
+  let m=ukuranM(c);assert.equal(m.st,'perlu');assert.equal(m.p,null);assert.equal(m.m.length,1);assert.equal(m.m[0].pcs,30);assert.equal(m.m[0].tahap,'belum ke penjahit');
+  const view=run(c,'VIEWS.stokjual()');assert.match(view,new RegExp('Macet, cek PO:</b> M 30 belum ke penjahit sejak tgl:'+c.lama+' \\(PO-1\\)'));assert.match(view,/data-a="poOpen" data-id="po1"/,'the stuck PO stays one tap away');assert.match(view,/Perlu PO:<\/b> M · XL/);
+  c.baru=hariLalu(29);run(c,"S.state.potong[0].tanggal=baru");m=ukuranM(c);assert.equal(m.st,'jalan');assert.equal(m.m,null);assert.doesNotMatch(run(c,'VIEWS.stokjual()'),/Macet/);
+  c.batas=hariLalu(30);run(c,"S.state.potong[0].tanggal=batas");assert.equal(ukuranM(c).st,'perlu','thirty days is stuck');
+  run(c,"S.state.potong[0].tanggal='';S.state.potong[0].dibuat=batas+'T08:00:00.000Z'");assert.equal(ukuranM(c).st,'perlu','the creation date counts when the row has no date');
+  run(c,"S.state.potong=[]");assert.equal(ukuranM(c).st,'jalan','no date at all keeps the earlier reading');
+});
+test('a sewing job whose target has not passed is not stuck, and a refused count is no movement',()=>{
+  const c=ui();waktu(c);seed(c);c.potong=hariLalu(60);c.kirim=hariLalu(45);c.target=hariLalu(-10);
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,sisaMaklon:30};S.state.potong=[{poId:'po1',tanggal:potong,ukuran:{M:30}}];S.state.kirim=[{poId:'po1',tanggal:kirim,target:target,ukuran:{M:30}}]");
+  assert.equal(ukuranM(c).st,'jalan');
+  c.target=hariLalu(40);run(c,"S.state.kirim[0].target=target");let m=ukuranM(c);assert.equal(m.st,'perlu');assert.equal(m.m[0].tahap,'di penjahit');
+  c.setor=hariLalu(2);run(c,"S.state.setor=[{poId:'po1',tanggal:setor,status:'ditolak',ukuran:{M:30}}]");assert.equal(ukuranM(c).st,'perlu','a refused count is not movement');
+  run(c,"S.state.setor[0].status='diterima'");assert.equal(ukuranM(c).st,'jalan');
+  run(c,"S.state.setor=[];S.state.qc=[{poId:'po1',tanggal:setor,ukuran:{},rejectUkuran:{M:2}}]");assert.equal(ukuranM(c).st,'jalan','a QC that only rejected still moved the size');
+});
+test('a size ordered but never cut uses the PO date, and the new PO button covers stuck sizes',()=>{
+  const c=ui();waktu(c);seed(c);c.lama=hariLalu(40);run(c,"S.state.po[0]._belum=['XL'];S.state.po[0].tanggal=lama;S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}]");
+  const r=plain(run(c,'sjHitung()')).filter(x=>x.k==='SA-UJI-KBD-HJ')[0],xl=r.uk.filter(u=>u.s==='XL')[0];
+  assert.equal(xl.st,'perlu');assert.equal(xl.m[0].tahap,'belum dipotong');assert.equal(xl.m[0].pcs,0);assert.equal(r.kelas,'perlu');
+  assert.match(run(c,'VIEWS.stokjual()'),new RegExp('XL belum dipotong sejak tgl:'+c.lama),'no pcs are written for a size that was never cut');
+  c.baru=hariLalu(3);run(c,"S.state.po[0].tanggal=baru");assert.equal(plain(run(c,'sjHitung()')).filter(x=>x.k==='SA-UJI-KBD-HJ')[0].uk.filter(u=>u.s==='XL')[0].st,'jalan');
+});
+test('every QC detail counts as movement, and a QC row without sizes takes the sizes of its count',()=>{
+  const c=ui();waktu(c);seed(c);c.lama=hariLalu(60);c.setor=hariLalu(40);c.qc=hariLalu(2);
+  run(c,"S.state.po[0].agg.ukuran.M={potong:30,kirim:30,terima:30};S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}];S.state.setor=[{id:'ss1',poId:'po1',tanggal:setor,status:'diterima',ukuran:{M:30}}]");
+  assert.equal(ukuranM(c).st,'perlu');
+  run(c,"S.state.qc=[{poId:'po1',setorId:'ss1',tanggal:qc,ukuran:'{}',offlineUkuran:'{\"M\":10}'}]");assert.equal(ukuranM(c).st,'jalan','an offline-only QC moved the size');
+  run(c,"S.state.qc=[{poId:'po1',setorId:'ss1',tanggal:qc,ukuran:{},perbaikanUkuran:{M:-4}}]");assert.equal(ukuranM(c).st,'jalan','a repair QC that took pieces back moved the size');
+  run(c,"S.state.qc=[{poId:'po1',setorId:'ss1',tanggal:qc,total:10}]");assert.equal(ukuranM(c).st,'jalan','a QC row with only a total uses the sizes of its count');
+  run(c,"S.state.qc=[{poId:'po1',setorId:'tidak-ada',tanggal:qc,total:10}]");assert.equal(ukuranM(c).st,'perlu','a QC row that names no size and no known count moves nothing');
+});
+test('a size not cut yet is dated by the latest PO edit or cloth preparation, so adding it to a PO does not leave it stuck',()=>{
+  const c=ui();waktu(c);seed(c);c.lama=hariLalu(40);c.baru=hariLalu(1);
+  run(c,"S.state.po[0]._belum=['XL'];S.state.po[0].dibuat=lama+'T08:00:00.000Z';S.state.potong=[{poId:'po1',tanggal:lama,ukuran:{M:30}}]");
+  const xl=()=>plain(run(c,'sjHitung()')).filter(x=>x.k==='SA-UJI-KBD-HJ')[0].uk.filter(u=>u.s==='XL')[0];
+  assert.equal(xl().st,'perlu');
+  run(c,"S.state.po[0].diubah=baru+'T09:00:00.000Z'");assert.equal(xl().st,'jalan','a size added to the PO yesterday is not stuck');
+  run(c,"delete S.state.po[0].diubah;S.state.rencanaPotong=[{poId:'po1',status:'batal',dibuat:baru+'T09:00:00.000Z'}]");assert.equal(xl().st,'perlu','a cancelled preparation is no movement');
+  run(c,"S.state.rencanaPotong[0].status='siap'");assert.equal(xl().st,'jalan','cloth prepared yesterday is movement');
+  assert.equal(ukuranM(c).st,'perlu','preparing cloth does not move a size that was already cut');
+});

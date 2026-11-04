@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261101-hpp-offline-1572';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261104-stok-macet-1573';</script>
 <script>
 (function () {
 'use strict';
@@ -498,7 +498,7 @@ var LOGO = 'data:image/webp;base64,UklGRjAYAABXRUJQVlA4WAoAAAAwAAAAjwAAjwAASUNDU
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.72';
+var APP_VERSION = '1.5.73';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -8633,7 +8633,7 @@ function newId() {
    - gambar TIDAK disimpan di localStorage, tetapi di IndexedDB milik aplikasi ini sendiri;
    - data kecil (kode sambungan, sesi, kunci divisi) ikut disalin ke IndexedDB supaya tetap ada walau localStorage penuh;
    - aplikasi ini hanya menyentuh kunci berawalan pk_. */
-var UI_VERSION = '1.5.72';
+var UI_VERSION = '1.5.73';
 /* penanda waktu untuk mengukur kecepatan buka (terlihat di alat pengembang browser, tidak memengaruhi aplikasi) */
 function tanda(nama) { try { if (!window.performance.getEntriesByName(nama).length) window.performance.mark(nama); } catch (e) {} }
 tanda('pk-mulai');
@@ -15285,22 +15285,47 @@ function sjDariBaris(rows) {
 }
 /* PO stok yang aktif untuk satu barang. Per ukuran: pcs yang masih di jalur produksi (sudah dipotong, belum lulus QC)
    dan apakah ukuran itu sudah di-PO tetapi belum dipotong. Yang sudah lulus QC dianggap sudah menjadi stok: catatan
-   "Input BigSeller" tidak dipakai, karena tidak menentukan selesainya produksi dan sering tidak diisi. */
-function sjProduksi(produkId) {
-  var out = { po: [], uk: {}, kosong: [] }, pr = produkId ? D.produk[produkId] : null; if (!pr) return out;   /* kosong: PO buatan aplikasi ini yang belum dipotong, ukurannya masih bisa ditambah */
+   "Input BigSeller" tidak dipakai, karena tidak menentukan selesainya produksi dan sering tidak diisi.
+   Ukuran yang SJ_MACET hari tidak bergerak (potong, tugas jahit, setoran, QC, atau target jahit) masuk "macet": tidak
+   menahan Perlu PO, tetapi ditulis supaya PO-nya dicek. Catatan PO tidak diubah. */
+var SJ_MACET = 30;
+/* Tanggal gerak terakhir per PO dan ukuran. Target jahit ikut dihitung, supaya jahitan yang belum jatuh tempo tidak macet.
+   QC tanpa rincian ukuran memakai ukuran setorannya. Persiapan bahan menggerakkan ukuran yang belum dipotong ('*'). */
+function sjGerak() {
+  var out = {}, setor = {};
+  function catat(poId, s, d) { if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))) return; var po = out[poId] || (out[poId] = {}); if (!(po[s] >= d)) po[s] = d; }
+  function ukuran(r) { var hasil = []; [r.ukuran, r.offlineUkuran, r.rejectUkuran, r.perbaikanUkuran].forEach(function (m) { m = coreParseJSON(m, {}) || {}; Object.keys(m).forEach(function (s) { if (coreNum(m[s]) !== 0 && hasil.indexOf(s) < 0) hasil.push(s); }); }); return hasil; }
+  (S.state.setor || []).forEach(function (r) { if (r && r.id) setor[r.id] = r; });
+  [S.state.potong, S.state.kirim, S.state.setor, S.state.qc].forEach(function (list) {
+    (list || []).forEach(function (r) {
+      if (!r || !r.poId || r.status === 'ditolak') return;
+      var uk = ukuran(r); if (!uk.length && r.setorId && setor[r.setorId]) uk = ukuran(setor[r.setorId]);
+      [r.tanggal || String(r.dibuat || '').slice(0, 10), r.target].forEach(function (d) { uk.forEach(function (s) { catat(r.poId, s, d); }); });
+    });
+  });
+  (S.state.rencanaPotong || []).forEach(function (r) { if (r && r.poId && r.status !== 'batal') [r.tanggal, String(r.dibuat || '').slice(0, 10), String(r.diubah || '').slice(0, 10)].forEach(function (d) { catat(r.poId, '*', d); }); });
+  return out;
+}
+function sjTahapUkuran(a, antre) { return antre ? 'belum dipotong' : !(coreNum(a.kirim) > 0) ? 'belum ke penjahit' : coreNum(a.sisaMaklon) > 0 ? 'di penjahit' : 'menunggu hitung atau QC'; }
+function sjProduksi(produkId, gerak) {
+  var out = { po: [], uk: {}, kosong: [], macet: {} }, pr = produkId ? D.produk[produkId] : null; if (!pr) return out;
+  gerak = gerak || sjGerak();   /* kosong: PO buatan aplikasi ini yang belum dipotong, ukurannya masih bisa ditambah */
   var nama = String(pr.nama || '').trim().toLowerCase();
   (S.state.po || []).forEach(function (po) {
     if (po.status !== 'aktif' || po.jenis === 'pesanan') return;
     if (po.produkId ? po.produkId !== produkId : String(po.nama || '').trim().toLowerCase() !== nama) return;
     T(po);
-    var au = (po.agg && po.agg.ukuran) || {}, wu = workflowFor(po).ukuran || {}, set = {}, ada = false;
+    var au = (po.agg && po.agg.ukuran) || {}, wu = workflowFor(po).ukuran || {}, set = {}, ada = false, g = gerak[po.id] || {}, awal = [po.tanggal, String(po.dibuat || '').slice(0, 10), String(po.diubah || '').slice(0, 10), g['*']].filter(function (d) { return /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')); }).sort().pop() || '';
     poUkuranPotong(po).forEach(function (s) { set[s] = 2; });
     Object.keys(au).forEach(function (s) { if (!set[s]) set[s] = 1; });
     Object.keys(set).forEach(function (s) {
       var a = au[s] || {}, beres = !!(wu[s] && wu[s].complete), antre = set[s] === 2 && !(coreNum(a.potong) > 0);
       var jalan = beres ? 0 : Math.max(0, coreNum(a.potong) - coreNum(a.qcOk) - coreNum(a.qcOffline) - coreNum(a.qcReject) - coreNum(a.reject));
       if (!jalan && !antre) return;
-      var u = out.uk[s] || (out.uk[s] = { jalan: 0, antre: false }); u.jalan += jalan; if (antre) u.antre = true; ada = true;
+      ada = true;
+      var sejak = g[s] || (antre ? awal : ''), lama = /^\d{4}-\d{2}-\d{2}$/.test(sejak) ? -selisihHari(sejak) : null;
+      if (lama !== null && lama >= SJ_MACET) { (out.macet[s] || (out.macet[s] = [])).push({ po: po, pcs: jalan, sejak: sejak, tahap: sjTahapUkuran(a, antre && !jalan) }); return; }
+      var u = out.uk[s] || (out.uk[s] = { jalan: 0, antre: false }); u.jalan += jalan; if (antre) u.antre = true;
     });
     if (po.asal !== 'lama' && coreParseJSON(po.ukuranAktif, []).length && !Object.keys(au).some(function (s) { return coreNum(au[s].potong) > 0; })) out.kosong.push(po);   /* PO bawaan aplikasi lama: ukurannya terkunci */
     if (ada) out.po.push(po);
@@ -15308,13 +15333,13 @@ function sjProduksi(produkId) {
   return out;
 }
 function sjHitung() {
-  var d = sjData(), fam = (d.stok && d.stok.fam) || {};
+  var d = sjData(), fam = (d.stok && d.stok.fam) || {}, gerak = sjGerak();
   return Object.keys(fam).map(function (k) {
-    var f = fam[k], l = d.link[k] || {}, pr = l.p ? D.produk[l.p] : null, prod = sjProduksi(pr ? l.p : ''), kelas = 'aman', kurang = 0, tersedia = 0;
+    var f = fam[k], l = d.link[k] || {}, pr = l.p ? D.produk[l.p] : null, prod = sjProduksi(pr ? l.p : '', gerak), kelas = 'aman', kurang = 0, tersedia = 0;
     var uk = coreSizeOrder(Object.keys(f.u)).map(function (s) {
       var a = f.u[s] || [0, 0, 0], batas = l.batas !== undefined && l.batas !== null && l.batas !== '' ? coreNum(l.batas) : (a[1] > 0 ? a[1] : SJ_BATAS), p = prod.uk[s] || null, tipis = a[0] <= batas;
       if (tipis) kurang++; tersedia += Math.max(0, a[0]);
-      return { s: s, stok: a[0], batas: batas, st: !tipis ? 'aman' : (p ? 'jalan' : 'perlu'), p: p };
+      return { s: s, stok: a[0], batas: batas, st: !tipis ? 'aman' : (p ? 'jalan' : 'perlu'), p: p, m: prod.macet[s] || null };
     });
     if (uk.some(function (u) { return u.st === 'perlu'; })) kelas = 'perlu'; else if (uk.some(function (u) { return u.st === 'jalan'; })) kelas = 'jalan';
     return { k: k, f: f, l: l, pr: pr, prod: prod, uk: uk, kelas: kelas, kurang: kurang, tersedia: tersedia };
@@ -15324,11 +15349,12 @@ function sjHitung() {
 function sjKartu(r) {
   var l = r.l, k = esc(r.k), bagian = r.k.split('-'), warna = bagian.length >= 4 ? bagian[bagian.length - 1] : '';   /* SKU: merek-seri-model-warna */
   function nama(u) { return u.s === '-' ? 'stok' : esc(u.s); }
-  var perlu = r.uk.filter(function (u) { return u.st === 'perlu'; }), antre = r.uk.filter(function (u) { return u.p && u.p.antre && !u.p.jalan; }), jalan = r.uk.filter(function (u) { return u.p && u.p.jalan > 0; });
+  var perlu = r.uk.filter(function (u) { return u.st === 'perlu'; }), antre = r.uk.filter(function (u) { return u.p && u.p.antre && !u.p.jalan; }), jalan = r.uk.filter(function (u) { return u.p && u.p.jalan > 0; }), macet = r.uk.filter(function (u) { return u.m; });
   var ket = (perlu.length ? '<div class="small sj-perlu"><b>' + (r.pr ? 'Perlu PO' : 'Stok tipis') + ':</b> ' + perlu.map(nama).join(' · ') + '</div>' : '') +
     (antre.length ? '<div class="small muted"><b>Antre potong:</b> ' + antre.map(nama).join(' · ') + '</div>' : '') +
     (jalan.length ? '<div class="small muted"><b>Sedang diproduksi:</b> ' + jalan.map(function (u) { return nama(u) + ' ' + nf(u.p.jalan); }).join(' · ') + '</div>' : '') +
-    (!perlu.length && !antre.length && !jalan.length ? '<div class="small muted">Stok aman</div>' : '');
+    (macet.length ? '<div class="small warn"><b>Macet, cek PO:</b> ' + macet.map(function (u) { return u.m.map(function (x) { return nama(u) + (x.pcs > 0 ? ' ' + nf(x.pcs) : '') + ' ' + x.tahap + ' sejak ' + tgl(x.sejak) + ' (' + esc(x.po.noPO || 'PO') + ')'; }).join(' · '); }).join(' · ') + '</div>' : '') +
+    (!perlu.length && !antre.length && !jalan.length && !macet.length ? '<div class="small muted">Stok aman</div>' : '');
   var tombol = l.sembunyi ? '<button class="btn sm" data-a="sjSembunyi" data-k="' + k + '">Tampilkan lagi</button>' :
     !r.pr ? '<button class="btn sm pri" data-a="sjHubung" data-k="' + k + '">Hubungkan</button><button class="btn sm ghost" data-a="sjSembunyi" data-k="' + k + '">Sembunyikan</button>' :
     (!perlu.length ? '' : r.prod.kosong.length ? '<button class="btn sm pri" data-a="sjTambah" data-k="' + k + '" data-id="' + esc(r.prod.kosong[0].id) + '">' + ic('plus', 's') + 'Tambah ke ' + esc(r.prod.kosong[0].noPO || 'PO') + '</button>' :
@@ -15344,7 +15370,7 @@ VIEWS.stokjual = function () {
   var d = sjData(), sub = S.sub.sj || 'perlu';
   /* hubungan yang baru ada di perangkat ini (dibuat sebelum 1.5.42, atau kiriman terakhir gagal) dikirim ke server */
   if (typeof isAdmin === 'function' && isAdmin() && (d.kotor || (!d.srv && Object.keys(d.link).length))) { d.kotor = true; sjKirim(); }
-  var kepala = '<div class="head"><div class="grow"><h1>Stok &amp; PO ulang</h1><div class="sub">Stok BigSeller dicocokkan dengan PO yang jalan. Merah: perlu PO. Kuning: ukuran itu sudah di-PO atau sedang diproduksi (belum lulus QC).</div></div>' +
+  var kepala = '<div class="head"><div class="grow"><h1>Stok &amp; PO ulang</h1><div class="sub">Stok BigSeller dicocokkan dengan PO yang jalan. Merah: perlu PO. Kuning: ukuran itu sudah di-PO atau sedang diproduksi (belum lulus QC). Produksi yang ' + SJ_MACET + ' hari tidak bergerak ditulis macet dan tidak menahan Perlu PO.</div></div>' +
     '<label class="btn pri">' + ic('up') + (d.stok ? 'Perbarui stok' : 'Unggah stok BigSeller') + '<input type="file" accept=".xlsx" data-c="sjFile" hidden></label></div>';
   if (!d.stok) return kepala + '<div class="card">' + emptyBox('Belum ada data stok. Di BigSeller buka Pergudangan > Rincian Stok > Impor & Ekspor, ekspor ke Excel, lalu unggah file .xlsx itu di sini.') + '</div>';
   var rows = sjHitung(), n = { perlu: 0, jalan: 0, aman: 0, lepas: 0, sembunyi: 0 };
