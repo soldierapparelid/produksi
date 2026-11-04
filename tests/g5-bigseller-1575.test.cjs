@@ -78,26 +78,42 @@ test('home shows no "Belum BigSeller" work; the tile counts POs that can be clos
   assert.match(view, /data-a="todoGo" data-v="tutup">Bisa ditutup <b>2<\/b>/, 'the closing suggestion is on the alert bar');
   assert.match(view, /data-a="poStatusSet" data-id="pj" data-v="selesai"/);
   assert.match(view, /<h3 class="grow">BigSeller<\/h3><\/div><div><div class="dv-n">40<\/div><div class="dv-u">pcs diinput · 1 catatan/, 'BigSeller inputs stay visible as history');
-  assert.match(view, /Tidak wajib\. Barang OK QC sudah termasuk barang jadi\./);
+  assert.match(view, /Tercatat otomatis saat owner\/admin menekan OK\. OK dari Input QC dicatat di lembar PO\./);
   assert.match(view, /<span>Di maklon<\/span><b>50<\/b>/, 'the production flow still shows real pending work');
 });
 
 test('the PO stage filter has no BigSeller stage; Tuntas still lists finished POs', () => {
   const c = ui(); isi(c);
   const opsi = json(c, 'TAHAP_OPSI');
-  assert.ok(!opsi.some(o => o[0] === 'jual' || /BigSeller/.test(o[1])));
+  assert.ok(!opsi.some(o => o[0] === 'jual' || /Belum BigSeller|Input BigSeller/.test(o[1])));
+  assert.deepEqual(opsi.find(o => o[0] === 'qc'), ['qc', 'QC · menunggu OK'], '1.5.76: the QC stage covers stock and orders');
   assert.ok(opsi.some(o => o[0] === 'tuntas'));
   assert.equal(json(c, "poMasukTahap(pj,'tuntas')"), true);
   assert.equal(json(c, "poMasukTahap(pm,'tuntas')"), false);
   assert.equal(json(c, "poMasukTahap(pm,'maklon')"), true);
 });
 
-test('the PO sheet keeps Input BigSeller as a normal button and keeps the BigSeller column per size', () => {
+/* 1.5.76: the separate Input BigSeller button is gone; OK on a counted slip records QC and BigSeller together */
+test('the PO sheet has no separate Input BigSeller button and keeps the BigSeller column per size', () => {
   const sheetSrc = part('function poSheet(', 'A.poStatusSet =');
-  const all = sheetSrc.split('data-a="gudangOpen"').length - 1, plain = sheetSrc.split('<button class="btn" data-a="gudangOpen"').length - 1;
-  assert.ok(all >= 2, 'the button is offered on active and finished POs');
-  assert.equal(plain, all, 'never the primary button');
-  assert.match(sheetSrc, /if \(po\.jenis !== 'pesanan'\) b \+= '<button class="btn" data-a="gudangOpen"' \+ d \+ '>' \+ ic\('tag'\) \+ 'Input BigSeller<\/button>';/);
+  assert.equal(sheetSrc.split('data-a="gudangOpen"').length - 1, 0, 'neither active nor finished POs offer it');
+  assert.match(sheetSrc, /h \+= okBsPanel\(po\);/);
   assert.match(sheetSrc, /cols\.push\(\['BigSeller', 'bigseller', t\.bigseller\]\)/);
-  assert.match(part('function openGudang(', 'A.gudangSave ='), /Tidak wajib\. Barang OK QC sudah termasuk barang jadi\./);
+  assert.match(part('function openGudang(', 'A.gudangSave ='), /Untuk OK QC yang dicatat lewat Input QC, hasil perbaikan, atau catatan lama\./);
+});
+
+/* 1.5.76: "Belum masuk BigSeller" counts stock POs only; an order waits for OK separately */
+test('the home tile and legend count only stock POs as not in BigSeller; orders wait for OK separately', () => {
+  const c = ui(); isi(c);
+  vm.runInContext(`var qs={id:'qs',noPO:'PO-Q1',nama:'Kaos Antre',status:'aktif',jenis:'stok',agg:{total:{siapQC:12},maklon:{}},workflow:{issues:[],complete:false,ukuran:{M:{siapQC:12,readyQC:true}}}};
+    var qp={id:'qp',noPO:'PO-Q2',nama:'Seragam Antre',status:'aktif',jenis:'pesanan',agg:{total:{siapQC:7},maklon:{}},workflow:{issues:[],complete:false,ukuran:{M:{siapQC:7,readyQC:true}}}};
+    S.state.po.push(qs,qp); D.po.qs=qs; D.po.qp=qp;`, c);
+  const view = vm.runInContext('VIEWS.beranda()', c);
+  assert.match(view, /data-a="kpiGo" data-id="po:qc:stok"><span class="label">Belum masuk BigSeller<\/span><span class="v">12<\/span>/);
+  assert.match(view, /<span>Belum masuk BigSeller<\/span><b>12<\/b>/);
+  assert.match(view, /<span>Pesanan menunggu OK<\/span><b>7<\/b>/);
+  assert.match(view, /<span class="grow">Antre QC<\/span><b>19 pcs<\/b>/);
+  /* without orders waiting, the legend has no order line */
+  vm.runInContext("S.state.po.pop();", c);
+  assert.doesNotMatch(vm.runInContext('VIEWS.beranda()', c), /Pesanan menunggu OK/);
 });

@@ -15,7 +15,7 @@
    - Setiap baris punya id dari perangkat pengirim, jadi kirim ulang tidak dobel.
    ============================================================ */
 
-var APP_VERSION = '1.5.75';
+var APP_VERSION = '1.5.76';
 var WORKFLOW_VERSION = 2;
 
 /* Kolom baru selalu ditambahkan di AKHIR daftar: sheet lama mendapat kolom baru di sebelah kanan, isi lama tidak bergeser.
@@ -224,6 +224,9 @@ function coreQcGroupKey(source, repairMode, setorRows) {
   var receipt = repairMode && source.setorId && !coreLegacyInfo(source,'qc') ? (setorRows || []).filter(function (s) { return s.id === source.setorId; })[0] : source;
   return coreHash(coreDomainCanonical([source.poId,source.maklonId,coreNum((receipt || source).upah),repairMode ? 'repair' : 'count']));
 }
+/* 1.5.76: baris BigSeller otomatis dari tombol OK memakai id tetap turunan id QC-nya (6-18 karakter). Kirim ulang
+   tidak membuat baris dobel, dan layar PO tahu slip mana yang sudah masuk BigSeller. */
+function coreQcBigSellerId(qcId) { return 'qbs_' + coreHash('qcMasukBigSeller|' + String(qcId || '')); }
 function coreSizeOrder(list, pref) {
   var order = (pref || []).concat(['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL', 'XXXXXL', '2XL', '3XL', '4XL', '5XL']);
   return list.slice().sort(function (a, b) {
@@ -3153,6 +3156,36 @@ function createCore(store, env) {
     return rec;
   };
 
+  /* 1.5.76: tombol OK dari owner/admin pada slip yang sudah dihitung. Hasil QC dicatat dengan aturan Input QC
+     (prepareQC; bukan hasil perbaikan, bukan barang offline). Untuk PO stok, jumlah OK langsung tercatat masuk BigSeller
+     dalam permintaan yang sama: baris Gudang berbentuk sama dengan Input BigSeller, id-nya turunan id QC. Upah tetap
+     mengikuti OK QC (baris Gudang tidak dipakai upah). Kirim ulang dengan id dan isi yang sama aman: baris yang sudah
+     ada dikembalikan dan baris BigSeller ditambahkan bila belum ada. Id sama dengan isi berbeda ditolak. */
+  actions.qcMasukBigSeller = function (p) {
+    var me = auth(p); mustAdmin(me);
+    var raw = p.qc || {}, r = {}, beda = 'ID ini sudah tercatat dengan permintaan berbeda. Periksa data terbaru; jangan kirim sebagai transaksi baru.';
+    if (raw.repairQcId || raw.dariPerbaikan) fail('Hasil perbaikan dicatat lewat Input QC, bukan tombol OK.');
+    if (coreNum(raw.offline) || coreSumSizes(coreMap(raw.offlineUkuran))) fail('Barang offline dicatat lewat Input QC, bukan tombol OK.');
+    ['id','poId','setorId','tanggal','ukuran','rejectUkuran','reject','perbaikanUkuran','perbaikan','catatan'].forEach(function (k) { if (raw[k] !== undefined) r[k] = raw[k]; });
+    if (store.fresh) store.fresh('Gudang');
+    var d = dedupe('QC', r, me, 'qcMasukBigSeller'), rec = d.ada, baru = !rec;
+    if (rec && (rec.repairQcId || rec.poId !== String(r.poId || '') || rec.setorId !== String(r.setorId || ''))) fail(beda);
+    if (baru) rec = stampRequest(prepareQC(r, me, d.id), d);
+    var po = findRow('PO', rec.poId); if (!po || po.status === 'batal') fail('PO tidak tersedia.');
+    var ok = coreMap(rec.ukuran), total = coreSumSizes(ok), gudang = null, tulis = null;
+    if (po.jenis !== 'pesanan' && total > 0) {
+      gudang = findRow('Gudang', coreQcBigSellerId(rec.id));
+      if (gudang && (gudang.requestHash !== d.requestHash || gudang.requestActor !== d.requestActor || gudang.poId !== po.id)) fail(beda);
+      if (!gudang) gudang = tulis = stampRequest({ id: coreQcBigSellerId(rec.id), poId: po.id, userId: me.id, tanggal: rec.tanggal, ukuran: JSON.stringify(ok), total: total,
+        catatan: 'Otomatis dari OK QC', dibuat: nowIso() }, d);
+    }
+    /* periksa kedua baris dulu, baru menulis: QC lebih dulu, lalu BigSeller (kirim ulang melengkapi yang tertinggal) */
+    if (store.validateRows) { if (baru) store.validateRows('QC', [rec]); if (tulis) store.validateRows('Gudang', [tulis]); }
+    if (baru) store.append('QC', rec);
+    if (tulis) store.append('Gudang', tulis);
+    return { qc: rec, gudang: gudang };
+  };
+
   actions.createUpah = function (p) {
     var me = auth(p); mustAdmin(me);
     var u = p.upah || {}; var d = dedupe('SlipUpah', u, me); if (d.ada) return d.ada;
@@ -3315,8 +3348,12 @@ function createCore(store, env) {
       if (ikatQc.indexOf('bayar') >= 0) fail('Hitungan asal QC sudah dibayar atau terikat pembayaran lama. Koreksi perlu pencocokan riwayat.');
       if (ikatQc.indexOf('tahan') >= 0) fail('Hitungan asal QC terikat pembayaran lama yang masih ditahan; owner perlu mencocokkannya dulu di menu Upah.');
       if (store.read('QC').some(function (q) { return q.repairQcId === rec.id; })) fail('QC sudah mempunyai hasil perbaikan. Hapus hasil perbaikan terlebih dahulu.');
+      /* 1.5.76: baris BigSeller otomatis dari tombol OK ikut dihapus bersama QC-nya, supaya OK yang diulang tidak tercatat dua kali */
+      var bsOtomatis = findRow('Gudang', coreQcBigSellerId(rec.id));
+      if (bsOtomatis && !admin) fail('OK QC ini sudah tercatat masuk BigSeller. Hanya owner atau admin yang bisa menghapusnya.');
       var remainingQC = store.read('QC').filter(function (q) { return q.id !== id; });
-      var after = coreWorkflow(store.read('PO'), store.read('Potong'), store.read('SlipKirim'), store.read('SlipSetor'), remainingQC, store.read('Gudang'), legacyExtras())[rec.poId];
+      var remainingGudang = store.read('Gudang').filter(function (g) { return !bsOtomatis || g.id !== bsOtomatis.id; });
+      var after = coreWorkflow(store.read('PO'), store.read('Potong'), store.read('SlipKirim'), store.read('SlipSetor'), remainingQC, remainingGudang, legacyExtras())[rec.poId];
       if (after && Object.keys(after.ukuran).some(function (s) { return after.ukuran[s].stokLedger < 0; })) fail('OK QC sudah dicatat ke BigSeller. Koreksi catatan BigSeller terlebih dahulu.');
     } else if (sheet === 'Gudang') {
       if (!admin) fail('Hanya admin.');
@@ -3365,8 +3402,10 @@ function createCore(store, env) {
       if (!admin) fail('Hanya admin.');
       if (rec.tipe === 'kasbon' && store.read('Kasbon').some(function (k) { return k.tipe === 'cicilan' && k.kasbonId === id; })) fail('Kasbon ini sudah punya cicilan. Hapus cicilannya dulu.');
     } else fail('Tidak bisa dihapus.');
+    /* BigSeller otomatis dihapus lebih dulu: bila penghapusan QC terputus, OK-nya tampil lagi sebagai "Sudah QC, belum masuk BigSeller" */
+    if (bsOtomatis) store.remove('Gudang', bsOtomatis.id);
     store.remove(sheet, id);
-    return { ok: true };
+    return bsOtomatis ? { ok: true, bigSellerDihapus: bsOtomatis.id } : { ok: true };
   };
 
   /* ---------- impor data lama ---------- */
@@ -3710,6 +3749,7 @@ function createCore(store, env) {
   WRITE.saveMissingSizeCorrection = 1;
   WRITE.tutupSisaPO = 1;
   WRITE.cocokkanPembayaranLama = 1;
+  WRITE.qcMasukBigSeller = 1;
   /* Actions without a narrower row/cohort proof use the version captured when the form opened. */
   var GLOBAL_VERSION_WRITE = {saveSettings:1,saveUser:1,saveProduk:1,saveGambar:1,saveKaryawan:1,saveGaji:1,lunasGaji:1,hapusGaji:1,ubahKasbon:1,cocokkanStok:1,tandaiLunas:1,deleteRecord:1,arsipPO:1,buangPO:1,mulaiDariNol:1,lepasUkuranPotong:1,ubahRinciRol:1};
   var NO_STATE = { setupOwner: 1, login: 1, logout: 1, importRows: 1, importGambar: 1, saveStokJualLink: 1 };
@@ -3724,7 +3764,7 @@ function createCore(store, env) {
     var fn = actions[action];
     if (!fn) fail('Aksi tidak dikenal: ' + action);
     payload = payload || {};
-    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, tutupSisaPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, createUpah: 1, tandaiLunas: 1, cocokkanPembayaranLama: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
+    var contractAction = { savePO: 1, savePOWithRencana: 1, setStatusPO: 1, tutupSisaPO: 1, saveRencanaPotong: 1, saveInvoiceBahan: 1, cocokkanStokRol: 1, koreksiHargaBahan: 1, koreksiHargaJenisBahan: 1, createPotong: 1, createKirim: 1, createSetor: 1, prosesSetor: 1, createQC: 1, simpanQCGabungan: 1, createGudang: 1, qcMasukBigSeller: 1, createUpah: 1, tandaiLunas: 1, cocokkanPembayaranLama: 1, ubahHarga: 1, deleteRecord: 1, importRows: 1, gantiImpor: 1, applyLegacyMigration: 1, recoverLegacyMigration: 1, getHistoryCorrection: 1, saveHistoryCorrection: 1 };
     if ((contractAction[action] || COMMERCE_WRITE[action] || action === 'getMissingSizeCorrection' || action === 'saveMissingSizeCorrection' || action === 'getHapusStokBahan' || action === 'hapusStokBahan' || action === 'getPrintHistory' || action === 'savePrintHistory') && Number(payload.workflowVersion) !== WORKFLOW_VERSION) fail('Versi alur produksi tidak cocok. Muat ulang aplikasi versi terbaru.');
     if (!WRITE[action]) return fn(payload);
     if (env.enforceClientVersion === true && action !== 'login' && action !== 'logout' && String(payload.clientVersion || '') !== APP_VERSION) {

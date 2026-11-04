@@ -15,7 +15,7 @@ test('already-cut historical 656/603 and 396/396 POs are review records, never u
  const h=ui();for(const [cut,count,qc]of [[656,656,603],[396,297,396]]){
   const p=po();p.workflow={lama:true,issues:['Catatan sumber lama tidak lengkap'],blockingIssues:[],complete:false,qcReviewSources:{old:{M:'Hubungan QC lama belum jelas'}},ukuran:{M:{potong:cut,kirim:count,diterima:count,rejectJahit:0,diajukan:0,sisaMaklon:0,siapQC:0,qcOk:qc,legacyBlockedCount:count,legacyUnlinkedQC:qc,readyQC:true,complete:false,maklon:{}}}};
   const before=JSON.stringify(p.workflow);assert.deepEqual(label(h,p),{k:'review',label:'Catatan lama perlu diperiksa',cls:'warn'});assert.equal(JSON.stringify(p.workflow),before);assert.equal(h.run('T(po).potong'),cut);assert.equal(h.run('T(po).qcOk'),qc);
-  const chips=h.run('poStatusChips(po)');assert.match(chips,/PO aktif/);assert.match(chips,/Catatan lama perlu diperiksa/);assert.doesNotMatch(chips,/Belum dipotong|Siap diperiksa QC|Produksi selesai|Selesai otomatis/);assert.equal(h.run('poWarna(po)'),'review');
+  const chips=h.run('poStatusChips(po)');assert.match(chips,/PO aktif/);assert.match(chips,/Catatan lama perlu diperiksa/);assert.doesNotMatch(chips,/Belum dipotong|QC · belum masuk BigSeller|Produksi selesai|Selesai otomatis/);assert.equal(h.run('poWarna(po)'),'review');
  }
 });
 
@@ -25,7 +25,7 @@ test('ledger-only history with a completed cut and QC is not mislabeled uncut or
 
 test('actionable new work takes priority over a held historical source on the same PO',()=>{
  const h=ui(),p=po({potong:80,kirim:80,terima:80});p.workflow.qcReviewSources={old:{M:'Riwayat lama'}};
- p.workflow.ukuran={M:{potong:80,kirim:80,diterima:80,siapQC:30,readyQC:true,legacyBlockedCount:50,legacyUnlinkedQC:50,maklon:{}}};assert.equal(label(h,p).label,'Siap diperiksa QC');
+ p.workflow.ukuran={M:{potong:80,kirim:80,diterima:80,siapQC:30,readyQC:true,legacyBlockedCount:50,legacyUnlinkedQC:50,maklon:{}}};assert.equal(label(h,p).label,'QC · belum masuk BigSeller');
  p.workflow.ukuran.M.siapQC=0;p.workflow.ukuran.M.diajukan=10;assert.equal(label(h,p).label,'Menunggu hitung fisik');
  p.workflow.ukuran.M.diajukan=0;p.workflow.ukuran.M.sisaMaklon=10;assert.equal(label(h,p).label,'Di maklon');
  p.workflow.ukuran.M.sisaMaklon=0;p.workflow.ukuran.M.qcPerbaikan=5;assert.equal(label(h,p).label,'Dalam perbaikan QC');
@@ -38,7 +38,7 @@ test('positive work evidence falls back to the furthest recorded stage without i
   [{potong:100,kirim:100,reject:100},'cek','Sudah dihitung'],
   [{potong:100,kirim:100},'maklon','Sudah ditugaskan'],
   [{potong:100},'kirim','Sudah dipotong']
- ];for(const [t,k,text]of cases){const p=po(t);delete p.workflow;const result=label(h,p);assert.equal(result.k,k);assert.equal(result.label,text);assert.equal(h.run('workflowFor(po).complete'),false);assert.doesNotMatch(h.run('poStatusChips(po)'),/Belum dipotong|Siap diperiksa QC|Produksi selesai|Selesai otomatis/);}
+ ];for(const [t,k,text]of cases){const p=po(t);delete p.workflow;const result=label(h,p);assert.equal(result.k,k);assert.equal(result.label,text);assert.equal(h.run('workflowFor(po).complete'),false);assert.doesNotMatch(h.run('poStatusChips(po)'),/Belum dipotong|QC · belum masuk BigSeller|Produksi selesai|Selesai otomatis/);}
 });
 
 test('native zero production, genuine waiting, verified completion and cancellation preserve their existing labels',()=>{
