@@ -392,7 +392,7 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 13.5px; font-vari
 .sheet-h { display: flex; align-items: center; gap: 8px; padding: 12px 8px 12px 16px; border-bottom: 1px solid var(--line); flex: none; }
 .sheet-h h2 { flex: 1 1 auto; min-width: 0; font-size: 19px; }
 .sheet-b { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; -webkit-overflow-scrolling: touch; }
-.sheet-b > .search { flex: none; }
+.sheet-b > * { flex-shrink: 0; }   /* 1.5.76b: isi lembar tidak menyusut; daftar panjang dalam kotak .card.flush digulir lewat lembarnya, tidak terpotong */
 .sheet-f { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); display: flex; gap: 10px; flex: none; }
 .sheet-f .btn { flex: 1 1 0; }
 @media (min-width: 720px) {
@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261104-ok-bigseller-1576';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261104-gulir-lembar-1576b';</script>
 <script>
 (function () {
 'use strict';

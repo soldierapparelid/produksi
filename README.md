@@ -14,7 +14,11 @@ Owner meminta langkah Input BigSeller yang terpisah dihapus. Sesudah setoran dih
 - Tidak diubah: divisi QC tetap memakai Input QC; barang offline dan hasil perbaikan tetap lewat Input QC.
 
 - Versi **1.5.76**, rakitan `20261104-ok-bigseller-1576`, dari `main` `02c62b2` (1.5.75b). Build, pemeriksaan hasil build, dan **1.718 tes lulus**.
-- Server dan tampilan harus dipasang bersama karena ada aksi server baru.
+- Server terpasang pada deployment yang sama, **Versi 91**, **4 November 2026 pukul 20.14 WIB**; server menjawab `appVersion: 1.5.76`. Tampilan lewat [PR #110](https://github.com/soldierapparelid/produksi/pull/110), `main` `650b422`. Upah 567 baris dan HPP 201 baris: 0 beda sebelum/sesudah pasang.
+
+## Pembaruan tampilan 1.5.76b — Daftar panjang di lembar bisa digulir
+
+- Lembar "Pilih PO yang dikirim" (Maklon → Tugaskan jahit) dan lembar lain yang daftarnya ada dalam kotak langsung di badan lembar kini bisa digulir. Sebelumnya kotak daftar menyusut setinggi lembar dan memotong isinya. Aturan CSS: anak langsung `.sheet-b` tidak menyusut. Rakitan `20261104-gulir-lembar-1576b`; server tidak berubah.
 
 ## Pembaruan tampilan 1.5.75b — Deadline PO sebagai tanda masih diproduksi
 
