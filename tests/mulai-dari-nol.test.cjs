@@ -41,7 +41,7 @@ function fixture() {
   good('saveInvoiceBahan', { invoice: { id: 'nol-invoice-001', invoice: 'FIXTURE-BON-1', tanggal: '2026-10-01', supplier: 'Fixture Store', items: [{ bahan: 'Katun Putih', satuan: 'kg', harga: 60000, rolls: [{ qty: 20, rollLabel: 'K1' }, { qty: 18.5, rollLabel: 'K2' }] }] } });
   good('savePOWithRencana', { po: { newId: 'nol-po-a-0001', nama: 'Fixture Dipotong', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M', 'L'] }, rencana: { id: 'nol-plan-a-001', alokasiBahan: [{ stokId: rolls[0].id, qty: 25 }], catatan: '' } });
   const planA = good('getState').rencanaPotong.find(r => r.id === 'nol-plan-a-001');
-  good('createPotong', { potong: { id: 'nol-cut-a-0001', rencanaId: planA.id, expectedRencanaRevision: planA.revision, ukuran: { M: 40 }, tanggal: '2026-10-09' } });
+  good('createPotong', { potong: { id: 'nol-cut-a-0001', userId: 'nolcutter0001', rencanaId: planA.id, expectedRencanaRevision: planA.revision, ukuran: { M: 40 }, tanggal: '2026-10-09' } });
   good('savePOWithRencana', { po: { newId: 'nol-po-b-0001', nama: 'Fixture Siap Potong', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['L'] }, rencana: { id: 'nol-plan-b-001', alokasiBahan: [{ stokId: rolls[1].id, qty: 10 }], catatan: 'jatah' } });
   h.run(`pkStore_().lock(function(){
     pkStore_().append('PO',{id:'nol-po-c-0001',noPO:'PO-C',jenis:'stok',nama:'Fixture Belum Apa-apa',ukuran:'{"M":10}',total:10,status:'aktif',dibuat:'2026-10-01T00:00:00.000Z'});

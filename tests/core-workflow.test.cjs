@@ -231,10 +231,10 @@ test('out-of-order repair payments bind their earned IDs before redistributing Q
   assert.equal(a.pay().find(r => r.id === 'repair:repair1:M').available, 0);
 });
 
-test('all sewing rejects do not claim a completed QC stage without a positive count target', () => {
+test('all sewing rejects open no QC stage and, since 1.5.75, finish the size and the PO', () => {
   const a = app(); a.seed({ M: 40 });
   a.call('createSetor', { setor: { id: 'count01', poId: 'po00001', maklonId: 'worker1', ukuran: {}, rejectUkuran: { M: 40 }, reject: 40 } });
   assert.equal(a.state().po[0].workflow.ukuran.M.readyQC, false);
-  assert.equal(a.state().po[0].workflow.complete, false);
-  assert.throws(() => a.call('setStatusPO', { id: 'po00001', status: 'selesai' }), /belum selesai/);
+  assert.equal(a.state().po[0].workflow.complete, true, 'every piece came back from sewing as reject: nothing is left to count or inspect');
+  a.call('setStatusPO', { id: 'po00001', status: 'selesai' }); assert.equal(a.db('PO')[0].status, 'selesai');
 });

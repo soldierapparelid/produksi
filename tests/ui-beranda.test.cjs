@@ -67,10 +67,10 @@ test('a missing price comes first, a paid old record is left out, and old report
   assert.deepEqual(todo.filter(x => x.k === 'tugas').map(x => x.id), ['p1']);
 });
 
-test('a finished PO whose pieces are not yet in BigSeller is not offered for closing', () => {
+test('1.5.75: a finished PO whose pieces are not yet in BigSeller is still offered for closing', () => {
   const c = context(); isi(c);
   vm.runInContext('p3.agg.total.stok=12;', c);
-  assert.equal(json(c, 'tindakan().filter(function(x){return x.k==="tutup";}).length'), 0);
+  assert.equal(json(c, 'tindakan().filter(function(x){return x.k==="tutup";}).length'), 1);
 });
 
 test('home lists every pending matter with filters instead of sending the owner to the PO tab', () => {

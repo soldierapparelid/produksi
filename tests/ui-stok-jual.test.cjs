@@ -156,8 +156,8 @@ test('thin sizes join a PO of the same item that is not cut yet instead of becom
   run(c,"S.state.po[0].ukuranAktif='[\"M\",\"L\"]';S.state.po[0].asal='lama'");assert.doesNotMatch(run(c,'VIEWS.stokjual()'),/sjTambah/,'an old-app PO is never offered');
   run(c,"S.state.po[0].asal=''");
   let view=run(c,'VIEWS.stokjual()');
-  assert.match(view,/<b>Perlu PO:<\/b> XL<\/div><div class="small muted"><b>Antre potong:<\/b> M · L<\/div>/);
-  assert.match(view,/class="btn sm pri" data-a="sjTambah" data-k="SA-UJI-KBD-HJ" data-id="po1">Tambah ke PO-1<\/button>/);assert.doesNotMatch(view,/data-a="sjPO"/,'one button: no second PO for the same item');
+  assert.match(view,/<b>Belum masuk PO-1:<\/b> XL<\/div><div class="small muted"><b>Antre potong:<\/b> M · L<\/div>/,'1.5.75: the thin size is named as not yet in the uncut PO, not as a second PO');
+  assert.match(view,/class="btn sm pri" data-a="sjTambah" data-k="SA-UJI-KBD-HJ" data-id="po1">Tambah XL ke PO-1<\/button>/);assert.doesNotMatch(view,/data-a="sjPO"/,'one button: no second PO for the same item');
   const el="{getAttribute:function(a){return a==='data-k'?'SA-UJI-KBD-HJ':'po1';}}";
   run(c,"form.nodes={'[data-po-active-size=\"XL\"]':{checked:false},'[data-po-active-size=\"M\"]':{checked:true}};A.sjTambah("+el+")");await new Promise(r=>setTimeout(r,120));
   assert.equal(c.openedId,'po1','the edit form of that PO opens');assert.equal(c.opened,'');assert.equal(c.form.nodes['[data-po-active-size="XL"]'].checked,true,'the size is ticked for the owner to check and save');

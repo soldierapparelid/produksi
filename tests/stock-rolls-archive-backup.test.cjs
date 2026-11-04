@@ -74,7 +74,7 @@ test('an itemised roll is cut like a bought roll; an unused one can be taken bac
   f.good('savePOWithRencana', { po: { newId: 'rinci-po-0001', nama: 'Fixture Zipper', jenis: 'stok', status: 'aktif', ukuran: {}, ukuranAktif: ['M'] }, rencana: { id: 'rinci-plan-0001', alokasiBahan: [{ stokId: rolls[0].id, qty: 25 }], catatan: '' } });
   const plan = f.good('getState').rencanaPotong.find(r => r.id === 'rinci-plan-0001');
   assert.deepEqual(plan.rincianRol.map(r => [r.rollLabel, r.qty, r.bahan]), [['Rol 1', 25, 'Scuba Hitam']]);
-  const cut = f.good('createPotong', { potong: { id: 'rinci-cut-0001', rencanaId: plan.id, expectedRencanaRevision: plan.revision, ukuran: { M: 40 }, tanggal: '2026-10-09' } });
+  const cut = f.good('createPotong', { potong: { id: 'rinci-cut-0001', userId: 'rincicutter01', rencanaId: plan.id, expectedRencanaRevision: plan.revision, ukuran: { M: 40 }, tanggal: '2026-10-09' } });
   assert.equal(cut.kg, 25); assert.equal(cut.bahan, 'Scuba Hitam');
   const m = f.material('scuba hitam'); assert.equal(m.saldo, 203.05); assert.equal(m.pakai, 25); assert.equal(m.legacySaldo, 179.05, 'the stock without roll detail is not touched by a roll cut');
   f.bad('saveStok', { stok: { id: rolls[1].id, bahan: 'Scuba Hitam', qty: 30, satuan: 'kg' } }, /Rincian rol tidak dapat diubah/);
