@@ -20,8 +20,7 @@ test('the PO picker puts its clipping list card straight in the sheet body, whic
   assert.match(pick, /sheetHtml\(S\.pick\.title, '<label class="search">[^]*<\/label><div class="card flush"><div class="list" id="pick-list">/);
 });
 
-test('the page build changed together with the service worker', () => {
+test('the page build matches the service worker', () => {
   const worker = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
-  assert.equal(html.match(/window\.PK_BUILD = '([^']+)'/)[1], '20261104-gulir-lembar-1576b');
-  assert.equal(worker.match(/var RAKITAN = '([^']+)'/)[1], '20261104-gulir-lembar-1576b');
+  assert.equal(html.match(/window\.PK_BUILD = '([^']+)'/)[1], worker.match(/var RAKITAN = '([^']+)'/)[1]);
 });
