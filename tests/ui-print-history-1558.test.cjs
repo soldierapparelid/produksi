@@ -108,7 +108,7 @@ test('opening, native printing, canceling and closing previews never save print 
   assert.equal(u.timers.size, 0);
 });
 
-test('explicit completion hides only the saved PO signature and new material makes it available again', async () => {
+test('explicit completion hides only the saved PO; new material alone does not bring printed sizes back (1.5.76c)', async () => {
   const u = ui();
   await u.run('A.potongCetak(null)');
   u.run("S.potongCetakPilih={tidak:{'po-second':true}};");
@@ -124,7 +124,7 @@ test('explicit completion hides only the saved PO signature and new material mak
   await secondDevice.run('A.potongCetak(null)');
   assert.deepEqual(secondDevice.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-second']);
   u.run("rencana.push({id:'plan-extra',poId:'po-first',revision:'r2',status:'siap',rol:1,bahanList:[{nama:'Kain CONTOH',qty:50,satuan:'yard'}],rincianRol:[]});S.state.po[0].printSignature=printWorkSignature(S.state.po[0],rencana);");
-  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-first', 'po-second']);
+  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-second'], 'XL was already printed, so more cloth alone does not reprint it');
   assert.equal(u.run('S.potongPrintHistory.length'), 1, 'the prior snapshot stays in history');
 });
 
@@ -452,4 +452,39 @@ test('bulk reprint with no current selection is safe even when stale selection I
   assert.equal(u.run('persisted.length'), 2);
   assert.equal(u.json('messages').length, 2);
   assert.ok(u.json('messages').every(([text, error]) => error && /Centang PO/.test(text)));
+});
+
+/* 1.5.76c: ukuran yang sudah dicetak tidak ikut lagi; hanya ukuran baru yang muncul, dicetak, dan disimpan */
+test('a size already printed does not come back: only the new size is listed, printed and saved', async () => {
+  const u = ui();
+  await u.run('A.potongCetak(null)');
+  await u.run("potongCetakSimpan(potongCetakData([S.state.po[0]]),'jalan')()");
+  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-second']);
+  /* owner fills the cloth and adds size L to the same PO */
+  u.run("var p=S.state.po[0];p.ukuran={L:30,XL:50};p.ukuranAktif=['L','XL'];p._potong=['L','XL'];rencana.push({id:'plan-l',poId:'po-first',revision:'r3',status:'siap',rol:1,bahanList:[{nama:'Kain CONTOH',qty:40,satuan:'yard'}],rincianRol:[{bahan:'Kain CONTOH',qty:40,satuan:'yard',ukuran:'L'}]});p.printSignature=printWorkSignature(p,rencana);");
+  const list = u.json('potongCetakDaftar().map(function(x){return {id:x.po.id,uk:x.ukuran.map(function(s){return s.s;}),sudah:x.sudahDicetak||[]};})');
+  assert.deepEqual(list, [{ id: 'po-first', uk: ['L'], sudah: ['XL'] }, { id: 'po-second', uk: ['M'], sudah: [] }]);
+  const sheet = u.run('lembar.render()');
+  assert.match(sheet, /<span class="po-ukuran kecil"><span class="sz-aktif potong">L<\/span><\/span><span class="xs muted">Sudah dicetak: XL<\/span>/);
+  /* print only that PO: the cutting sheet and the travel cards carry L, not XL */
+  u.run("S.potongCetakPilih={tidak:{'po-second':true}};");
+  await u.run('A.potongCetakJalan(null)');
+  const doc = u.printedHtml();
+  assert.match(doc, /<span class="uk">L<small>30 pcs<\/small><\/span>/);
+  assert.doesNotMatch(doc, /<span class="uk">XL/);
+  u.button('Sudah dicetak').onclick(); await flush();
+  const saved = u.json('persisted').at(-1);
+  assert.deepEqual(saved.snapshot.ukuran, [{ s: 'L', target: 30 }]);
+  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-second'], 'both sizes are printed now');
+  u.button('Tutup pratinjau').onclick();
+  /* travel cards for a fresh size follow the same rule */
+  u.run("var p=S.state.po[0];p.ukuran={L:30,XL:50,XXL:10};p.ukuranAktif=['L','XL','XXL'];p._potong=['L','XL','XXL'];p.printSignature=printWorkSignature(p,rencana);");
+  assert.deepEqual(u.json('kartuJalanData(potongCetakDaftar().filter(function(x){return x.po.id==="po-first";})).map(function(x){return x.ukuran[0].s;})'), ['XXL']);
+  assert.match(u.run('lembar.render()'), /Yang muncul lagi hanya ukuran baru yang belum pernah dicetak/);
+});
+
+test('a PO printed before the history kept sizes still lists all its sizes', async () => {
+  const u = ui([{ id: 'old-row', poId: 'po-first', jenis: 'potong', signature: 'oldsig', snapshot: { po: { id: 'po-first' } }, dibuat: '2026-10-01T00:00:00.000Z', dibuatOleh: 'owner' }]);
+  await u.run('A.potongCetak(null)');
+  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return {id:x.po.id,uk:x.ukuran.map(function(s){return s.s;})};})'), [{ id: 'po-first', uk: ['XL'] }, { id: 'po-second', uk: ['M'] }]);
 });
