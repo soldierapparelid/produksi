@@ -488,3 +488,68 @@ test('a PO printed before the history kept sizes still lists all its sizes', asy
   await u.run('A.potongCetak(null)');
   assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return {id:x.po.id,uk:x.ukuran.map(function(s){return s.s;})};})'), [{ id: 'po-first', uk: ['XL'] }, { id: 'po-second', uk: ['M'] }]);
 });
+
+/* 1.5.76e: ukuran yang sudah dipotong, belum ke penjahit, dan belum pernah dicetak tetap muncul sebagai kartu jalan saja */
+function maroon(u) {
+  u.run(`S.state.po.push({id:'po-maroon',noPO:'PO-MAROON',nama:'POLO MAROON',series:'GHOST',status:'aktif',ukuran:{M:82,XL:82},ukuranAktif:['M','XL'],_potong:[],
+      agg:{potong:164,ukuran:{M:{potong:82,kirim:0},XL:{potong:82,kirim:0}}}});
+    S.state.po.push({id:'po-dikirim',noPO:'PO-KIRIM',nama:'SUDAH DI PENJAHIT',status:'aktif',ukuran:{M:10},ukuranAktif:['M'],_potong:[],agg:{potong:10,ukuran:{M:{potong:10,kirim:10}}}});
+    S.state.po.push({id:'po-arsip',noPO:'PO-ARSIP',nama:'PO SELESAI',status:'selesai',ukuran:{M:10},_potong:[],agg:{potong:10,ukuran:{M:{potong:10,kirim:0}}}});
+    rencana.push({id:'plan-maroon',poId:'po-maroon',revision:'r9',status:'terpakai',rol:2,bahanList:[{nama:'Drayfit Maroon',qty:46.72,satuan:'kg'}],rincianRol:[{bahan:'Drayfit Maroon',qty:23.52,satuan:'kg',ukuran:'M'},{bahan:'Drayfit Maroon',qty:23.2,satuan:'kg',ukuran:'XL'}]});
+    S.state.po.forEach(function(p){p.printSignature=printWorkSignature(p,rencana);});`);
+}
+test('a PO already cut but not yet at the tailor and never printed stays printable as travel cards only', async () => {
+  const u = ui(); maroon(u);
+  await u.run('A.potongCetak(null)');
+  const list = u.json('potongCetakDaftar().map(function(x){return {id:x.po.id,uk:x.ukuran.map(function(s){return s.s;}),dipotong:(x.dipotong||[]).map(function(s){return s.s+" "+s.target;})};})');
+  assert.deepEqual(list, [{ id: 'po-first', uk: ['XL'], dipotong: [] }, { id: 'po-second', uk: ['M'], dipotong: [] }, { id: 'po-maroon', uk: [], dipotong: ['M 82', 'XL 82'] }], 'goods at the tailor and closed POs stay out');
+  const sheet = u.run('lembar.render()');
+  assert.match(sheet, /<span class="xs muted">Sudah dipotong, kartu jalan saja: M · XL<\/span><\/span><span class="chip ok">Sudah dipotong<\/span><\/label>/);
+  assert.match(sheet, /3 PO dipilih · 1 lembar A4 \(6 PO per lembar\)\. 1 PO sudah dipotong: hanya kartu jalan\./);
+  assert.match(sheet, /data-a="potongCetakJalan">Cetak 2 PO<\/button>/, 'the cutting sheet counts only POs still to be cut');
+  /* the cutting sheet refuses a cut-only selection */
+  u.run("S.potongCetakPilih={tidak:{'po-first':true,'po-second':true}};");
+  await u.run('A.potongCetakJalan(null)');
+  assert.equal(u.document.body.children.length, 0);
+  assert.deepEqual(u.json('messages').at(-1), ['PO yang dicentang sudah dipotong. Cetak lewat Kartu jalan PO.', true]);
+  /* travel cards: one per cut size, with the cloth that was used */
+  await u.run('A.potongKartuJalan(null)');
+  const doc = u.printedHtml();
+  assert.equal((doc.match(/<article class="kj">/g) || []).length, 2);
+  assert.match(doc, /<div class="pil"><span>M<\/span><\/div><div class="bhn">Bahan: Drayfit Maroon 23,52 kg<\/div>/);
+  assert.match(doc, /<div class="pil"><span>XL<\/span><\/div><div class="bhn">Bahan: Drayfit Maroon 23,2 kg<\/div>/);
+  u.button('Sudah dicetak').onclick(); await flush();
+  const saved = u.json('persisted').at(-1);
+  assert.equal(saved.jenis, 'jalan');
+  assert.deepEqual(saved.snapshot.ukuran, [{ s: 'M', target: 82 }, { s: 'XL', target: 82 }]);
+  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-first', 'po-second'], 'printed now, so it moves to history');
+});
+
+test('a PO with sizes still to cut and a size already cut prints both on travel cards but only the uncut one on the cutting sheet', async () => {
+  const u = ui();
+  u.run("var p=S.state.po[0];p.status='aktif';p.ukuran={L:30,XL:50};p.ukuranAktif=['L','XL'];p._potong=['XL'];p.agg={potong:30,ukuran:{L:{potong:30,kirim:0}}};p.printSignature=printWorkSignature(p,rencana);S.potongCetakPilih={tidak:{'po-second':true}};");
+  await u.run('A.potongCetak(null)');
+  assert.deepEqual(u.json('potongCetakDaftar()[0].ukuran.map(function(s){return s.s;})'), ['XL']);
+  assert.deepEqual(u.json('potongCetakDaftar()[0].dipotong'), [{ s: 'L', target: 30 }]);
+  await u.run('A.potongCetakJalan(null)');
+  const sheetDoc = u.printedHtml();
+  assert.match(sheetDoc, /<span class="uk">XL<small>50 pcs<\/small><\/span>/);
+  assert.doesNotMatch(sheetDoc, /<span class="uk">L/);
+  u.button('Sudah dicetak').onclick(); await flush();
+  assert.deepEqual(u.json('persisted').at(-1).snapshot.ukuran, [{ s: 'XL', target: 50 }], 'the cutting sheet records only XL');
+  u.button('Tutup pratinjau').onclick();
+  /* L is cut and never printed: it still waits for its travel card */
+  assert.deepEqual(u.json('potongCetakDaftar().filter(function(x){return x.po.id==="po-first";}).map(function(x){return {uk:x.ukuran.length,dipotong:x.dipotong.map(function(s){return s.s;})};})'), [{ uk: 0, dipotong: ['L'] }]);
+  await u.run('A.potongKartuJalan(null)');
+  assert.equal((u.printedHtml().match(/<article class="kj">/g) || []).length, 1);
+  assert.match(u.printedHtml(), /<div class="pil"><span>L<\/span><\/div>/);
+});
+
+test('marking as printed covers the cut sizes shown, so they do not come back', async () => {
+  const u = ui(); maroon(u);
+  await u.run('A.potongCetak(null)');
+  u.run("S.potongCetakPilih={tidak:{'po-first':true,'po-second':true}};");
+  await u.run('A.potongCetakTandai()');
+  assert.deepEqual(u.json('persisted').at(-1).snapshot.ukuran.map(s => s.s), ['M', 'XL']);
+  assert.deepEqual(u.json('potongCetakDaftar().map(function(x){return x.po.id;})'), ['po-first', 'po-second']);
+});

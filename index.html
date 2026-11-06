@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261106-baca-cetak-1576d';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261106-kartu-dipotong-1576e';</script>
 <script>
 (function () {
 'use strict';
@@ -12226,12 +12226,29 @@ function potongCetakDaftar() {
      ukuran yang belum pernah dicetak; tambahan kain saja tidak memunculkannya. Cetak ulang ukuran lama lewat Riwayat cetak. */
   var printed={}, dicetak={};
   (S.potongPrintHistory||[]).forEach(function(r){printed[r.poId+'|'+r.signature]=true;var uk=dicetak[r.poId]||(dicetak[r.poId]={});(((r.snapshot||{}).ukuran)||[]).forEach(function(u){if(u&&u.s)uk[String(u.s)]=true;});});
-  return data.filter(function(x){var sig=x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id));return !printed[x.po.id+'|'+sig];}).map(function(x){
+  var hasil=data.filter(function(x){var sig=x.po.printSignature||printWorkSignature(x.po,rencanaPotongRows(x.po.id));return !printed[x.po.id+'|'+sig];}).map(function(x){
     var sudah=dicetak[x.po.id];if(!sudah)return x;
     var baru=x.ukuran.filter(function(u){return !sudah[u.s];}),lama=x.ukuran.filter(function(u){return sudah[u.s];}).map(function(u){return u.s;});
     return lama.length?Object.assign({},x,{ukuran:baru,sudahDicetak:lama}):x;
   }).filter(function(x){return x.ukuran.length>0;});
+  /* 1.5.76e: ukuran yang sudah dipotong tetapi belum semua dikirim ke penjahit, dan belum pernah dicetak, tetap bisa
+     dicetak sebagai kartu jalan saja (potongnya sudah selesai, jadi tidak masuk daftar potong). Disimpan di x.dipotong. */
+  var ada={},urut=((S.state||{}).settings||{}).ukuran||[];hasil.forEach(function(x){ada[x.po.id]=x;});
+  tampil.forEach(function(po){
+    if(!po||po.status!=='aktif')return;
+    var au=(po.agg&&po.agg.ukuran)||{},sudah=dicetak[po.id]||{},x=ada[po.id],lain=x?x.ukuran.map(function(u){return u.s;}):[];
+    var uk=coreSizeOrder(Object.keys(au).filter(function(s){var a=au[s]||{};return s!=='?'&&coreNum(a.potong)>coreNum(a.kirim)&&!sudah[s]&&lain.indexOf(s)<0;}),urut);
+    if(!uk.length)return;
+    var dipotong=uk.map(function(s){return {s:s,target:coreNum(au[s].potong)-coreNum(au[s].kirim)};});
+    if(x){x.dipotong=dipotong;return;}
+    x=potongCetakData([po])[0];x.ukuran=[];x.dipotong=dipotong;
+    x.rencana=rencanaPotongRows(po.id).filter(function(r){return (r.status==='terpakai'||r.status==='siap')&&!r.legacyBlocked;});
+    hasil.push(x);
+  });
+  return hasil;
 }
+/* kartu jalan memuat ukuran yang belum dipotong dan yang sudah dipotong */
+function potongCetakKartuIsi(x){return x.dipotong&&x.dipotong.length?Object.assign({},x,{ukuran:x.ukuran.concat(x.dipotong)}):x;}
 /* Cache is private to this login. Opening the menu never waits behind a server
    round trip; a first load stays visibly pending rather than showing old POs. */
 function potongCetakCache() {
@@ -12305,7 +12322,7 @@ function potongCetakSheet() {
   tabs='<div class="row wrap gap-s"><div class="grow">'+tabs+'</div>'+refresh+'</div>';
   if(!cache.loaded&&!S.potongPrintHistory.length)return sheetHtml('Cetak daftar potong','<div class="col">'+tabs+(status||'<div role="status">Memuat riwayat cetak…</div>')+'</div>','<button class="btn" data-a="close">Tutup</button>');
   if(tab==='riwayat'){var count=potongCetakHistoryPilihan().length,disabled=count?'':' disabled';return sheetHtml('Cetak daftar potong','<div class="col">'+tabs+status+potongCetakHistorySheet()+'</div>','<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongCetakUlangPilihan" data-v="jalan"'+disabled+'>Kartu jalan'+(count?' · '+nf(count)+' PO':'')+'</button><button class="btn pri" data-a="potongCetakUlangPilihan" data-v="potong"'+disabled+'>Cetak pilihan'+(count?' · '+nf(count)+' PO':'')+'</button>');}
-  var data = potongCetakDaftar(), tidak = potongCetakTidak(), selected=data.filter(function (x) { return !tidak[x.po.id]; }), n = selected.length;
+  var data = potongCetakDaftar(), tidak = potongCetakTidak(), selected=data.filter(function (x) { return !tidak[x.po.id]; }), n = selected.length, nPotong = selected.filter(function (x) { return x.ukuran.length; }).length;
   var siap = data.filter(function (x) { return x.tahap === 'siap' || x.tahap === 'lanjut'; }).length;
   var body = !data.length ? emptyBox('Tidak ada PO yang belum dicetak. Cetakan sebelumnya ada di Riwayat cetak.') :
     '<div class="row wrap gap-s"><span class="label grow">PO yang dicetak</span><button class="btn ghost sm" data-a="potongCetakSemua" data-v="1">Pilih semua</button>' + (siap && siap < data.length ? '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="siap">Bahan siap saja</button>' : '') + '<button class="btn ghost sm" data-a="potongCetakSemua" data-v="0">Kosongkan</button></div>' +
@@ -12313,19 +12330,20 @@ function potongCetakSheet() {
       var po = x.po, ok = x.tahap === 'siap' || x.tahap === 'lanjut';
       return '<label class="check cetak-baris"><input type="checkbox" data-c="potongCetakCek" data-id="' + esc(po.id) + '"' + (tidak[po.id] ? '' : ' checked') + '>' + thumb(po) +
         '<span class="grow col gap-s"><b>' + esc(po.nama) + '</b><span class="xs muted">' + esc(po.noPO || 'PO') + '</span><span class="po-ukuran kecil">' + x.ukuran.map(function (u) { return '<span class="sz-aktif potong">' + esc(u.s) + '</span>'; }).join('') + '</span>' +
-        (x.sudahDicetak && x.sudahDicetak.length ? '<span class="xs muted">Sudah dicetak: ' + x.sudahDicetak.map(esc).join(' · ') + '</span>' : '') + '</span>' +
-        '<span class="chip ' + (ok ? 'ok' : x.tahap === 'periksa' ? 'bad' : 'warn') + '">' + POTONG_CETAK_TAHAP[x.tahap] + '</span></label>';
+        (x.sudahDicetak && x.sudahDicetak.length ? '<span class="xs muted">Sudah dicetak: ' + x.sudahDicetak.map(esc).join(' · ') + '</span>' : '') +
+        (x.dipotong && x.dipotong.length ? '<span class="xs muted">Sudah dipotong, kartu jalan saja: ' + x.dipotong.map(function (u) { return esc(u.s); }).join(' · ') + '</span>' : '') + '</span>' +
+        (x.ukuran.length ? '<span class="chip ' + (ok ? 'ok' : x.tahap === 'periksa' ? 'bad' : 'warn') + '">' + POTONG_CETAK_TAHAP[x.tahap] + '</span>' : '<span class="chip ok">Sudah dipotong</span>') + '</label>';
     }).join('') + '</div>' +
-    '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(n / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' : 'Belum ada PO dipilih.') + '</div>' +
-    '<div class="xs muted">Kartu jalan PO: satu kartu untuk satu barang dan satu ukuran; ' + KARTU_JALAN_PER_LEMBAR + ' kartu memanjang per lembar A4' + (n ? ' (' + nf(Math.ceil(kartuJalanData(selected).length / KARTU_JALAN_PER_LEMBAR)) + ' lembar)' : '') + '.</div>';
+    '<div class="small muted">' + (n ? nf(n) + ' PO dipilih · ' + nf(Math.ceil(nPotong / POTONG_CETAK_PER_LEMBAR)) + ' lembar A4 (' + POTONG_CETAK_PER_LEMBAR + ' PO per lembar).' + (nPotong < n ? ' ' + nf(n - nPotong) + ' PO sudah dipotong: hanya kartu jalan.' : '') : 'Belum ada PO dipilih.') + '</div>' +
+    '<div class="xs muted">Kartu jalan PO: satu kartu untuk satu barang dan satu ukuran; ' + KARTU_JALAN_PER_LEMBAR + ' kartu memanjang per lembar A4' + (n ? ' (' + nf(Math.ceil(kartuJalanData(selected.map(potongCetakKartuIsi)).length / KARTU_JALAN_PER_LEMBAR)) + ' lembar)' : '') + '.</div>';
   var mark=n?'<div class="note row wrap gap-s"><span class="grow">Sudah mencetak PO yang dicentang?</span><button class="btn pri" data-a="potongCetakTandai"'+(cache.saving?' disabled':'')+'>'+(cache.saving?'Menyimpan…':'Sudah dicetak · pindahkan '+nf(n)+' PO')+'</button></div>':'';
-  return sheetHtml('Cetak daftar potong', '<div class="col">' + tabs + status + mark + body + '<div class="small muted">PO yang sudah ditandai pindah ke riwayat. Yang muncul lagi hanya ukuran baru yang belum pernah dicetak; ukuran yang sudah dicetak bisa dicetak ulang dari Riwayat cetak.</div>' + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (n ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (n ? ' ' + nf(n) + ' PO' : '') + '</button>');
+  return sheetHtml('Cetak daftar potong', '<div class="col">' + tabs + status + mark + body + '<div class="small muted">PO yang sudah ditandai pindah ke riwayat. Yang muncul lagi hanya ukuran baru yang belum pernah dicetak; ukuran yang sudah dicetak bisa dicetak ulang dari Riwayat cetak. Ukuran yang sudah dipotong tetapi belum dikirim ke penjahit tetap bisa dicetak sebagai kartu jalan.</div>' + '</div>', '<button class="btn" data-a="close">Tutup</button><button class="btn" data-a="potongKartuJalan"' + (n ? '' : ' disabled') + '>Kartu jalan PO</button><button class="btn pri" data-a="potongCetakJalan"' + (nPotong ? '' : ' disabled') + '>' + ic('list', 's') + 'Cetak' + (nPotong ? ' ' + nf(nPotong) + ' PO' : '') + '</button>');
 }
 A.potongCetak = function () { potongCetakCache();S.potongPrintTab='baru';openSheet(potongCetakSheet, { live: true, cls: 'wide' });var pending=potongCetakMuat(false);paintTop();return pending; };
 A.potongCetakSegarkan=function(){var pending=potongCetakMuat(true);paintTop();return pending;};
 A.potongCetakTandai=function(){
   var cache=potongCetakCache();if(cache.saving)return cache.saving;
-  var tidak=potongCetakTidak(),data=potongCetakDaftar().filter(function(x){return !tidak[x.po.id];});if(!data.length)return;
+  var tidak=potongCetakTidak(),data=potongCetakDaftar().filter(function(x){return !tidak[x.po.id];}).map(potongCetakKartuIsi);if(!data.length)return;
   var key=data.map(function(x){return x.po.id+'|'+x.po.printSignature;}).join(',');
   if(!cache.saveIntent||cache.saveIntent.key!==key)cache.saveIntent={key:key,save:potongCetakSimpan(data,'potong')};
   cache.saving=cache.saveIntent.save().then(function(){if(potongCetakCache()!==cache)return;cache.saving=null;cache.saveIntent=null;S.potongPrintTab='riwayat';paintTop();toast('PO sudah dipindahkan ke Riwayat cetak.');},function(e){if(potongCetakCache()!==cache)return;cache.saving=null;paintTop();toast(e.message||'Belum tersimpan. Coba lagi.',true);});paintTop();return cache.saving;
@@ -12337,8 +12355,8 @@ A.potongCetakSemua = function (el) {
   paintTop();
 };
 A.potongCetakJalan = function (el) {
-  var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
-  if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
+  var tidak = potongCetakTidak(), pilih = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; }), data = pilih.filter(function (x) { return x.ukuran.length; });
+  if (!data.length) return toast(pilih.length ? 'PO yang dicentang sudah dipotong. Cetak lewat Kartu jalan PO.' : 'Centang dulu PO yang mau dicetak.', true);
   var selesai=potongCetakSimpan(data,'potong');
   return act(el,potongCetakFoto(data).then(function(withPhotos){return potongCetakBuka(potongCetakHtml(withPhotos),selesai);})).catch(quiet);
 };
@@ -12395,7 +12413,7 @@ function kartuJalanHtml(data) {
     lembar.map(function (isi) { return '<section class="lembar">' + isi.map(kartuJalanKartu).join('') + '</section>'; }).join('') + '</body></html>';
 }
 A.potongKartuJalan = function (el) {
-  var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; });
+  var tidak = potongCetakTidak(), data = potongCetakDaftar().filter(function (x) { return !tidak[x.po.id]; }).map(potongCetakKartuIsi);
   if (!data.length) return toast('Centang dulu PO yang mau dicetak.', true);
   var selesai=potongCetakSimpan(data,'jalan');
   return act(el,potongCetakFoto(data).then(function(withPhotos){return dokumenCetakBuka(kartuJalanHtml(withPhotos),{nama:'kartu jalan PO',tanda:'.lembar',selesai:selesai});})).catch(quiet);
