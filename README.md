@@ -16,6 +16,10 @@ Owner meminta langkah Input BigSeller yang terpisah dihapus. Sesudah setoran dih
 - Versi **1.5.76**, rakitan `20261104-ok-bigseller-1576`, dari `main` `02c62b2` (1.5.75b). Build, pemeriksaan hasil build, dan **1.718 tes lulus**.
 - Server terpasang pada deployment yang sama, **Versi 91**, **4 November 2026 pukul 20.14 WIB**; server menjawab `appVersion: 1.5.76`. Tampilan lewat [PR #110](https://github.com/soldierapparelid/produksi/pull/110), `main` `650b422`. Upah 567 baris dan HPP 201 baris: 0 beda sebelum/sesudah pasang.
 
+## Pembaruan tampilan 1.5.76d — Pesan sambungan putus di Cetak daftar potong
+
+- Membuka Cetak daftar potong hanya membaca riwayat cetak. Bila internet putus, layar dulu menulis "Sambungan terputus saat menyimpan. Perubahan mungkin sudah tersimpan", seolah ada yang disimpan. `getPrintHistory` kini dihitung sebagai bacaan, jadi pesannya pesan baca biasa. Rakitan `20261106-baca-cetak-1576d`; server tidak berubah.
+
 ## Pembaruan tampilan 1.5.76c — Ukuran yang sudah dicetak tidak ikut dicetak lagi
 
 - Cetak daftar potong, tab Belum dicetak: PO yang sudah pernah dicetak hanya muncul lagi dengan ukuran yang belum pernah dicetak (daftar potong atau kartu jalan). Tambahan kain saja tidak memunculkannya lagi. Barisnya menulis "Sudah dicetak: L"; ukuran lama dicetak ulang lewat Riwayat cetak. Contoh owner: Loreng Malvinas PO-2610-037, L dicetak sebelum kain diisi, lalu XL ditambah; sekarang yang muncul hanya XL. Rakitan `20261105-cetak-ukuran-1576c`; server tidak berubah.

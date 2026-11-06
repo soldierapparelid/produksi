@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261105-cetak-ukuran-1576c';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261106-baca-cetak-1576d';</script>
 <script>
 (function () {
 'use strict';
@@ -9185,7 +9185,7 @@ var Api = (function () {
     var body = JSON.stringify({ action: action, payload: payload });
     return new Promise(function (resolve, reject) {
       var settled = false, controller = null;
-      var readOnly = /^(bootstrap|hangat|sync|getState|getGambar|cekGambar|makePdf|makeWeeklyPdf|makeGajiPdf|getHistoryCorrection|getMissingSizeCorrection|previewLegacyMigration|getCommerceState|getCommerceImages|makeCommercePdf|previewCommerceImport|getHapusStokBahan|getReturState|getReturDetail|getReturBukti)$/.test(action);
+      var readOnly = /^(bootstrap|hangat|sync|getState|getPrintHistory|getGambar|cekGambar|makePdf|makeWeeklyPdf|makeGajiPdf|getHistoryCorrection|getMissingSizeCorrection|previewLegacyMigration|getCommerceState|getCommerceImages|makeCommercePdf|previewCommerceImport|getHapusStokBahan|getReturState|getReturDetail|getReturBukti)$/.test(action);
       var loginRequest = action === 'login';
       var timer = setTimeout(function () {
         var error = new Error(loginRequest ? 'Jawaban pemeriksaan masuk belum diterima. Silakan masukkan PIN dan coba masuk lagi.' : (readOnly ? 'Server belum menjawab. Coba muat ulang data.' : 'Jawaban server belum diterima. Perubahan mungkin sudah tersimpan. Periksa data terbaru sebelum mencoba lagi.'));
