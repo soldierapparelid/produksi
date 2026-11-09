@@ -16,6 +16,10 @@ Owner meminta langkah Input BigSeller yang terpisah dihapus. Sesudah setoran dih
 - Versi **1.5.76**, rakitan `20261104-ok-bigseller-1576`, dari `main` `02c62b2` (1.5.75b). Build, pemeriksaan hasil build, dan **1.718 tes lulus**.
 - Server terpasang pada deployment yang sama, **Versi 91**, **4 November 2026 pukul 20.14 WIB**; server menjawab `appVersion: 1.5.76`. Tampilan lewat [PR #110](https://github.com/soldierapparelid/produksi/pull/110), `main` `650b422`. Upah 567 baris dan HPP 201 baris: 0 beda sebelum/sesudah pasang.
 
+## Pembaruan tampilan 1.5.76f — Menu Retur paket dihapus
+
+- Atas permintaan owner, menu Lainnya > Admin > Retur paket dihapus untuk semua akun. Retur ditangani di BigSeller (Hasil Retur > Scan to Stock-in, untuk resi lama dan resi pengembalian semua toko). Data Retur di Google Sheet dan bukti di Google Drive tidak dihapus; kode server Retur dibiarkan dan tidak dipakai. Rakitan `20261109-tanpa-retur-1576f`; server tidak berubah.
+
 ## Pembaruan tampilan 1.5.76e — PO yang sudah dipotong tetap bisa dicetak kartu jalannya
 
 - Cetak daftar potong, tab Belum dicetak: ukuran yang sudah dipotong tetapi belum semua dikirim ke penjahit, dan belum pernah dicetak, tetap muncul. Barisnya menulis "Sudah dipotong, kartu jalan saja". Ukuran itu hanya dicetak sebagai Kartu jalan PO; tombol Cetak (daftar potong) hanya untuk ukuran yang belum dipotong. Tidak ada batas tanggal. Contoh owner: Polo Ziper Maroon PO-2611-003 dipotong sebelum dicetak. Rakitan `20261106-kartu-dipotong-1576e`; server tidak berubah.
