@@ -479,7 +479,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = true; window.PK_BUILD = '20261106-kartu-dipotong-1576e';</script>
+<script>window.PK_HOSTED = true; window.PK_BUILD = '20261109-tanpa-retur-1576f';</script>
 <script>
 (function () {
 'use strict';
@@ -11723,7 +11723,9 @@ function upahRow(r) {
 /* ---------- tab Lainnya ---------- */
 VIEWS.lain = function () {
   var st = S.state; var sub = S.sub.lain || 'menu'; var u = me();
-  if (sub === 'retur') return returView();   /* 1.5.60: Retur paket (owner) */
+  /* 1.5.76f: menu Retur paket dihapus atas permintaan owner (retur ditangani di BigSeller). Kunci halaman lama kembali ke menu;
+     data Retur di Sheet dan Drive tetap disimpan. */
+  if (sub === 'retur') { sub = 'menu'; S.sub.lain = 'menu'; }
   if (sub === 'produk') {
     S.listFn = function () {
       var rows = st.produk.filter(function (p) { return cocok(S.f.q, [p.nama, p.series]); });
@@ -11748,7 +11750,6 @@ VIEWS.lain = function () {
   return '<div class="head"><h1>Lainnya</h1></div>' +
     '<div class="card row"><span class="ava l">' + esc(inisial(u.nama)) + '</span><span class="grow"><span class="b">' + esc(u.nama) + '</span><br><span class="muted small">' + esc(DIVISI[u.divisi].label) + ' · ' + esc(st.settings.namaUsaha) + '</span></span></div>' +
     '<div class="col gap-s"><div class="label">Admin</div><div class="card flush"><div class="list">' +
-    (coreIsAdmin(u) ? item('returMenu', 'inbox', 'Retur paket', 'Impor pesanan, terima paket, dan buat laporan') : '') +
     item('tab', 'box', 'Stok & PO ulang', 'stok siap jual BigSeller dicocokkan dengan PO yang jalan', 'data-id="stokjual"') +
     item('tab', 'tag', 'Stok bahan', stokTampil().length + ' bahan · pembelian, pemakaian, koreksi', 'data-id="stok"') +
     item('tab', 'people', 'Gaji harian', (st.karyawan || []).filter(function (x) { return x.aktif; }).length + ' karyawan · absen mingguan, kasbon, slip print', 'data-id="gaji"') + '</div></div></div>' +

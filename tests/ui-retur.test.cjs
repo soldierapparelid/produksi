@@ -28,21 +28,19 @@ function menu(file, role) {
   return { html: vm.runInContext('VIEWS.lain()', context), retur: () => vm.runInContext("S.sub.lain = 'retur'; VIEWS.lain()", context) };
 }
 
+/* 1.5.76f: owner meminta menu Retur paket dihapus (retur ditangani di BigSeller). Data Retur tetap tersimpan. */
 for (const file of ['index.html', 'apps-script/Index.html']) {
-  test(`${file}: owner and admin find Retur paket in the Admin group; production roles cannot open it`, () => {
-    const owner = menu(file, 'owner').html;
-    const admin = menu(file, 'admin');
-    assert.equal((admin.html.match(/data-a="returMenu"/g) || []).length, 1);
-    assert.match(admin.retur(), /Memuat data retur/);
-    assert.equal((owner.match(/data-a="returMenu"/g) || []).length, 1);
-    const label = owner.indexOf('<span class="t">Retur paket</span>');
-    assert.ok(label > owner.indexOf('<div class="label">Admin</div>') && label < owner.indexOf('<div class="label">Data induk</div>'));
-    assert.ok(!/https?:\/\//.test(owner.slice(label - 300, label + 200)), 'no external site: returns live inside this app');
-    for (const role of ['potong', 'jahit', 'qc']) {
+  test(`${file}: Retur paket is gone from the menu for every role, and its old page key shows the normal menu`, () => {
+    for (const role of ['owner', 'admin', 'potong', 'jahit', 'qc']) {
       const r = menu(file, role);
       assert.ok(!r.html.includes('returMenu'), role);
-      assert.match(r.retur(), /khusus owner/, role + ' cannot open the page by its sub key');
+      assert.ok(!r.html.includes('Retur paket'), role);
+      const page = r.retur();
+      assert.match(page, /<div class="head"><h1>Lainnya<\/h1><\/div>/, role + ': the old Retur page key falls back to the menu');
+      assert.ok(!/Memuat data retur|khusus owner|returMenu/.test(page), role);
     }
+    const owner = menu(file, 'owner').html;
+    assert.match(owner, /<div class="label">Admin<\/div>[^]*Stok & PO ulang[^]*<div class="label">Data induk<\/div>/, 'the rest of the Admin group stays');
   });
 }
 
