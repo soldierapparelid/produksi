@@ -16,6 +16,10 @@ Owner meminta langkah Input BigSeller yang terpisah dihapus. Sesudah setoran dih
 - Versi **1.5.76**, rakitan `20261104-ok-bigseller-1576`, dari `main` `02c62b2` (1.5.75b). Build, pemeriksaan hasil build, dan **1.718 tes lulus**.
 - Server terpasang pada deployment yang sama, **Versi 91**, **4 November 2026 pukul 20.14 WIB**; server menjawab `appVersion: 1.5.76`. Tampilan lewat [PR #110](https://github.com/soldierapparelid/produksi/pull/110), `main` `650b422`. Upah 567 baris dan HPP 201 baris: 0 beda sebelum/sesudah pasang.
 
+## Pembaruan tampilan 1.5.76g — Tanda bahan siap di kartu PO
+
+- Kartu PO yang masih harus dipotong kini bertanda **Bahan siap** (hijau) bila owner sudah menyiapkan bahan, **Bahan ada · lanjut potong** untuk potong lanjutan, dan tetap **Menunggu bahan** bila belum. Judul bagian Harus dipotong menulis jumlah keduanya. Rakitan `20261117-tanda-bahan-1576g`; server tidak berubah.
+
 ## Pembaruan tampilan 1.5.76f — Menu Retur paket dihapus
 
 - Atas permintaan owner, menu Lainnya > Admin > Retur paket dihapus untuk semua akun. Retur ditangani di BigSeller (Hasil Retur > Scan to Stock-in, untuk resi lama dan resi pengembalian semua toko). Data Retur di Google Sheet dan bukti di Google Drive tidak dihapus; kode server Retur dibiarkan dan tidak dipakai. Rakitan `20261109-tanpa-retur-1576f`; server tidak berubah.
