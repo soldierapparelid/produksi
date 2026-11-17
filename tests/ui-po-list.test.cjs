@@ -145,7 +145,7 @@ test('1.5.40: POs that still have sizes to cut are listed first under "Harus dip
     po('s1',{nama:'Selesai',series:'Alfa',dibuat:kini,status:'selesai',ukuranAktif:['M']})];
   h.run('seed(fixture,[])');const view=h.run('VIEWS.po()');
   const atas=view.slice(at(view,'id="po-potong"'),at(view,'po-legenda'));
-  assert.match(atas,/<h3>Harus dipotong<\/h3><span class="xs muted">3 PO · terbaru di atas/);
+  assert.match(atas,/<h3>Harus dipotong<\/h3><span class="xs muted">3 PO · 2 menunggu bahan · terbaru di atas/);   /* 1.5.76g: jumlah bahan siap / menunggu bahan */
   assert.ok(at(atas,'data-id="n1"')<at(atas,'data-id="o1"')&&at(atas,'data-id="o1"')<at(atas,'data-id="i1"'),'newest first, records without a date last');
   for(const id of ['n2','s1'])assert.ok(!atas.includes('data-id="'+id+'"'),id+' is fully cut or finished');
   assert.match(atas,/class="po w-potong" data-a="poOpen" data-id="n1"/,'the ordinary PO card');assert.match(atas,/Polo Baru[\s\S]*?PO-9 · Zulu[\s\S]*?Dibuat tadi/);

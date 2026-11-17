@@ -476,7 +476,7 @@ table.gaji-grid tfoot td { text-align: right; }
 <div id="app"></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
-<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261109-tanpa-retur-1576f';</script>
+<script>window.PK_HOSTED = false; window.PK_DIV = '__PK_DIV__'; window.PK_BUILD = '20261117-tanda-bahan-1576g';</script>
 <script>
 (function () {
 'use strict';
@@ -10383,11 +10383,22 @@ function poMenungguBahan(po) {
   if (po.cutting && po.cutting.lanjut) return false;   /* sebagian sudah dipotong: tukang bisa melanjutkan tanpa persiapan baru */
   return !((S.state || {}).rencanaPotong || []).some(function (r) { return r.poId === po.id && r.status === 'siap' && !r.legacyBlocked; });
 }
+/* 1.5.76g: tanda bahan untuk PO yang masih harus dipotong: 'siap' bila owner sudah menyiapkan bahan, 'lanjut' untuk potong
+   lanjutan dari bahan pertama, kosong bila tidak ada ukuran yang menunggu dipotong. */
+function poBahanSiap(po) {
+  if (!po || po.status !== 'aktif' || !poUkuranPotong(po).length) return '';
+  if (((S.state || {}).rencanaPotong || []).some(function (r) { return r.poId === po.id && r.status === 'siap' && !r.legacyBlocked; })) return 'siap';
+  return po.cutting && po.cutting.lanjut ? 'lanjut' : '';
+}
+function poTandaBahan(po) {
+  var b = poMenungguBahan(po) ? 'tunggu' : poBahanSiap(po);
+  return b === 'tunggu' ? '<span class="chip warn">Menunggu bahan</span>' : b === 'siap' ? '<span class="chip ok">Bahan siap</span>' : b === 'lanjut' ? '<span class="chip ok">Bahan ada · lanjut potong</span>' : '';
+}
 function poCard(po, extra) {
   var th = poTahap(po);
   return '<button class="po w-' + poWarna(po, th) + '" data-a="poOpen" data-id="' + esc(po.id) + '"><div class="row top">' + thumb(po) +
     '<div class="grow col gap-s"><div class="name">' + esc(po.nama) + '</div><div class="xs muted">' + poMeta(po) + '</div>' + poUkuranAktifHtml(po, true) +
-    '<div class="chips">' + poStatusChips(po, th) + (poMenungguBahan(po) ? '<span class="chip warn">Menunggu bahan</span>' : '') + (po.jenis === 'pesanan' ? '<span class="chip">Pesanan</span>' : '') +
+    '<div class="chips">' + poStatusChips(po, th) + poTandaBahan(po) + (po.jenis === 'pesanan' ? '<span class="chip">Pesanan</span>' : '') +
     (po.status === 'aktif' && po.deadline ? deadlineChip(po.deadline) : '') + '</div></div><span class="po-pita">' + esc(PO_PITA[poWarna(po, th)] || '') + '</span></div>' + stagesHtml(po) + (extra || '') + '</button>';
 }
 
@@ -11148,7 +11159,7 @@ VIEWS.po = function () {
     var perluPotong = (f.poStatus === 'aktif' || f.poStatus === 'semua') && !f.q && !f.poTahap && !f.poJenis ? poHarusDipotong().filter(function (p) { return rows.indexOf(p) >= 0; }) : [], idAtas = {}, batasBaru = Date.now() - 2 * 86400000;
     perluPotong.forEach(function (p) { idAtas[p.id] = 1; });
     var grup = poKelompok(rows.filter(function (p) { return !idAtas[p.id]; }).slice(0, 90), d.kosong.slice(0, 150));
-    var stripBaru = perluPotong.length ? '<section class="po-seri" id="po-potong"><div class="po-seri-h alat"><h3>Harus dipotong</h3><span class="xs muted">' + nf(perluPotong.length) + ' PO · terbaru di atas · sesudah dipotong pindah ke serinya</span>' + (admin ? '<button class="btn sm" data-a="potongCetak">' + ic('list', 's') + 'Cetak daftar potong</button>' : '') + '</div><div class="grid g-cards">' +
+    var stripBaru = perluPotong.length ? '<section class="po-seri" id="po-potong"><div class="po-seri-h alat"><h3>Harus dipotong</h3><span class="xs muted">' + nf(perluPotong.length) + ' PO' + (function () { var s = 0, t = 0; perluPotong.forEach(function (p) { if (poMenungguBahan(p)) t++; else if (poBahanSiap(p)) s++; }); return (s ? ' · ' + nf(s) + ' bahan siap' : '') + (t ? ' · ' + nf(t) + ' menunggu bahan' : ''); })() + ' · terbaru di atas · sesudah dipotong pindah ke serinya</span>' + (admin ? '<button class="btn sm" data-a="potongCetak">' + ic('list', 's') + 'Cetak daftar potong</button>' : '') + '</div><div class="grid g-cards">' +
       perluPotong.map(function (p) { var kapan = Date.parse(p.dibuat); return poCard(p, isFinite(kapan) && kapan >= batasBaru ? '<div class="xs muted">Dibuat ' + esc(lalu(p.dibuat)) + '</div>' : ''); }).join('') + '</div></section>' : '';
     var isi = grup.map(function (g) {
       return '<section class="po-seri"><div class="po-seri-h"><h3>' + esc(g.nama || 'Tanpa seri') + '</h3><span class="xs muted">' + [g.po.length ? nf(g.po.length) + ' PO' : '', g.produk.length ? nf(g.produk.length) + ' belum di-PO' : ''].filter(Boolean).join(' · ') + '</span></div>' +
